@@ -1,0 +1,25 @@
+# JavaScript 依赖与前端构建产物
+**/node_modules/
+**/dist/
+**/coverage/
+
+# Rust 与 Tauri 生成文件
+**/target/
+**/src-tauri/gen/schemas/
+
+# 日志与本地环境变量
+*.log
+.env
+.env.*
+!.env.example
+
+# 编辑器与本地代理状态
+**/.vscode/
+**/.idea/
+*.iml
+.agents/
+
+# 操作系统生成文件
+.DS_Store
+Thumbs.db
+desktop.ini
