@@ -25,6 +25,7 @@
 | 技术栈 / 语言 / 框架 | 对应 skill 文件 | 状态 |
 | --- | --- | --- |
 | Rust / Cargo | `.agent/skills/rust-code-organization/SKILL.md` | 已启用 |
+| Go / Go Modules | `.agent/skills/go-code-organization/SKILL.md` | 已启用 |
 | Tauri / React / TypeScript / Vite | `.agent/skills/tauri-react-typescript-vite/SKILL.md` | 已启用 |
 
 项目级 skills 放置在 `.agent/skills/` 目录下。
@@ -32,6 +33,10 @@
 当 Rust 任务涉及新增或修改测试时，还必须加载 `.agent/skills/rust-testing/SKILL.md`。
 
 当 Rust 任务涉及错误类型、public error API 或 `Result<T, E>` 设计时，还必须加载 `.agent/skills/rust-error-design/SKILL.md`。
+
+当 Go 任务涉及新增、修改或迁移测试，选择同包或外部测试 package、表驱动测试、集成测试、race 或 fuzz 策略时，还必须加载 `.agent/skills/go-testing/SKILL.md`。
+
+当 Go 任务涉及错误类型、sentinel error、public error API、错误包装、`errors.Is` / `errors.As` 或跨 package 错误边界时，还必须加载 `.agent/skills/go-error-design/SKILL.md`。
 
 当 Tauri 后端涉及 `src-tauri/` 下 Rust 模块拆分、Rust 测试或 Rust 错误 API 时，必须在 Tauri / React / TypeScript / Vite skill 之外，继续按上述 Rust 规则加载对应 Rust skill。
 
