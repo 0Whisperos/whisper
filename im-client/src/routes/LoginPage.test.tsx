@@ -40,7 +40,7 @@ describe("LoginPage", () => {
     // 构造方法：模拟 canvas 运行环境后渲染 LoginPage，并检查用户可见内容和壳层 class。
     // 输入数据：无用户输入，只检查初始页面结构。
     // 预期行为：登录表单和小游戏区域存在，`.client-window`、`.client-titlebar`、`.window-dot` 不存在。
-    const { container } = render(<LoginPage />);
+    const { container } = render(<LoginPage apiBaseUrl="http://127.0.0.1:8080" onAuthenticated={() => undefined} />);
 
     expect(screen.getByLabelText("小恐龙小游戏区域")).toBeInTheDocument();
     expect(screen.getByLabelText("账号")).toBeInTheDocument();

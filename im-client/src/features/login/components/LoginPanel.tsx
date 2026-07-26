@@ -1,17 +1,21 @@
 import type { FormEvent, MouseEvent } from "react";
-import { useState } from "react";
+
+import { useLoginForm } from "../hooks/useLoginForm";
+import type { AuthSession } from "../types";
 
 interface LoginPanelProps {
+  apiBaseUrl: string;
+  onAuthenticated: (session: AuthSession) => void;
   onPauseGame: () => void;
 }
 
-export function LoginPanel({ onPauseGame }: LoginPanelProps) {
-  const [account, setAccount] = useState("");
-  const [password, setPassword] = useState("");
+export function LoginPanel({ apiBaseUrl, onAuthenticated, onPauseGame }: LoginPanelProps) {
+  const { account, password, errorMessage, isSubmitting, setAccount, setPassword, submit } = useLoginForm(apiBaseUrl, onAuthenticated);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onPauseGame();
+    await submit();
   };
 
   const handleForgotPassword = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -68,8 +72,11 @@ export function LoginPanel({ onPauseGame }: LoginPanelProps) {
             <a className="forgot-link" href="#" data-forgot-link onClick={handleForgotPassword}>
               忘记密码
             </a>
-            <button className="login-button" type="submit">登录</button>
+            <button className="login-button" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "登录中" : "登录"}
+            </button>
           </div>
+          {errorMessage ? <p className="login-error" role="alert">{errorMessage}</p> : null}
         </form>
       </div>
     </section>
