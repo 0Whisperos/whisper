@@ -12,6 +12,29 @@
 .env
 .env.*
 !.env.example
+.envrc
+.direnv/
+**/config.local.yaml
+**/config.local.yml
+**/config.test.local.yaml
+**/config.test.local.yml
+**/*.local.json
+
+# 私钥、证书与凭据存储
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.kdbx
+id_rsa
+id_ed25519
+
+# 本地数据库与转储
+*.db
+*.sqlite
+*.sqlite3
+*.dump
 
 # 编辑器与本地代理状态
 **/.vscode/
