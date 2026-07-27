@@ -132,3 +132,9 @@
 2. 为什么会有这个疑问。
 3. 如果疑问来自现有实现，说明它和现有哪部分代码或行为冲突。
 4. 有哪些可能的实现方向供用户选择。
+
+## 6. Windows 下的 apply_patch 调用
+
+在 Windows / PowerShell 环境中，只有已实际观察到 `apply_patch` / `apply_patch.bat` 对多行补丁发生参数转发或补丁解析失败时，才必须加载 `.agent/skills/apply-patch-recovery/SKILL.md`。
+
+不要因权限拒绝、路径不存在、补丁上下文不匹配、`codex.exe` 自身失败、缺少写入授权或本会话未提供 shell 工具而触发该 skill。具体恢复流程和停止条件以该 skill 为准。
