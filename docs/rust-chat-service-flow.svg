@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Rust 聊天服务可靠消息流</title>
+  <desc id="desc">展示客户端消息写入 MySQL、Outbox 发布到 Kafka、在线投递、离线同步，以及发布、送达和已读三种独立状态。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#344054"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#157a55"/>
+    </marker>
+    <style>
+      text { font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; letter-spacing: 0; fill: #182230; }
+      .title { font-size: 32px; font-weight: 700; }
+      .subtitle { font-size: 16px; fill: #475467; }
+      .band-title { font-size: 19px; font-weight: 700; }
+      .node-title { font-size: 18px; font-weight: 700; }
+      .body { font-size: 15px; }
+      .small { font-size: 13px; fill: #475467; }
+      .label { font-size: 14px; font-weight: 600; }
+      .node { stroke-width: 2; rx: 8; }
+      .arrow { fill: none; stroke: #344054; stroke-width: 2.2; marker-end: url(#arrow); }
+      .arrow-green { fill: none; stroke: #157a55; stroke-width: 2.2; marker-end: url(#arrow-green); }
+      .dash { stroke-dasharray: 8 7; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1180" fill="#f8fafc"/>
+  <text x="70" y="62" class="title">Rust 聊天服务可靠消息流</text>
+  <text x="70" y="92" class="subtitle">MySQL 保存消息事实，Kafka 分发实时事件；Kafka 已消费不等于客户端已送达。</text>
+
+  <!-- Reliable acceptance and publication -->
+  <rect x="50" y="125" width="1500" height="410" rx="8" fill="#ffffff" stroke="#d0d5dd" stroke-width="2"/>
+  <text x="75" y="160" class="band-title">A. 服务端可靠接收与事件发布</text>
+
+  <rect class="node" x="80" y="215" width="220" height="120" fill="#e8f1fb" stroke="#2e6fa7"/>
+  <text x="190" y="252" text-anchor="middle" class="node-title">发送方客户端</text>
+  <text x="190" y="280" text-anchor="middle" class="body">通过 WebSocket 发送</text>
+  <text x="190" y="304" text-anchor="middle" class="small">客户端幂等标识 / 会话标识</text>
+
+  <rect class="node" x="370" y="195" width="260" height="160" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="500" y="232" text-anchor="middle" class="node-title">Rust 消息处理</text>
+  <text x="500" y="262" text-anchor="middle" class="body">验证 JWT、成员权限与输入</text>
+  <text x="500" y="288" text-anchor="middle" class="body">开启一个 MySQL 事务</text>
+  <text x="500" y="314" text-anchor="middle" class="small">事务提交后才确认服务端已接收</text>
+
+  <rect class="node" x="710" y="180" width="310" height="190" fill="#fff5df" stroke="#b7791f"/>
+  <text x="865" y="218" text-anchor="middle" class="node-title">MySQL 同一事务</text>
+  <rect x="740" y="240" width="120" height="85" rx="6" fill="#ffffff" stroke="#b7791f"/>
+  <text x="800" y="270" text-anchor="middle" class="label">messages</text>
+  <text x="800" y="296" text-anchor="middle" class="small">正式消息事实</text>
+  <rect x="875" y="240" width="120" height="85" rx="6" fill="#ffffff" stroke="#b7791f"/>
+  <text x="935" y="270" text-anchor="middle" class="label">outbox_events</text>
+  <text x="935" y="296" text-anchor="middle" class="small">pending</text>
+  <text x="865" y="349" text-anchor="middle" class="small">同时提交或同时回滚</text>
+
+  <rect class="node" x="1100" y="195" width="260" height="160" fill="#f4ebff" stroke="#7f56d9"/>
+  <text x="1230" y="232" text-anchor="middle" class="node-title">Outbox Publisher</text>
+  <text x="1230" y="262" text-anchor="middle" class="body">扫描 pending 事件</text>
+  <text x="1230" y="288" text-anchor="middle" class="body">使用 Kafka Producer 发布</text>
+  <text x="1230" y="314" text-anchor="middle" class="small">失败则保留并稍后重试</text>
+
+  <rect class="node" x="1100" y="420" width="260" height="80" fill="#fff0f0" stroke="#c2413a"/>
+  <text x="1230" y="452" text-anchor="middle" class="node-title">Kafka Broker</text>
+  <text x="1230" y="478" text-anchor="middle" class="small">满足配置的 Producer 确认条件</text>
+
+  <path class="arrow" d="M300 275 H370"/>
+  <text x="335" y="260" text-anchor="middle" class="label">发送</text>
+  <path class="arrow" d="M630 275 H710"/>
+  <text x="670" y="260" text-anchor="middle" class="label">写事务</text>
+  <path class="arrow" d="M1020 275 H1100"/>
+  <text x="1060" y="260" text-anchor="middle" class="label">扫描</text>
+  <path class="arrow" d="M1230 355 V420"/>
+  <text x="1248" y="393" class="label">发布</text>
+  <path class="arrow-green" d="M1098 460 H1060 V385 H935 V325"/>
+  <text x="975" y="405" text-anchor="middle" class="label">确认后改为 published</text>
+  <path class="arrow-green dash" d="M710 342 H650 V405 H500 V355"/>
+  <text x="605" y="429" text-anchor="middle" class="label">事务成功：确认“服务端已接收”</text>
+
+  <!-- Delivery paths -->
+  <rect x="50" y="565" width="1500" height="380" rx="8" fill="#ffffff" stroke="#d0d5dd" stroke-width="2"/>
+  <text x="75" y="600" class="band-title">B. Kafka 消费后的在线投递与离线补齐</text>
+
+  <rect class="node" x="90" y="655" width="235" height="125" fill="#fff0f0" stroke="#c2413a"/>
+  <text x="207" y="692" text-anchor="middle" class="node-title">Kafka Consumer</text>
+  <text x="207" y="720" text-anchor="middle" class="body">幂等处理事件</text>
+  <text x="207" y="746" text-anchor="middle" class="small">完成本次投递决策后推进 offset</text>
+
+  <rect class="node" x="415" y="655" width="235" height="125" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="532" y="692" text-anchor="middle" class="node-title">连接管理器</text>
+  <text x="532" y="720" text-anchor="middle" class="body">查找接收方设备连接</text>
+  <text x="532" y="746" text-anchor="middle" class="small">用户、设备、连接相互区分</text>
+
+  <polygon points="760,650 900,717 760,784 620,717" fill="#f2f4f7" stroke="#667085" stroke-width="2"/>
+  <text x="760" y="711" text-anchor="middle" class="node-title">接收方在线？</text>
+  <text x="760" y="737" text-anchor="middle" class="small">只决定实时推送路径</text>
+
+  <rect class="node" x="1000" y="620" width="245" height="125" fill="#e8f1fb" stroke="#2e6fa7"/>
+  <text x="1122" y="657" text-anchor="middle" class="node-title">在线：WebSocket 推送</text>
+  <text x="1122" y="685" text-anchor="middle" class="body">客户端按 message_id 去重</text>
+  <text x="1122" y="711" text-anchor="middle" class="small">按 conversation_seq 排序补缺</text>
+
+  <rect class="node" x="1000" y="795" width="245" height="110" fill="#fff5df" stroke="#b7791f"/>
+  <text x="1122" y="832" text-anchor="middle" class="node-title">离线：结束实时尝试</text>
+  <text x="1122" y="860" text-anchor="middle" class="body">仍推进 Kafka offset</text>
+  <text x="1122" y="884" text-anchor="middle" class="small">不推进 delivered_seq</text>
+
+  <rect class="node" x="1320" y="620" width="190" height="125" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="1415" y="657" text-anchor="middle" class="node-title">客户端回执</text>
+  <text x="1415" y="686" text-anchor="middle" class="body">确认连续送达进度</text>
+  <text x="1415" y="712" text-anchor="middle" class="small">推进 delivered_seq</text>
+
+  <rect class="node" x="1320" y="795" width="190" height="110" fill="#f4ebff" stroke="#7f56d9"/>
+  <text x="1415" y="832" text-anchor="middle" class="node-title">重新上线同步</text>
+  <text x="1415" y="860" text-anchor="middle" class="body">从 MySQL 查询</text>
+  <text x="1415" y="884" text-anchor="middle" class="small">seq &gt; delivered_seq</text>
+
+  <path class="arrow" d="M325 717 H415"/>
+  <path class="arrow" d="M650 717 H620"/>
+  <path class="arrow-green" d="M900 695 H1000"/>
+  <text x="948" y="679" text-anchor="middle" class="label">在线</text>
+  <path class="arrow" d="M840 756 Q910 820 1000 850"/>
+  <text x="922" y="799" text-anchor="middle" class="label">离线</text>
+  <path class="arrow-green" d="M1245 682 H1320"/>
+  <path class="arrow" d="M1245 850 H1320"/>
+  <path class="arrow-green dash" d="M1415 795 V765 Q1415 755 1405 755 H1122 V745"/>
+  <text x="1290" y="774" text-anchor="middle" class="label">补齐后回到实时链路</text>
+
+  <!-- State boundaries -->
+  <rect x="50" y="975" width="1500" height="155" rx="8" fill="#182230"/>
+  <text x="75" y="1010" class="band-title" fill="#ffffff" style="fill:#ffffff">C. 三套独立状态边界</text>
+  <rect x="85" y="1035" width="430" height="70" rx="6" fill="#f4ebff"/>
+  <text x="300" y="1063" text-anchor="middle" class="node-title">Outbox published</text>
+  <text x="300" y="1088" text-anchor="middle" class="body">满足 Kafka Producer 确认条件</text>
+  <rect x="585" y="1035" width="430" height="70" rx="6" fill="#eaf7ef"/>
+  <text x="800" y="1063" text-anchor="middle" class="node-title">delivered_seq</text>
+  <text x="800" y="1088" text-anchor="middle" class="body">客户端确认连续收到的最大会话序号</text>
+  <rect x="1085" y="1035" width="430" height="70" rx="6" fill="#e8f1fb"/>
+  <text x="1300" y="1063" text-anchor="middle" class="node-title">read_seq</text>
+  <text x="1300" y="1088" text-anchor="middle" class="body">用户确认已经阅读的最大会话序号</text>
+  <text x="800" y="1155" text-anchor="middle" class="label">Kafka 已消费 ≠ 客户端已送达 ≠ 用户已读</text>
+</svg>

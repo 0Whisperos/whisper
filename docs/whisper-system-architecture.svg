@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1450" viewBox="0 0 1900 1450" role="img" aria-labelledby="title desc">
+  <title id="title">Whisper IM 项目整体架构</title>
+  <desc id="desc">展示 Tauri 客户端、Go IM HTTP API 服务、Rust 实时消息服务、MySQL、Kafka、对象存储和 Coturn 的职责与交互。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#344054"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2563a5"/>
+    </marker>
+    <marker id="arrow-violet" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#7f56d9"/>
+    </marker>
+    <style>
+      text { font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; letter-spacing: 0; fill: #182230; }
+      .title { font-size: 34px; font-weight: 700; }
+      .subtitle { font-size: 16px; fill: #475467; }
+      .layer-title { font-size: 20px; font-weight: 700; }
+      .node-title { font-size: 19px; font-weight: 700; }
+      .module-title { font-size: 15px; font-weight: 700; }
+      .body { font-size: 14px; }
+      .small { font-size: 13px; fill: #475467; }
+      .flow { font-size: 14px; font-weight: 700; }
+      .node { stroke-width: 2; rx: 8; }
+      .module { stroke-width: 1.4; rx: 6; }
+      .solid { fill: none; stroke: #344054; stroke-width: 2.3; marker-end: url(#arrow); }
+      .solid-bi { fill: none; stroke: #2563a5; stroke-width: 2.5; marker-start: url(#arrow-blue); marker-end: url(#arrow-blue); }
+      .async { fill: none; stroke: #7f56d9; stroke-width: 2.5; stroke-dasharray: 9 7; marker-end: url(#arrow-violet); }
+      .media { fill: none; stroke: #c2413a; stroke-width: 3; stroke-dasharray: 14 6 3 6; marker-start: url(#arrow); marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1900" height="1450" fill="#f8fafc"/>
+  <text x="60" y="58" class="title">Whisper IM 项目整体架构</text>
+  <text x="60" y="88" class="subtitle">当前确定架构：单机部署、两个业务服务、一个 MySQL 实例的两个逻辑数据域</text>
+
+  <!-- Client layer -->
+  <rect x="45" y="115" width="1810" height="275" rx="8" fill="#eef6ff" stroke="#84b6e3" stroke-width="2"/>
+  <text x="70" y="150" class="layer-title">客户端层</text>
+
+  <rect class="node" x="85" y="175" width="700" height="180" fill="#ffffff" stroke="#2e6fa7"/>
+  <text x="435" y="207" text-anchor="middle" class="node-title">im-client A · Tauri 桌面客户端</text>
+  <rect class="module" x="115" y="228" width="190" height="95" fill="#e8f1fb" stroke="#2e6fa7"/>
+  <text x="210" y="257" text-anchor="middle" class="module-title">React UI</text>
+  <text x="210" y="282" text-anchor="middle" class="small">界面、交互、视图状态</text>
+  <text x="210" y="305" text-anchor="middle" class="small">WebRTC 媒体与渲染</text>
+  <rect class="module" x="330" y="228" width="420" height="95" fill="#dff3e7" stroke="#22865e"/>
+  <text x="540" y="257" text-anchor="middle" class="module-title">Rust Client Core</text>
+  <text x="540" y="282" text-anchor="middle" class="small">认证、HTTP、WebSocket、同步、本地缓存</text>
+  <text x="540" y="305" text-anchor="middle" class="small">重连、协议、附件上传下载、通话信令</text>
+
+  <rect class="node" x="1115" y="175" width="700" height="180" fill="#ffffff" stroke="#2e6fa7"/>
+  <text x="1465" y="207" text-anchor="middle" class="node-title">im-client B · 对端客户端</text>
+  <rect class="module" x="1145" y="228" width="190" height="95" fill="#e8f1fb" stroke="#2e6fa7"/>
+  <text x="1240" y="257" text-anchor="middle" class="module-title">React UI</text>
+  <text x="1240" y="282" text-anchor="middle" class="small">界面、交互、视图状态</text>
+  <text x="1240" y="305" text-anchor="middle" class="small">WebRTC 媒体与渲染</text>
+  <rect class="module" x="1360" y="228" width="420" height="95" fill="#dff3e7" stroke="#22865e"/>
+  <text x="1570" y="257" text-anchor="middle" class="module-title">Rust Client Core</text>
+  <text x="1570" y="282" text-anchor="middle" class="small">认证、HTTP、WebSocket、同步、本地缓存</text>
+  <text x="1570" y="305" text-anchor="middle" class="small">重连、协议、附件上传下载、通话信令</text>
+
+  <path class="media" d="M210 228 V165 H1240 V228"/>
+  <text x="725" y="158" text-anchor="middle" class="flow">⑦ WebRTC P2P 音视频媒体</text>
+
+  <!-- Business services layer -->
+  <rect x="45" y="425" width="1810" height="330" rx="8" fill="#edf8f1" stroke="#7fc59f" stroke-width="2"/>
+  <text x="70" y="460" class="layer-title">业务服务层</text>
+
+  <rect class="node" x="135" y="490" width="650" height="220" fill="#ffffff" stroke="#22865e"/>
+  <text x="460" y="524" text-anchor="middle" class="node-title">im-api · Go IM HTTP API 服务</text>
+  <rect class="module" x="170" y="550" width="175" height="70" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="257" y="578" text-anchor="middle" class="module-title">认证与令牌</text>
+  <text x="257" y="601" text-anchor="middle" class="small">登录、刷新、退出、JWT</text>
+  <rect class="module" x="370" y="550" width="175" height="70" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="457" y="578" text-anchor="middle" class="module-title">用户资料</text>
+  <text x="457" y="601" text-anchor="middle" class="small">账号与个人资料</text>
+  <rect class="module" x="570" y="550" width="175" height="70" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="657" y="578" text-anchor="middle" class="module-title">好友关系</text>
+  <text x="657" y="601" text-anchor="middle" class="small">申请、接受、删除、查询</text>
+  <rect class="module" x="270" y="640" width="380" height="45" fill="#f4ebff" stroke="#7f56d9"/>
+  <text x="460" y="668" text-anchor="middle" class="module-title">API Outbox Publisher · 发布好友领域事件</text>
+
+  <rect class="node" x="895" y="490" width="870" height="220" fill="#ffffff" stroke="#22865e"/>
+  <text x="1330" y="524" text-anchor="middle" class="node-title">im-chat · Rust 实时消息服务</text>
+  <rect class="module" x="925" y="550" width="180" height="62" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="1015" y="576" text-anchor="middle" class="module-title">连接与 JWT 验证</text>
+  <text x="1015" y="597" text-anchor="middle" class="small">WebSocket、心跳、重连</text>
+  <rect class="module" x="1125" y="550" width="180" height="62" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="1215" y="576" text-anchor="middle" class="module-title">会话与成员</text>
+  <text x="1215" y="597" text-anchor="middle" class="small">单聊创建与访问控制</text>
+  <rect class="module" x="1325" y="550" width="180" height="62" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="1415" y="576" text-anchor="middle" class="module-title">消息与同步</text>
+  <text x="1415" y="597" text-anchor="middle" class="small">落盘、补齐、回执、游标</text>
+  <rect class="module" x="1525" y="550" width="210" height="62" fill="#eaf7ef" stroke="#22865e"/>
+  <text x="1630" y="576" text-anchor="middle" class="module-title">媒体与通话协调</text>
+  <text x="1630" y="597" text-anchor="middle" class="small">附件授权、WebRTC 信令</text>
+  <rect class="module" x="1005" y="640" width="250" height="45" fill="#f4ebff" stroke="#7f56d9"/>
+  <text x="1130" y="668" text-anchor="middle" class="module-title">Chat Outbox Publisher</text>
+  <rect class="module" x="1280" y="640" width="250" height="45" fill="#f4ebff" stroke="#7f56d9"/>
+  <text x="1405" y="668" text-anchor="middle" class="module-title">Kafka Consumer</text>
+
+  <!-- Client to service links -->
+  <path class="solid-bi" d="M430 355 V490"/>
+  <text x="445" y="414" class="flow">① HTTPS：认证、用户、好友</text>
+  <path class="solid-bi" d="M650 355 C700 405 910 420 1015 490"/>
+  <text x="785" y="396" class="flow">② WebSocket：聊天同步与实时消息</text>
+  <path class="solid-bi" d="M1570 355 C1550 410 1460 435 1415 490"/>
+  <text x="1510" y="405" text-anchor="middle" class="flow">WebSocket</text>
+
+  <!-- Infrastructure layer -->
+  <rect x="45" y="790" width="1810" height="315" rx="8" fill="#fff9e9" stroke="#d5ad52" stroke-width="2"/>
+  <text x="70" y="825" class="layer-title">基础设施层</text>
+
+  <rect class="node" x="80" y="850" width="780" height="210" fill="#ffffff" stroke="#b7791f"/>
+  <text x="470" y="884" text-anchor="middle" class="node-title">MySQL · 单实例，逻辑数据域隔离</text>
+  <rect class="module" x="115" y="910" width="330" height="115" fill="#fff5df" stroke="#b7791f"/>
+  <text x="280" y="940" text-anchor="middle" class="module-title">im_api 数据域 · im-api 写入</text>
+  <text x="280" y="966" text-anchor="middle" class="small">用户、认证会话、好友关系</text>
+  <text x="280" y="991" text-anchor="middle" class="small">API Outbox 事件</text>
+  <rect class="module" x="480" y="910" width="345" height="115" fill="#fff5df" stroke="#b7791f"/>
+  <text x="652" y="940" text-anchor="middle" class="module-title">im_chat 数据域 · im-chat 写入</text>
+  <text x="652" y="966" text-anchor="middle" class="small">会话、成员、消息、Chat Outbox</text>
+  <text x="652" y="991" text-anchor="middle" class="small">送达与已读游标</text>
+
+  <rect class="node" x="920" y="850" width="250" height="210" fill="#ffffff" stroke="#7f56d9"/>
+  <text x="1045" y="892" text-anchor="middle" class="node-title">Kafka</text>
+  <text x="1045" y="928" text-anchor="middle" class="body">好友领域事件</text>
+  <text x="1045" y="956" text-anchor="middle" class="body">消息创建事件</text>
+  <text x="1045" y="984" text-anchor="middle" class="body">异步分发与重放</text>
+  <text x="1045" y="1025" text-anchor="middle" class="small">不是离线消息事实库</text>
+
+  <rect class="node" x="1230" y="850" width="280" height="210" fill="#ffffff" stroke="#7f56d9"/>
+  <text x="1370" y="892" text-anchor="middle" class="node-title">外部对象存储</text>
+  <text x="1370" y="928" text-anchor="middle" class="body">文件、图片、语音对象</text>
+  <text x="1370" y="956" text-anchor="middle" class="body">客户端直接 HTTPS 传输</text>
+  <text x="1370" y="984" text-anchor="middle" class="body">限时授权与对象校验</text>
+  <text x="1370" y="1025" text-anchor="middle" class="small">消息只保存对象引用</text>
+
+  <rect class="node" x="1570" y="850" width="250" height="210" fill="#ffffff" stroke="#c2413a"/>
+  <text x="1695" y="892" text-anchor="middle" class="node-title">Coturn</text>
+  <text x="1695" y="928" text-anchor="middle" class="body">TURN 媒体中继</text>
+  <text x="1695" y="956" text-anchor="middle" class="body">仅在 P2P 无法直连时使用</text>
+  <text x="1695" y="1002" text-anchor="middle" class="small">不承载聊天消息</text>
+
+  <!-- Service to infrastructure links -->
+  <path class="solid" d="M360 710 V850"/>
+  <text x="375" y="778" class="flow">① SQL</text>
+  <path class="solid" d="M1180 710 C1080 760 760 780 652 910"/>
+  <text x="870" y="746" text-anchor="middle" class="flow">④ SQL：消息、Outbox、游标</text>
+  <path class="async" d="M650 663 C820 700 910 760 1000 850"/>
+  <text x="820" y="715" text-anchor="middle" class="flow">③ friendship.accepted</text>
+  <path class="async" d="M1130 685 C1110 745 1070 790 1060 850"/>
+  <text x="1095" y="730" class="flow">④ 消息事件</text>
+  <path class="async" d="M1030 850 C1100 800 1260 760 1405 685"/>
+  <text x="1280" y="750" text-anchor="middle" class="flow">③④ 消费事件</text>
+  <path class="solid" d="M1630 710 C1580 770 1460 790 1400 850"/>
+  <text x="1515" y="780" text-anchor="middle" class="flow">⑥ 对象校验 / 管理 API</text>
+
+  <!-- Direct media/storage routes -->
+  <path class="solid-bi" d="M700 323 H840 V770 H1370 V850"/>
+  <text x="1110" y="810" text-anchor="middle" class="flow">⑥ HTTPS：附件上传与下载</text>
+  <path class="media" d="M1815 275 H1835 V955 H1820"/>
+  <text x="1815" y="720" text-anchor="end" class="flow">⑦ P2P 失败时 TURN 中继</text>
+
+  <!-- Flow summary -->
+  <rect x="45" y="1140" width="1810" height="260" rx="8" fill="#ffffff" stroke="#d0d5dd" stroke-width="2"/>
+  <text x="70" y="1175" class="layer-title">主要交互与边界</text>
+  <text x="85" y="1215" class="body">① im-client 通过 HTTPS 调用 im-api；im-api 只读写 im_api 数据域。</text>
+  <text x="85" y="1247" class="body">② 登录后 im-client 使用访问令牌建立 im-chat WebSocket；会话、历史、同步与回执均走该连接。</text>
+  <text x="85" y="1279" class="body">③ 好友通过：im-api 写好友关系与 API Outbox，Kafka 通知 im-chat 创建单聊会话。</text>
+  <text x="85" y="1311" class="body">④ 聊天消息：im-chat 写 messages 与 Chat Outbox，Kafka 负责实时事件分发，MySQL 保存消息事实。</text>
+  <text x="965" y="1215" class="body">⑤ 离线补齐：im-client 按 delivered_seq 从 im-chat 同步，Kafka 不承担用户离线收件箱。</text>
+  <text x="965" y="1247" class="body">⑥ 附件：im-chat 签发聊天附件授权，客户端直接与对象存储传输，消息只携带对象引用。</text>
+  <text x="965" y="1279" class="body">⑦ 音视频：im-chat 转发信令；客户端优先 WebRTC 直连，失败时通过 Coturn 中继媒体。</text>
+  <text x="965" y="1311" class="body">Redis 暂不引入；多节点连接路由、在线状态共享或分布式限流出现后再评估。</text>
+  <a href="rust-chat-service-flow.svg">
+    <rect x="1275" y="1340" width="545" height="38" rx="6" fill="#eef6ff" stroke="#2e6fa7"/>
+    <text x="1547" y="1365" text-anchor="middle" class="module-title" fill="#2563a5" style="fill:#2563a5">查看 Rust 聊天服务可靠消息流详图</text>
+  </a>
+
+  <!-- Legend -->
+  <line x1="80" y1="1422" x2="135" y2="1422" class="solid"/>
+  <text x="150" y="1428" class="small">同步请求 / 单向写入</text>
+  <line x1="355" y1="1422" x2="410" y2="1422" class="solid-bi"/>
+  <text x="425" y="1428" class="small">双向连接 / 请求响应</text>
+  <line x1="660" y1="1422" x2="715" y2="1422" class="async"/>
+  <text x="730" y="1428" class="small">Kafka 异步事件</text>
+  <line x1="930" y1="1422" x2="985" y2="1422" class="media"/>
+  <text x="1000" y="1428" class="small">WebRTC 媒体流</text>
+</svg>
