@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whisper 登录后主界面布局方向</title>
+<style>
+  :root { color-scheme:light; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:#23282f; background:#eef2f5; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-width:320px; min-height:100vh; background:#eef2f5; }
+  main { width:min(1500px,100%); margin:0 auto; padding:32px clamp(18px,4vw,52px) 84px; }
+  h1 { margin:0 0 8px; font-size:clamp(24px,3vw,34px); letter-spacing:0; }
+  .subtitle { margin:0; color:#66717d; font-size:14px; line-height:1.6; }
+  .selection-bar { position:fixed; left:50%; bottom:18px; z-index:10; transform:translateX(-50%); min-width:min(420px,calc(100% - 32px)); padding:11px 16px; border:1px solid #cdd9df; border-radius:8px; color:#315b6b; background:rgb(251 252 253 / 94%); box-shadow:0 12px 32px rgb(35 40 47 / 14%); text-align:center; font-size:13px; backdrop-filter:blur(10px); }
+  .direction-grid { display:grid; gap:22px; margin-top:24px; }
+  .direction-card { border:1px solid #d8e0e6; border-radius:8px; background:#fff; overflow:hidden; cursor:pointer; transition:160ms ease; }
+  .direction-card:hover { border-color:#2f6f88; box-shadow:0 12px 30px rgb(35 40 47 / 10%); }
+  .direction-card.selected { outline:3px solid rgb(47 111 136 / 24%); border-color:#2f6f88; }
+  .direction-label { display:flex; align-items:flex-start; gap:14px; padding:16px 18px; border-top:1px solid #e5eaee; }
+  .direction-label .letter { flex:0 0 30px; width:30px; height:30px; border-radius:7px; display:grid; place-items:center; background:#2f6f88; color:white; font-weight:750; }
+  .direction-label h3 { margin:0 0 4px; font-size:16px; }
+  .direction-label p { margin:0; color:#66717d; font-size:13px; line-height:1.55; }
+  .app { height:340px; display:grid; color:#23282f; background:#f7f9fa; font:12px Inter,system-ui,sans-serif; }
+  .rail { background:#26333c; color:#dfe8ec; padding:14px 9px; display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .mark { width:31px; height:31px; border-radius:7px; display:grid; place-items:center; background:#2f6f88; color:#fff; font-weight:800; margin-bottom:8px; }
+  .rail-i { width:30px; height:30px; border-radius:7px; display:grid; place-items:center; border:1px solid rgb(255 255 255 / 12%); }
+  .rail-i.active { background:#eef5f7; color:#285f74; }
+  .rail-spacer { flex:1; }
+  .list { min-width:0; background:#f6f8f9; border-right:1px solid #dce3e7; }
+  .list-head { padding:17px 14px 12px; }
+  .title { font-size:16px; font-weight:750; margin-bottom:11px; }
+  .search { height:30px; border:1px solid #d3dbe1; border-radius:7px; background:white; color:#7a858f; display:flex; align-items:center; padding:0 10px; }
+  .thread { display:grid; grid-template-columns:38px 1fr auto; gap:9px; padding:11px 13px; border-top:1px solid #e7ebee; align-items:center; }
+  .thread.active { background:#e7f0f3; border-left:3px solid #2f6f88; padding-left:10px; }
+  .avatar { width:36px; height:36px; border-radius:8px; display:grid; place-items:center; background:#d9e8ec; color:#315b6b; font-weight:750; }
+  .thread b { display:block; margin-bottom:4px; font-size:12px; }
+  .thread span { color:#74808a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; max-width:135px; }
+  .time { color:#89939c; font-size:10px; align-self:start; }
+  .chat { min-width:0; display:grid; grid-template-rows:58px 1fr 82px; background:#fbfcfd; }
+  .chat-head { display:flex; align-items:center; justify-content:space-between; padding:0 17px; border-bottom:1px solid #dfe5e9; }
+  .chat-head b { font-size:14px; }
+  .status { color:#59816f; font-size:10px; margin-top:3px; }
+  .head-actions { color:#58707d; letter-spacing:6px; font-size:15px; }
+  .messages { padding:18px; display:flex; flex-direction:column; gap:11px; overflow:hidden; background:#f8fafb; }
+  .bubble { max-width:64%; padding:9px 11px; border-radius:7px; line-height:1.45; background:#fff; border:1px solid #dfe5e9; }
+  .bubble.mine { align-self:flex-end; background:#dcecf1; border-color:#c6dde4; }
+  .receipt { align-self:flex-end; color:#72808a; font-size:9px; margin-top:-8px; }
+  .composer { border-top:1px solid #dfe5e9; padding:10px 14px; background:#fff; }
+  .tools { color:#667d88; letter-spacing:7px; margin-bottom:8px; }
+  .input-line { display:flex; align-items:center; gap:8px; }
+  .input { height:28px; flex:1; border:1px solid #d5dde2; border-radius:7px; color:#96a0a8; display:flex; align-items:center; padding:0 9px; }
+  .send { height:28px; padding:0 11px; border-radius:7px; background:#2f6f88; color:#fff; display:grid; place-items:center; }
+  .a { grid-template-columns:52px 245px 1fr; }
+  .b { grid-template-columns:276px 1fr; }
+  .b .list { border-right:1px solid #dce3e7; }
+  .b .account-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .b .tabs { display:grid; grid-template-columns:1fr 1fr; margin:0 14px 9px; border:1px solid #d6dfe4; border-radius:7px; overflow:hidden; }
+  .b .tabs span { padding:6px; text-align:center; }
+  .b .tabs .active { background:#2f6f88; color:#fff; }
+  .c { grid-template-columns:54px 1fr 230px; }
+  .c .hub { min-width:0; padding:20px; background:#fbfcfd; }
+  .welcome { padding-bottom:15px; border-bottom:1px solid #e0e6ea; }
+  .welcome h4 { margin:0 0 5px; font-size:17px; }
+  .welcome p { margin:0; color:#6e7a84; }
+  .quick { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:14px; }
+  .quick > div { border:1px solid #dce3e7; border-radius:7px; padding:12px; background:#fff; }
+  .quick b { display:block; font-size:18px; margin-bottom:4px; }
+  .recent { margin-top:17px; }
+  .recent h5 { margin:0 0 9px; font-size:12px; }
+  .activity { display:flex; gap:9px; padding:9px 0; border-top:1px solid #e5e9ec; }
+  .side-context { padding:18px 14px; border-left:1px solid #dce3e7; background:#f4f7f8; }
+  .side-context h4 { margin:0 0 14px; font-size:14px; }
+  .request { border:1px solid #dce3e7; background:white; border-radius:7px; padding:11px; margin-bottom:9px; }
+  .request p { margin:5px 0 9px; color:#6f7a83; }
+  .mini-action { display:inline-block; padding:5px 8px; border-radius:6px; background:#2f6f88; color:white; }
+  .recommended { color:#2f6f88; font-weight:700; }
+  @media (min-width:1100px) { .direction-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .app { height:360px; } .a { grid-template-columns:42px 145px 1fr; } .c { grid-template-columns:42px 1fr 145px; } .thread { grid-template-columns:31px 1fr; } .thread .time { display:none; } .thread span { max-width:85px; } .avatar { width:30px; height:30px; } .side-context { padding:14px 9px; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>登录后的主界面，哪种骨架更像 Whisper？</h1>
+<p class="subtitle">三种方案都覆盖单聊、好友和当前账号；先选信息架构，不必纠结文案细节。点击方案即可选择。</p>
+
+<div class="direction-grid cards">
+  <div class="direction-card card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="app a">
+      <aside class="rail"><div class="mark">W</div><div class="rail-i active">聊</div><div class="rail-i">友</div><div class="rail-spacer"></div><div class="rail-i">林</div></aside>
+      <section class="list">
+        <div class="list-head"><div class="title">消息</div><div class="search">搜索会话</div></div>
+        <div class="thread active"><div class="avatar">周</div><div><b>周雨</b><span>晚点把原型发你</span></div><div class="time">14:32</div></div>
+        <div class="thread"><div class="avatar">陈</div><div><b>陈默</b><span>收到，明天见</span></div><div class="time">昨天</div></div>
+        <div class="thread"><div class="avatar">顾</div><div><b>顾言</b><span>[语音] 0:18</span></div><div class="time">周二</div></div>
+      </section>
+      <section class="chat">
+        <div class="chat-head"><div><b>周雨</b><div class="status">在线</div></div><div class="head-actions">⌕ ◇ ···</div></div>
+        <div class="messages"><div class="bubble">登录后的主界面有方向了吗？</div><div class="bubble mine">先把会话、联系人和消息状态放进同一套工作流。</div><div class="receipt">已读 · 14:31</div><div class="bubble">好，晚点把原型发你。</div></div>
+        <div class="composer"><div class="tools">＋ ♫ ☺</div><div class="input-line"><div class="input">输入消息</div><div class="send">发送</div></div></div>
+      </section>
+    </div>
+    <div class="direction-label"><div class="letter">A</div><div><h3>三栏会话工作台 <span class="recommended">推荐</span></h3><p>窄功能栏 + 会话列表 + 当前聊天。扫描快、路径稳定，也最适合 1120×720 桌面窗口；窄屏时逐级收起。</p></div></div>
+  </div>
+
+  <div class="direction-card card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="app b">
+      <section class="list">
+        <div class="list-head"><div class="account-row"><div><div class="title">Whisper</div><span>林深 · 已连接</span></div><div class="avatar">林</div></div><div class="search">搜索联系人和消息</div></div>
+        <div class="tabs"><span class="active">消息</span><span>好友</span></div>
+        <div class="thread active"><div class="avatar">周</div><div><b>周雨</b><span>晚点把原型发你</span></div><div class="time">14:32</div></div>
+        <div class="thread"><div class="avatar">陈</div><div><b>陈默</b><span>收到，明天见</span></div><div class="time">昨天</div></div>
+        <div class="thread"><div class="avatar">顾</div><div><b>顾言</b><span>[语音] 0:18</span></div><div class="time">周二</div></div>
+      </section>
+      <section class="chat">
+        <div class="chat-head"><div><b>周雨</b><div class="status">在线</div></div><div class="head-actions">⌕ ◇ ···</div></div>
+        <div class="messages"><div class="bubble">登录后的主界面有方向了吗？</div><div class="bubble mine">先把核心聊天体验做得更安静。</div><div class="receipt">已读 · 14:31</div><div class="bubble">好，晚点把原型发你。</div></div>
+        <div class="composer"><div class="tools">＋ ♫ ☺</div><div class="input-line"><div class="input">输入消息</div><div class="send">发送</div></div></div>
+      </section>
+    </div>
+    <div class="direction-label"><div class="letter">B</div><div><h3>双栏聚焦</h3><p>账号、消息和好友合并在左栏，右侧专注聊天。空间利用更宽松，但消息/好友切换不如独立导航稳定。</p></div></div>
+  </div>
+
+  <div class="direction-card card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="app c">
+      <aside class="rail"><div class="mark">W</div><div class="rail-i active">⌂</div><div class="rail-i">聊</div><div class="rail-i">友</div><div class="rail-spacer"></div><div class="rail-i">林</div></aside>
+      <section class="hub">
+        <div class="welcome"><h4>下午好，林深</h4><p>3 条未读消息，1 个新的好友申请</p></div>
+        <div class="quick"><div><b>3</b>未读消息</div><div><b>1</b>好友申请</div></div>
+        <div class="recent"><h5>最近动态</h5><div class="activity"><div class="avatar">周</div><div><b>周雨发来消息</b><div>晚点把原型发你</div></div></div><div class="activity"><div class="avatar">陈</div><div><b>陈默已读</b><div>你昨天发送的消息</div></div></div></div>
+      </section>
+      <aside class="side-context"><h4>好友申请</h4><div class="request"><b>许川</b><p>通过账号搜索添加你</p><span class="mini-action">处理</span></div><h4 style="margin-top:20px">连接</h4><div class="request"><b style="color:#59816f">已连接</b><p>消息已同步</p></div></aside>
+    </div>
+    <div class="direction-label"><div class="letter">C</div><div><h3>消息中心首页</h3><p>登录先看汇总，再进入聊天或好友。状态清楚，但多出一层导航，不符合高频 IM 的直接进入习惯。</p></div></div>
+  </div>
+</div>
+</main>
+<div class="selection-bar" id="selection-status" aria-live="polite">尚未选择布局方向</div>
+<script>
+  const labels = {
+    a: "已选择 A：三栏会话工作台",
+    b: "已选择 B：双栏聚焦",
+    c: "已选择 C：消息中心首页",
+  };
+
+  function toggleSelect(card) {
+    document.querySelectorAll(".direction-card").forEach((item) => {
+      const selected = item === card;
+      item.classList.toggle("selected", selected);
+      item.setAttribute("aria-pressed", String(selected));
+    });
+    document.querySelector("#selection-status").textContent = labels[card.dataset.choice];
+  }
+
+  document.querySelectorAll(".direction-card").forEach((card) => {
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("aria-pressed", "false");
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleSelect(card);
+      }
+    });
+  });
+</script>
+</body>
+</html>
