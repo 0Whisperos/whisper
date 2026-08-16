@@ -21,6 +21,7 @@ func validConfig() Config {
 	return Config{
 		Server:   ServerConfig{ListenAddr: "127.0.0.1:8080"},
 		Database: DatabaseConfig{DSN: "root:password@tcp(127.0.0.1:3306)/whisper"},
+		Redis:    RedisConfig{Addr: "127.0.0.1:6379", Username: "whisper", Password: "root"},
 		CORS:     CORSConfig{AllowedOrigins: []string{"http://127.0.0.1:1420"}},
 		Seed:     SeedConfig{Account: "00123456", Password: "development-password"},
 	}
@@ -36,6 +37,10 @@ server:
   listen_addr: 127.0.0.1:8080
 database:
   dsn: root:password@tcp(127.0.0.1:3306)/whisper
+redis:
+  addr: 127.0.0.1:6379
+  username: whisper
+  password: root
 cors:
   allowed_origins:
     - http://127.0.0.1:1420
@@ -53,6 +58,9 @@ seed:
 	}
 	if len(config.CORS.AllowedOrigins) != 1 || config.CORS.AllowedOrigins[0] != "http://127.0.0.1:1420" {
 		t.Errorf("AllowedOrigins = %#v, want [http://127.0.0.1:1420]", config.CORS.AllowedOrigins)
+	}
+	if config.Redis.Addr != "127.0.0.1:6379" || config.Redis.Username != "whisper" || config.Redis.Password != "root" {
+		t.Errorf("Redis = %#v, want configured addr, username and password", config.Redis)
 	}
 	if config.Seed.Account != "00123456" || config.Seed.Password != "development-password" {
 		t.Errorf("Seed = %#v, want the configured account and password", config.Seed)
@@ -73,9 +81,9 @@ func TestLoadRejectsMissingAndMalformedFiles(t *testing.T) {
 }
 
 func TestValidateServerRejectsMissingRequiredValues(t *testing.T) {
-	// 测试目标：验证启动服务所需的监听地址、数据库 DSN 和 CORS 来源均不能为空。
-	// 构造方法：从完整有效配置复制四个场景，并在每个场景中移除一个必需值。
-	// 输入数据：空监听地址、空 DSN、空 CORS 列表和包含空字符串的 CORS 列表。
+	// 测试目标：验证启动服务所需的监听地址、数据库 DSN、Redis 地址和 CORS 来源均不能为空。
+	// 构造方法：从完整有效配置复制五个场景，并在每个场景中移除一个必需值。
+	// 输入数据：空监听地址、空 DSN、空 Redis 地址、空 CORS 列表和包含空字符串的 CORS 列表。
 	// 预期行为：每个场景的 ValidateServer 都返回非空错误。
 	config := validConfig()
 	config.Server.ListenAddr = ""
@@ -87,6 +95,12 @@ func TestValidateServerRejectsMissingRequiredValues(t *testing.T) {
 	config.Database.DSN = ""
 	if err := config.ValidateServer(); err == nil {
 		t.Error("ValidateServer returned nil error for an empty database DSN")
+	}
+
+	config = validConfig()
+	config.Redis.Addr = ""
+	if err := config.ValidateServer(); err == nil {
+		t.Error("ValidateServer returned nil error for an empty Redis address")
 	}
 
 	config = validConfig()

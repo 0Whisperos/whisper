@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
+	Redis    RedisConfig    `yaml:"redis"`
 	CORS     CORSConfig     `yaml:"cors"`
 	Seed     SeedConfig     `yaml:"seed"`
 }
@@ -19,6 +20,8 @@ func (config *Config) ValidateServer() error {
 		return fmt.Errorf("server listen address is empty")
 	} else if config.Database.DSN == "" {
 		return fmt.Errorf("database DSN is empty")
+	} else if config.Redis.Addr == "" {
+		return fmt.Errorf("redis address is empty")
 	} else if len(config.CORS.AllowedOrigins) == 0 {
 		return fmt.Errorf("cors allowed origins is empty")
 	} else {
@@ -41,6 +44,12 @@ type ServerConfig struct {
 
 type DatabaseConfig struct {
 	DSN string `yaml:"dsn"`
+}
+
+type RedisConfig struct {
+	Addr     string `yaml:"addr"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 type CORSConfig struct {

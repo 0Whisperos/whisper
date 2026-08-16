@@ -4,6 +4,11 @@ server:
 database:
   dsn: ""
 
+redis:
+  addr: ""
+  username: ""
+  password: ""
+
 cors:
   allowed_origins:
     - http://127.0.0.1:1420
