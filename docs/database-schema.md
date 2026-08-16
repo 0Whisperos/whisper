@@ -38,6 +38,7 @@ CREATE TABLE users (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   account VARCHAR(12) NOT NULL,
   password_hash VARCHAR(60) NOT NULL,
+  avatar_object_key VARCHAR(255) NULL,
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
 
@@ -52,6 +53,7 @@ CREATE TABLE users (
 | `id` | `BIGINT UNSIGNED` | 否 | 自增 | 主键 | 用户 ID。系统内部使用的用户唯一标识，也是聊天成员、消息发送者和游标记录引用的用户标识。 |
 | `account` | `VARCHAR(12)` | 否 | 无 | `uk_users_account` 唯一 | 登录账号。第一阶段沿用当前账号规则：8 到 12 位数字；数据库负责非空、最大长度和唯一性，具体格式由业务校验保证。 |
 | `password_hash` | `VARCHAR(60)` | 否 | 无 | 无 | 密码哈希。保存 bcrypt 生成的密码摘要，不保存明文密码。 |
+| `avatar_object_key` | `VARCHAR(255)` | 是 | `NULL` | 无 | 用户头像在 OSS Bucket 内的对象 key，例如 `avatars/users/20001/<uuid>.webp`。该字段不保存完整 URL 或签名 URL；后续 API 根据 OSS、CDN 或签名策略生成客户端可访问的头像地址。 |
 | `created_at` | `DATETIME(6)` | 否 | 无 | 无 | 用户记录创建时间。数据库保存时间值；系统边界输出时使用 GB/T 7408 扩展格式。 |
 | `updated_at` | `DATETIME(6)` | 否 | 无 | 无 | 用户记录最后更新时间。数据库保存时间值；系统边界输出时使用 GB/T 7408 扩展格式。 |
 

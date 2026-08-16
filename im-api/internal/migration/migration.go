@@ -22,10 +22,10 @@ func Run(configPath string) error {
 		}
 	}()
 
-	if err := database.MigrateAuthentication(); err != nil {
+	if err := database.MigrateSchema(); err != nil {
 		return err
 	}
-	logging.Info("authentication database migration completed")
+	logging.Info("database schema migration completed")
 
 	return nil
 }

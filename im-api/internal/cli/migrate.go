@@ -9,7 +9,7 @@ func newMigrateCommand() *cobra.Command {
 	var configPath string
 	command := &cobra.Command{
 		Use:   "migrate",
-		Short: "Create or update authentication database tables",
+		Short: "Create or update database schema tables",
 		Args:  cobra.NoArgs,
 		RunE:  func(_ *cobra.Command, _ []string) error { return migration.Run(configPath) },
 	}
