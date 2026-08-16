@@ -1,0 +1,241 @@
+name: whisper
+
+services:
+  mysql:
+    image: mysql:${MYSQL_VERSION:-8.4}
+    container_name: whisper-mysql
+    command:
+      - --server-id=223344
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+      - --binlog-expire-logs-seconds=604800
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-whisper}
+      MYSQL_USER: ${MYSQL_USERNAME:-whisper}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  redis:
+    image: redis:${REDIS_VERSION:-7.4-alpine}
+    container_name: whisper-redis
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --user
+      - default
+      - "off"
+      - --user
+      - ${REDIS_USERNAME:-whisper}
+      - "on"
+      - ">${REDIS_PASSWORD:-root}"
+      - "~*"
+      - "+@all"
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --user $${REDIS_USERNAME:-whisper} --pass $${REDIS_PASSWORD:-root} ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  kafka:
+    image: bitnami/kafka:${KAFKA_VERSION:-3.7}
+    container_name: whisper-kafka
+    environment:
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: CLIENT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_CFG_ADVERTISED_LISTENERS: CLIENT://kafka:9092,EXTERNAL://localhost:${KAFKA_PORT:-9092}
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CLIENT:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:SASL_PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: CLIENT
+      KAFKA_CFG_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_CLIENT_LISTENER_NAME: CLIENT
+      KAFKA_CLIENT_USERS: ${KAFKA_USERNAME:-whisper}
+      KAFKA_CLIENT_PASSWORDS: ${KAFKA_PASSWORD:-root}
+      KAFKA_INTER_BROKER_USER: ${KAFKA_USERNAME:-whisper}
+      KAFKA_INTER_BROKER_PASSWORD: ${KAFKA_PASSWORD:-root}
+      KAFKA_CFG_LISTENER_NAME_CLIENT_PLAIN_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME:-whisper}" password="${KAFKA_PASSWORD:-root}" user_${KAFKA_USERNAME:-whisper}="${KAFKA_PASSWORD:-root}";
+      KAFKA_CFG_LISTENER_NAME_EXTERNAL_PLAIN_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required user_${KAFKA_USERNAME:-whisper}="${KAFKA_PASSWORD:-root}";
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    ports:
+      - "${KAFKA_PORT:-9092}:9094"
+    volumes:
+      - kafka-data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "printf 'security.protocol=SASL_PLAINTEXT\nsasl.mechanism=PLAIN\nsasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";\n' \"$${KAFKA_USERNAME:-whisper}\" \"$${KAFKA_PASSWORD:-root}\" >/tmp/kafka-client.properties && kafka-topics.sh --bootstrap-server kafka:9092 --command-config /tmp/kafka-client.properties --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  mysql-init:
+    image: mysql:${MYSQL_VERSION:-8.4}
+    container_name: whisper-mysql-init
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-whisper}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-whisper}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root}
+    command:
+      - bash
+      - -ec
+      - |
+        mysql -h mysql -uroot -p"$${MYSQL_ROOT_PASSWORD}" <<SQL
+        GRANT ALL PRIVILEGES ON \`$${MYSQL_DATABASE}\`.* TO '$${MYSQL_USERNAME}'@'%';
+        GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '$${MYSQL_USERNAME}'@'%';
+        FLUSH PRIVILEGES;
+        SQL
+    restart: "no"
+
+  kafka-init:
+    image: bitnami/kafka:${KAFKA_VERSION:-3.7}
+    container_name: whisper-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - bash
+      - -ec
+      - |
+        cat >/tmp/kafka-client.properties <<EOF
+        security.protocol=SASL_PLAINTEXT
+        sasl.mechanism=PLAIN
+        sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME:-whisper}" password="${KAFKA_PASSWORD:-root}";
+        EOF
+        kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --command-config /tmp/kafka-client.properties \
+          --create \
+          --if-not-exists \
+          --topic whisper.chat.message-events.v1 \
+          --partitions ${KAFKA_CHAT_TOPIC_PARTITIONS:-3} \
+          --replication-factor 1
+        kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --command-config /tmp/kafka-client.properties \
+          --create \
+          --if-not-exists \
+          --topic schema-changes.whisper \
+          --partitions 1 \
+          --replication-factor 1
+    restart: "no"
+
+  kafka-connect:
+    image: quay.io/debezium/connect:${DEBEZIUM_VERSION:-2.7}
+    container_name: whisper-kafka-connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: whisper-connect
+      CONFIG_STORAGE_TOPIC: whisper.connect.configs
+      OFFSET_STORAGE_TOPIC: whisper.connect.offsets
+      STATUS_STORAGE_TOPIC: whisper.connect.statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_SASL_MECHANISM: PLAIN
+      CONNECT_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME:-whisper}" password="${KAFKA_PASSWORD:-root}";
+      CONNECT_PRODUCER_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_PRODUCER_SASL_MECHANISM: PLAIN
+      CONNECT_PRODUCER_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME:-whisper}" password="${KAFKA_PASSWORD:-root}";
+      CONNECT_CONSUMER_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_CONSUMER_SASL_MECHANISM: PLAIN
+      CONNECT_CONSUMER_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME:-whisper}" password="${KAFKA_PASSWORD:-root}";
+      CONNECT_ADMIN_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_ADMIN_SASL_MECHANISM: PLAIN
+      CONNECT_ADMIN_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME:-whisper}" password="${KAFKA_PASSWORD:-root}";
+    ports:
+      - "${KAFKA_CONNECT_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/connectors >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  debezium-init:
+    image: curlimages/curl:${CURL_VERSION:-8.10.1}
+    container_name: whisper-debezium-init
+    profiles:
+      - init
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    command:
+      - sh
+      - -ec
+      - |
+        curl -fsS -X PUT http://kafka-connect:8083/connectors/whisper-mysql-outbox/config \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+            "topic.prefix": "whisper",
+            "database.hostname": "mysql",
+            "database.port": "3306",
+            "database.user": "${MYSQL_USERNAME:-whisper}",
+            "database.password": "${MYSQL_PASSWORD:-root}",
+            "database.include.list": "${MYSQL_DATABASE:-whisper}",
+            "table.include.list": "${MYSQL_DATABASE:-whisper}.outbox_events",
+            "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+            "schema.history.internal.kafka.topic": "schema-changes.whisper",
+            "include.schema.changes": "false",
+            "tombstones.on.delete": "false",
+            "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+            "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+            "value.converter.schemas.enable": "false",
+            "transforms": "outbox",
+            "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+            "transforms.outbox.route.by.field": "aggregatetype",
+            "transforms.outbox.route.topic.replacement": "whisper.chat.message-events.v1",
+            "transforms.outbox.table.field.event.id": "id",
+            "transforms.outbox.table.field.event.key": "aggregateid",
+            "transforms.outbox.table.field.event.payload": "payload",
+            "transforms.outbox.table.field.event.timestamp": "created_at",
+            "transforms.outbox.table.expand.json.payload": "true",
+            "transforms.outbox.table.fields.additional.placement": "type:header:event_type,aggregatetype:header:aggregate_type"
+          }'
+    restart: "no"
+
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:

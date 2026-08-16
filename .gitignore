@@ -9,6 +9,7 @@
 
 # 日志与本地环境变量
 *.log
+.tmp/
 .env
 .env.*
 !.env.example
