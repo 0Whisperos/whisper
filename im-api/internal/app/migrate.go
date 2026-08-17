@@ -13,7 +13,7 @@ func RunMigration(configPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := mysql.Open(cfg.Database.DSN); err != nil {
+	if err := mysql.Open(cfg.Database); err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer func() {

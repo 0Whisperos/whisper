@@ -1,35 +1,34 @@
 package redis
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/0Whisperos/whisper/im-server/internal/service/auth"
+	"github.com/0Whisperos/whisper/im-server/internal/global"
+	authmodel "github.com/0Whisperos/whisper/im-server/internal/model/auth"
 	"github.com/alicebob/miniredis/v2"
 	goredis "github.com/redis/go-redis/v9"
 )
 
 func TestRefreshTokenRepositorySaveStoresProtocolJSONWithTTL(t *testing.T) {
 	// 测试目标：验证 refresh token repository 保存协议 JSON，并设置 Redis TTL。
-	// 构造方法：启动 miniredis，用 go-redis client 创建 repository 后保存一条 refresh token 记录。
+	// 构造方法：启动 miniredis，把测试 client 写入 global.RedisClient 后保存一条 refresh token 记录。
 	// 输入数据：tokenHash=hash-1，userID=20001，TTL=30m，issued_at/expires_at 使用 +08:00 固定时间。
-	// 预期行为：Redis 中存在 refresh_token:hash-1，JSON 字段为 user_id/issued_at/expires_at，且 TTL 大于 0。
+	// 预期行为：Redis 中存在 refresh_token:hash-1，JSON 字段包含 user_id/issued_at/expires_at，且 TTL 大于 0。
 	server := newRedisServer(t)
-	client := newTestClient(t, server)
-	repository := NewRefreshTokenRepository(client)
+	setTestClient(t, server)
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 
-	err := repository.Save(context.Background(), auth.RefreshTokenRecord{
+	err := SaveRefreshToken(authmodel.RefreshTokenRecord{
 		TokenHash: "hash-1",
 		UserID:    20001,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(30 * time.Minute),
 	}, 30*time.Minute)
 	if err != nil {
-		t.Fatalf("Save returned an error: %v", err)
+		t.Fatalf("SaveRefreshToken returned an error: %v", err)
 	}
 
 	raw, err := server.Get("refresh_token:hash-1")
@@ -56,17 +55,16 @@ func TestRefreshTokenRepositorySaveStoresProtocolJSONWithTTL(t *testing.T) {
 
 func TestRefreshTokenRepositoryFindReturnsMissingForRedisNil(t *testing.T) {
 	// 测试目标：验证 Redis key 不存在时返回 found=false，而不是泄漏 go-redis 的 redis.Nil。
-	// 构造方法：启动空 miniredis，调用 Find 查询不存在的 token hash。
+	// 构造方法：启动空 miniredis，把测试 client 写入 global.RedisClient 后查询不存在的 token hash。
 	// 输入数据：tokenHash=missing-hash。
 	// 预期行为：found=false，error=nil。
 	server := newRedisServer(t)
-	client := newTestClient(t, server)
-	repository := NewRefreshTokenRepository(client)
+	setTestClient(t, server)
 
-	_, found, err := repository.Find(context.Background(), "missing-hash")
+	_, found, err := FindRefreshToken("missing-hash")
 
 	if err != nil {
-		t.Fatalf("Find returned an error: %v", err)
+		t.Fatalf("FindRefreshToken returned an error: %v", err)
 	}
 	if found {
 		t.Fatal("found = true, want false")
@@ -75,26 +73,25 @@ func TestRefreshTokenRepositoryFindReturnsMissingForRedisNil(t *testing.T) {
 
 func TestRefreshTokenRepositoryUpdateLastUsedAtKeepsTTL(t *testing.T) {
 	// 测试目标：验证更新 last_used_at 时保留原 refresh token TTL。
-	// 构造方法：保存 refresh token 后记录 TTL，调用 UpdateLastUsedAt，再读取 JSON 和 TTL。
+	// 构造方法：保存 refresh token 后记录 TTL，调用 UpdateRefreshTokenLastUsedAt，再读取 JSON 和 TTL。
 	// 输入数据：tokenHash=hash-1，last_used_at=2026-08-16T12:05:00+08:00。
-	// 预期行为：JSON 包含 last_used_at，TTL 仍然存在且不超过原 TTL。
+	// 预期行为：JSON 包含 last_used_at，TTL 仍然存在。
 	server := newRedisServer(t)
-	client := newTestClient(t, server)
-	repository := NewRefreshTokenRepository(client)
+	setTestClient(t, server)
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.FixedZone("CST", 8*60*60))
-	if err := repository.Save(context.Background(), auth.RefreshTokenRecord{
+	if err := SaveRefreshToken(authmodel.RefreshTokenRecord{
 		TokenHash: "hash-1",
 		UserID:    20001,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(30 * time.Minute),
 	}, 30*time.Minute); err != nil {
-		t.Fatalf("Save returned an error: %v", err)
+		t.Fatalf("SaveRefreshToken returned an error: %v", err)
 	}
 	beforeTTL := server.TTL("refresh_token:hash-1")
 
 	usedAt := now.Add(5 * time.Minute)
-	if err := repository.UpdateLastUsedAt(context.Background(), "hash-1", usedAt); err != nil {
-		t.Fatalf("UpdateLastUsedAt returned an error: %v", err)
+	if err := UpdateRefreshTokenLastUsedAt("hash-1", usedAt); err != nil {
+		t.Fatalf("UpdateRefreshTokenLastUsedAt returned an error: %v", err)
 	}
 
 	var value refreshTokenValue
@@ -115,41 +112,39 @@ func TestRefreshTokenRepositoryUpdateLastUsedAtKeepsTTL(t *testing.T) {
 }
 
 func TestRefreshTokenRepositoryUpdateMissingReturnsInvalidRefreshToken(t *testing.T) {
-	// 测试目标：验证更新不存在的 refresh token 时返回 auth.ErrInvalidRefreshToken。
-	// 构造方法：启动空 miniredis，调用 UpdateLastUsedAt。
+	// 测试目标：验证更新不存在的 refresh token 时返回 ErrRefreshTokenNotFound。
+	// 构造方法：启动空 miniredis，把测试 client 写入 global.RedisClient 后调用 UpdateRefreshTokenLastUsedAt。
 	// 输入数据：tokenHash=missing-hash。
-	// 预期行为：错误可通过 errors.Is 判定为 ErrInvalidRefreshToken。
+	// 预期行为：错误可通过 errors.Is 判定为 ErrRefreshTokenNotFound。
 	server := newRedisServer(t)
-	client := newTestClient(t, server)
-	repository := NewRefreshTokenRepository(client)
+	setTestClient(t, server)
 
-	err := repository.UpdateLastUsedAt(context.Background(), "missing-hash", time.Now())
+	err := UpdateRefreshTokenLastUsedAt("missing-hash", time.Now())
 
-	if !errors.Is(err, auth.ErrInvalidRefreshToken) {
-		t.Fatalf("UpdateLastUsedAt error = %v, want ErrInvalidRefreshToken", err)
+	if !errors.Is(err, ErrRefreshTokenNotFound) {
+		t.Fatalf("UpdateRefreshTokenLastUsedAt error = %v, want ErrRefreshTokenNotFound", err)
 	}
 }
 
 func TestRefreshTokenRepositoryDeleteRemovesKey(t *testing.T) {
 	// 测试目标：验证 logout 通过 repository 删除 refresh token Redis key。
-	// 构造方法：先保存 refresh token，再调用 Delete。
+	// 构造方法：先保存 refresh token，再调用 DeleteRefreshToken。
 	// 输入数据：tokenHash=hash-1。
 	// 预期行为：Redis 中 refresh_token:hash-1 不再存在。
 	server := newRedisServer(t)
-	client := newTestClient(t, server)
-	repository := NewRefreshTokenRepository(client)
+	setTestClient(t, server)
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
-	if err := repository.Save(context.Background(), auth.RefreshTokenRecord{
+	if err := SaveRefreshToken(authmodel.RefreshTokenRecord{
 		TokenHash: "hash-1",
 		UserID:    20001,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(30 * time.Minute),
 	}, 30*time.Minute); err != nil {
-		t.Fatalf("Save returned an error: %v", err)
+		t.Fatalf("SaveRefreshToken returned an error: %v", err)
 	}
 
-	if err := repository.Delete(context.Background(), "hash-1"); err != nil {
-		t.Fatalf("Delete returned an error: %v", err)
+	if err := DeleteRefreshToken("hash-1"); err != nil {
+		t.Fatalf("DeleteRefreshToken returned an error: %v", err)
 	}
 
 	if server.Exists("refresh_token:hash-1") {
@@ -159,17 +154,18 @@ func TestRefreshTokenRepositoryDeleteRemovesKey(t *testing.T) {
 
 func newRedisServer(t *testing.T) *miniredis.Miniredis {
 	t.Helper()
-	server := miniredis.RunT(t)
-	return server
+	return miniredis.RunT(t)
 }
 
-func newTestClient(t *testing.T, server *miniredis.Miniredis) *goredis.Client {
+func setTestClient(t *testing.T, server *miniredis.Miniredis) {
 	t.Helper()
-	client := Open(Config{Addr: server.Addr()})
+	oldClient := global.RedisClient
+	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
+	global.RedisClient = client
 	t.Cleanup(func() {
 		if err := client.Close(); err != nil {
 			t.Fatalf("close Redis client: %v", err)
 		}
+		global.RedisClient = oldClient
 	})
-	return client
 }

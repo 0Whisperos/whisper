@@ -5,38 +5,33 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/0Whisperos/whisper/im-server/internal/model"
+	"github.com/0Whisperos/whisper/im-server/internal/global"
+	"github.com/0Whisperos/whisper/im-server/internal/model/entity"
 	"gorm.io/gorm"
 )
 
-func FindUserByAccount(account string) (model.User, bool, error) {
-	return FindUserByAccountContext(context.Background(), account)
-}
-
-func FindUserByAccountContext(ctx context.Context, account string) (model.User, bool, error) {
-	database, err := connection()
-	if err != nil {
-		return model.User{}, false, err
+func FindUserByAccount(account string) (entity.User, bool, error) {
+	if global.MysqlDB == nil {
+		return entity.User{}, false, ErrNotInitialized
 	}
 
-	var user model.User
-	err = database.WithContext(ctx).Where("account = ?", account).First(&user).Error
+	var user entity.User
+	err := global.MysqlDB.WithContext(context.Background()).Where("account = ?", account).First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return model.User{}, false, nil
+		return entity.User{}, false, nil
 	}
 	if err != nil {
-		return model.User{}, false, fmt.Errorf("find user by account: %w", err)
+		return entity.User{}, false, fmt.Errorf("find user by account: %w", err)
 	}
 
 	return user, true, nil
 }
 
-func CreateUser(user model.User) error {
-	database, err := connection()
-	if err != nil {
-		return err
+func CreateUser(user entity.User) error {
+	if global.MysqlDB == nil {
+		return ErrNotInitialized
 	}
-	if err := database.Create(&user).Error; err != nil {
+	if err := global.MysqlDB.Create(&user).Error; err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
 

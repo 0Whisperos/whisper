@@ -16,7 +16,7 @@ func RunServer(configPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := mysql.Open(cfg.Database.DSN); err != nil {
+	if err := mysql.Open(cfg.Database); err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer func() {
@@ -24,13 +24,11 @@ func RunServer(configPath string) error {
 			logging.Error("close database after serve", "error", err)
 		}
 	}()
-	redisClient := redisrepo.Open(redisrepo.Config{
-		Addr:     cfg.Redis.Addr,
-		Username: cfg.Redis.Username,
-		Password: cfg.Redis.Password,
-	})
+	if err := redisrepo.Open(cfg.Redis); err != nil {
+		return fmt.Errorf("open Redis: %w", err)
+	}
 	defer func() {
-		if err := redisClient.Close(); err != nil {
+		if err := redisrepo.Close(); err != nil {
 			logging.Error("close Redis after serve", "error", err)
 		}
 	}()
@@ -42,24 +40,7 @@ func RunServer(configPath string) error {
 	if err != nil {
 		return err
 	}
-	refreshRepository := redisrepo.NewRefreshTokenRepository(redisClient)
-	chatNodeRepository := redisrepo.NewChatNodeRepository(redisClient)
-	authService := auth.NewService(auth.ServiceConfig{
-		FindUserByAccount:          mysql.FindUserByAccountContext,
-		SaveRefreshToken:           refreshRepository.Save,
-		FindRefreshToken:           refreshRepository.Find,
-		UpdateRefreshTokenLastUsed: refreshRepository.UpdateLastUsedAt,
-		DeleteRefreshToken:         refreshRepository.Delete,
-		SelectReadyChatNode:        chatNodeRepository.SelectReady,
-		JWTSecret:                  []byte(cfg.Auth.JWTSecret),
-		AccessTokenTTL:             accessTokenTTL,
-		RefreshTokenTTL:            refreshTokenTTL,
-	})
-	engine := router.New(router.Config{
-		AllowedOrigins: cfg.CORS.AllowedOrigins,
-		Login:          authService.Login,
-		Refresh:        authService.Refresh,
-		Logout:         authService.Logout,
-	})
+	auth.SetTokenConfig([]byte(cfg.Auth.JWTSecret), accessTokenTTL, refreshTokenTTL)
+	engine := router.New(cfg.CORS.AllowedOrigins)
 	return engine.Run(cfg.Server.ListenAddr)
 }

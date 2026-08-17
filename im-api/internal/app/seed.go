@@ -5,8 +5,9 @@ import (
 
 	"github.com/0Whisperos/whisper/im-server/internal/config"
 	"github.com/0Whisperos/whisper/im-server/internal/logging"
-	"github.com/0Whisperos/whisper/im-server/internal/model"
+	"github.com/0Whisperos/whisper/im-server/internal/model/entity"
 	"github.com/0Whisperos/whisper/im-server/internal/repository/mysql"
+	"github.com/0Whisperos/whisper/im-server/internal/service/auth"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -15,11 +16,11 @@ func RunSeed(configPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := cfg.ValidateSeed(); err != nil {
+	if err := auth.ValidateCredentials(cfg.Seed.Account, cfg.Seed.Password); err != nil {
 		return fmt.Errorf("validate seed configuration: %w", err)
 	}
 
-	if err := mysql.Open(cfg.Database.DSN); err != nil {
+	if err := mysql.Open(cfg.Database); err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer func() {
@@ -59,7 +60,7 @@ func handleAccount(account string, password string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("hash seed password: %w", err)
 	}
-	if err := mysql.CreateUser(model.User{Account: account, PasswordHash: string(hash)}); err != nil {
+	if err := mysql.CreateUser(entity.User{Account: account, PasswordHash: string(hash)}); err != nil {
 		return false, fmt.Errorf("create seed user: %w", err)
 	}
 
