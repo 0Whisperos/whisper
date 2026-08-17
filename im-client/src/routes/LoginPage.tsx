@@ -6,7 +6,7 @@ import type { AuthSession } from "../features/login/types";
 
 interface LoginPageProps {
   apiBaseUrl: string;
-  onAuthenticated: (session: AuthSession) => void;
+  onAuthenticated: (session: AuthSession) => void | Promise<void>;
 }
 
 export function LoginPage({ apiBaseUrl, onAuthenticated }: LoginPageProps) {
