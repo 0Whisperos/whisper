@@ -22,8 +22,13 @@ func validConfig() Config {
 		Server:   ServerConfig{ListenAddr: "127.0.0.1:8080"},
 		Database: DatabaseConfig{DSN: "root:password@tcp(127.0.0.1:3306)/whisper"},
 		Redis:    RedisConfig{Addr: "127.0.0.1:6379", Username: "whisper", Password: "root"},
-		CORS:     CORSConfig{AllowedOrigins: []string{"http://127.0.0.1:1420"}},
-		Seed:     SeedConfig{Account: "00123456", Password: "development-password"},
+		Auth: AuthConfig{
+			JWTSecret:       "development-secret",
+			AccessTokenTTL:  "15m",
+			RefreshTokenTTL: "720h",
+		},
+		CORS: CORSConfig{AllowedOrigins: []string{"http://127.0.0.1:1420"}},
+		Seed: SeedConfig{Account: "00123456", Password: "development-password"},
 	}
 }
 
@@ -41,6 +46,10 @@ redis:
   addr: 127.0.0.1:6379
   username: whisper
   password: root
+auth:
+  jwt_secret: development-secret
+  access_token_ttl: 15m
+  refresh_token_ttl: 720h
 cors:
   allowed_origins:
     - http://127.0.0.1:1420
@@ -61,6 +70,9 @@ seed:
 	}
 	if config.Redis.Addr != "127.0.0.1:6379" || config.Redis.Username != "whisper" || config.Redis.Password != "root" {
 		t.Errorf("Redis = %#v, want configured addr, username and password", config.Redis)
+	}
+	if config.Auth.JWTSecret != "development-secret" || config.Auth.AccessTokenTTL != "15m" || config.Auth.RefreshTokenTTL != "720h" {
+		t.Errorf("Auth = %#v, want configured JWT secret and TTLs", config.Auth)
 	}
 	if config.Seed.Account != "00123456" || config.Seed.Password != "development-password" {
 		t.Errorf("Seed = %#v, want the configured account and password", config.Seed)
@@ -101,6 +113,24 @@ func TestValidateServerRejectsMissingRequiredValues(t *testing.T) {
 	config.Redis.Addr = ""
 	if err := config.ValidateServer(); err == nil {
 		t.Error("ValidateServer returned nil error for an empty Redis address")
+	}
+
+	config = validConfig()
+	config.Auth.JWTSecret = ""
+	if err := config.ValidateServer(); err == nil {
+		t.Error("ValidateServer returned nil error for an empty JWT secret")
+	}
+
+	config = validConfig()
+	config.Auth.AccessTokenTTL = ""
+	if err := config.ValidateServer(); err == nil {
+		t.Error("ValidateServer returned nil error for an empty access token TTL")
+	}
+
+	config = validConfig()
+	config.Auth.RefreshTokenTTL = "not-a-duration"
+	if err := config.ValidateServer(); err == nil {
+		t.Error("ValidateServer returned nil error for an invalid refresh token TTL")
 	}
 
 	config = validConfig()
