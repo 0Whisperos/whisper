@@ -62,11 +62,16 @@ describe("LoginPanel", () => {
   it("returns the authenticated session to the page on successful login", async () => {
     // 测试目标：验证 LoginPanel 只把成功会话交给上层，而不自行持久化令牌。
     // 构造方法：让登录 API 成功返回会话，模拟填写合法表单并提交。
-    // 输入数据：账号 12345678、密码 secret、返回 accessToken raw-token。
+    // 输入数据：账号 12345678、密码 secret、返回 accessToken 和 refreshToken。
     // 预期行为：onAuthenticated 收到完整会话。
     const user = userEvent.setup();
     const onAuthenticated = vi.fn();
-    loginMock.mockResolvedValueOnce({ accessToken: "raw-token", account: "12345678", expiresAt: "2026-08-02T00:00:00Z" });
+    loginMock.mockResolvedValueOnce({
+      accessToken: "jwt-access-token",
+      refreshToken: "refresh-token",
+      accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
+      imChatWsUrl: "ws://127.0.0.1:9001/ws",
+    });
 
     render(<LoginPanel apiBaseUrl="http://127.0.0.1:8080" onAuthenticated={onAuthenticated} onPauseGame={() => undefined} />);
 
@@ -75,7 +80,12 @@ describe("LoginPanel", () => {
     await user.click(screen.getByRole("button", { name: "登录" }));
 
     await waitFor(() => {
-      expect(onAuthenticated).toHaveBeenCalledWith({ accessToken: "raw-token", account: "12345678", expiresAt: "2026-08-02T00:00:00Z" });
+      expect(onAuthenticated).toHaveBeenCalledWith({
+        accessToken: "jwt-access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
+        imChatWsUrl: "ws://127.0.0.1:9001/ws",
+      });
     });
   });
 

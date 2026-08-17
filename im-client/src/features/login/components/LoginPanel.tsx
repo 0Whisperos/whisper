@@ -5,7 +5,7 @@ import type { AuthSession } from "../types";
 
 interface LoginPanelProps {
   apiBaseUrl: string;
-  onAuthenticated: (session: AuthSession) => void;
+  onAuthenticated: (session: AuthSession) => void | Promise<void>;
   onPauseGame: () => void;
 }
 

@@ -10,7 +10,7 @@ export function App() {
   const [config, setConfig] = useState<ClientConfig | null>(null);
   const [isConfigLoading, setIsConfigLoading] = useState(true);
   const [hasConfigError, setHasConfigError] = useState(false);
-  const { session, setSession, isLoggingOut, logout } = useAuthSession(config?.apiBaseUrl ?? "");
+  const { session, acceptSession, isRestoringSession, isLoggingOut, logout } = useAuthSession(config?.apiBaseUrl ?? "");
 
   useEffect(() => {
     let isMounted = true;
@@ -41,8 +41,11 @@ export function App() {
   if (hasConfigError || !config) {
     return <main className="status-page">客户端配置无效，请修正后重新启动 Whisper</main>;
   }
-  if (session) {
-    return <AuthenticatedPage account={session.account} isLoggingOut={isLoggingOut} onLogout={() => void logout()} />;
+  if (isRestoringSession) {
+    return <main className="status-page">正在恢复登录状态...</main>;
   }
-  return <LoginPage apiBaseUrl={config.apiBaseUrl} onAuthenticated={setSession} />;
+  if (session) {
+    return <AuthenticatedPage imChatWsUrl={session.imChatWsUrl} isLoggingOut={isLoggingOut} onLogout={() => void logout()} />;
+  }
+  return <LoginPage apiBaseUrl={config.apiBaseUrl} onAuthenticated={acceptSession} />;
 }

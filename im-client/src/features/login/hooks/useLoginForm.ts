@@ -3,7 +3,7 @@ import { useState } from "react";
 import { AuthApiError, login } from "../api";
 import type { AuthSession } from "../types";
 
-export function useLoginForm(apiBaseUrl: string, onAuthenticated: (session: AuthSession) => void) {
+export function useLoginForm(apiBaseUrl: string, onAuthenticated: (session: AuthSession) => void | Promise<void>) {
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -18,7 +18,7 @@ export function useLoginForm(apiBaseUrl: string, onAuthenticated: (session: Auth
     setErrorMessage(null);
     setIsSubmitting(true);
     try {
-      onAuthenticated(await login(apiBaseUrl, { account, password }));
+      await onAuthenticated(await login(apiBaseUrl, { account, password }));
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -46,6 +46,8 @@ function toErrorMessage(error: unknown): string {
         return "账号或密码错误";
       case "network_error":
         return "网络连接失败，请检查服务是否启动";
+      case "no_available_chat_node":
+        return "当前没有可用的聊天服务，请稍后重试";
       default:
         return "登录失败，请稍后重试";
     }
