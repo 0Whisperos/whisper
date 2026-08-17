@@ -1,145 +1,112 @@
 package auth
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
 
+	authmodel "github.com/0Whisperos/whisper/im-server/internal/model/auth"
+	authjwt "github.com/0Whisperos/whisper/im-server/internal/pkg/jwt"
+	"github.com/0Whisperos/whisper/im-server/internal/repository/mysql"
+	redisrepo "github.com/0Whisperos/whisper/im-server/internal/repository/redis"
 	"golang.org/x/crypto/bcrypt"
 )
 
-type ServiceConfig struct {
-	FindUserByAccount          FindUserByAccountFunc
-	SaveRefreshToken           SaveRefreshTokenFunc
-	FindRefreshToken           FindRefreshTokenFunc
-	UpdateRefreshTokenLastUsed UpdateRefreshTokenLastUsedFunc
-	DeleteRefreshToken         DeleteRefreshTokenFunc
-	SelectReadyChatNode        SelectReadyChatNodeFunc
-	Now                        NowFunc
-	JWTSecret                  []byte
-	AccessTokenTTL             time.Duration
-	RefreshTokenTTL            time.Duration
+var refreshTokenTTL time.Duration
+
+func SetTokenConfig(secret []byte, accessTTL time.Duration, refreshTTL time.Duration) {
+	authjwt.Configure(secret, accessTTL)
+	refreshTokenTTL = refreshTTL
 }
 
-type Service struct {
-	findUserByAccount          FindUserByAccountFunc
-	saveRefreshToken           SaveRefreshTokenFunc
-	findRefreshToken           FindRefreshTokenFunc
-	updateRefreshTokenLastUsed UpdateRefreshTokenLastUsedFunc
-	deleteRefreshToken         DeleteRefreshTokenFunc
-	selectReadyChatNode        SelectReadyChatNodeFunc
-	now                        NowFunc
-	jwtSecret                  []byte
-	accessTokenTTL             time.Duration
-	refreshTokenTTL            time.Duration
-}
-
-func NewService(config ServiceConfig) *Service {
-	now := config.Now
-	if now == nil {
-		now = time.Now
-	}
-	return &Service{
-		findUserByAccount:          config.FindUserByAccount,
-		saveRefreshToken:           config.SaveRefreshToken,
-		findRefreshToken:           config.FindRefreshToken,
-		updateRefreshTokenLastUsed: config.UpdateRefreshTokenLastUsed,
-		deleteRefreshToken:         config.DeleteRefreshToken,
-		selectReadyChatNode:        config.SelectReadyChatNode,
-		now:                        now,
-		jwtSecret:                  append([]byte(nil), config.JWTSecret...),
-		accessTokenTTL:             config.AccessTokenTTL,
-		refreshTokenTTL:            config.RefreshTokenTTL,
-	}
-}
-
-func (service *Service) Login(ctx context.Context, account string, password string) (AuthResult, error) {
+func Login(account string, password string) (authmodel.AuthResult, error) {
 	if err := ValidateCredentials(account, password); err != nil {
-		return AuthResult{}, ErrInvalidRequest
+		return authmodel.AuthResult{}, ErrInvalidRequest
 	}
-	user, found, err := service.findUserByAccount(ctx, account)
+	user, found, err := mysql.FindUserByAccount(account)
 	if err != nil {
-		return AuthResult{}, err
+		return authmodel.AuthResult{}, err
 	}
 	if !found {
-		return AuthResult{}, ErrInvalidCredentials
+		return authmodel.AuthResult{}, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-			return AuthResult{}, ErrInvalidCredentials
+			return authmodel.AuthResult{}, ErrInvalidCredentials
 		}
-		return AuthResult{}, fmt.Errorf("compare password hash: %v", err)
+		return authmodel.AuthResult{}, fmt.Errorf("compare password hash: %v", err)
 	}
 
 	refreshToken, err := generateRefreshToken()
 	if err != nil {
-		return AuthResult{}, fmt.Errorf("generate refresh token: %w", err)
+		return authmodel.AuthResult{}, fmt.Errorf("generate refresh token: %w", err)
 	}
-	now := service.now()
-	refreshRecord := RefreshTokenRecord{
+	now := time.Now()
+	refreshRecord := authmodel.RefreshTokenRecord{
 		TokenHash: hashRefreshToken(refreshToken),
 		UserID:    user.ID,
 		IssuedAt:  now,
-		ExpiresAt: now.Add(service.refreshTokenTTL),
+		ExpiresAt: now.Add(refreshTokenTTL),
 	}
-	if err := service.saveRefreshToken(ctx, refreshRecord, service.refreshTokenTTL); err != nil {
-		return AuthResult{}, err
+	if err := redisrepo.SaveRefreshToken(refreshRecord, refreshTokenTTL); err != nil {
+		return authmodel.AuthResult{}, err
 	}
 
-	result, err := service.issueAccessResult(ctx, user.ID, now)
+	result, err := issueAccessResult(user.ID, now)
 	if err != nil {
-		return AuthResult{}, err
+		return authmodel.AuthResult{}, err
 	}
 	result.RefreshToken = refreshToken
 	return result, nil
 }
 
-func (service *Service) Refresh(ctx context.Context, refreshToken string) (AuthResult, error) {
+func Refresh(refreshToken string) (authmodel.AuthResult, error) {
 	if refreshToken == "" {
-		return AuthResult{}, ErrInvalidRequest
+		return authmodel.AuthResult{}, ErrInvalidRequest
 	}
 	tokenHash := hashRefreshToken(refreshToken)
-	record, found, err := service.findRefreshToken(ctx, tokenHash)
+	record, found, err := redisrepo.FindRefreshToken(tokenHash)
 	if err != nil {
-		return AuthResult{}, err
+		return authmodel.AuthResult{}, err
 	}
 	if !found {
-		return AuthResult{}, ErrInvalidRefreshToken
+		return authmodel.AuthResult{}, ErrInvalidRefreshToken
 	}
-	now := service.now()
-	if err := service.updateRefreshTokenLastUsed(ctx, tokenHash, now); err != nil {
-		return AuthResult{}, err
+	now := time.Now()
+	if err := redisrepo.UpdateRefreshTokenLastUsedAt(tokenHash, now); err != nil {
+		if errors.Is(err, redisrepo.ErrRefreshTokenNotFound) {
+			return authmodel.AuthResult{}, ErrInvalidRefreshToken
+		}
+		return authmodel.AuthResult{}, err
 	}
-	return service.issueAccessResult(ctx, record.UserID, now)
+	return issueAccessResult(record.UserID, now)
 }
 
-func (service *Service) Logout(ctx context.Context, refreshToken string) error {
+func Logout(refreshToken string) error {
 	if refreshToken == "" {
 		return ErrInvalidRequest
 	}
-	return service.deleteRefreshToken(ctx, hashRefreshToken(refreshToken))
+	return redisrepo.DeleteRefreshToken(hashRefreshToken(refreshToken))
 }
 
-func (service *Service) VerifyAccessToken(accessToken string) (AccessClaims, error) {
-	return verifyAccessToken(accessToken, service.jwtSecret, service.now())
+func VerifyAccessToken(accessToken string) (authjwt.AccessClaims, error) {
+	claims, err := authjwt.VerifyAccessToken(accessToken, time.Now())
+	if errors.Is(err, authjwt.ErrTokenExpired) {
+		return authjwt.AccessClaims{}, ErrAccessTokenExpired
+	}
+	if err != nil {
+		return authjwt.AccessClaims{}, ErrInvalidAccessToken
+	}
+	return claims, nil
 }
 
-func (service *Service) issueAccessResult(ctx context.Context, userID uint64, now time.Time) (AuthResult, error) {
-	accessToken, expiresAt, err := signAccessToken(userID, now, service.accessTokenTTL, service.jwtSecret)
+func issueAccessResult(userID uint64, now time.Time) (authmodel.AuthResult, error) {
+	accessToken, expiresAt, err := authjwt.SignAccessToken(userID, now)
 	if err != nil {
-		return AuthResult{}, err
+		return authmodel.AuthResult{}, err
 	}
-	wsURL, err := service.selectReadyChatNode(ctx)
-	if err != nil {
-		return AuthResult{}, err
-	}
-	if wsURL == "" {
-		return AuthResult{}, ErrNoAvailableChatNode
-	}
-	return AuthResult{
+	return authmodel.AuthResult{
 		AccessToken:          accessToken,
 		AccessTokenExpiresAt: expiresAt,
-		IMChatWSURL:          wsURL,
 	}, nil
 }

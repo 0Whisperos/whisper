@@ -15,10 +15,6 @@ func ValidateCredentials(account string, password string) error {
 	return nil
 }
 
-func ValidateAccount(account string, password string) error {
-	return ValidateCredentials(account, password)
-}
-
 func validateAccount(account string) error {
 	accountLength := len(account)
 	if accountLength < 8 || accountLength > 12 {
