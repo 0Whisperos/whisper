@@ -2,12 +2,40 @@ server:
   listen_addr: 127.0.0.1:8080
 
 database:
-  dsn: ""
+  host: 127.0.0.1
+  port: 3306
+  username: whisper
+  password: ""
+  name: whisper_test
+  charset: utf8mb4
+  parse_time: true
+  loc: Local
+  timeout: 5s
+  read_timeout: 5s
+  write_timeout: 5s
+  pool:
+    max_open_conns: 10
+    max_idle_conns: 2
+    conn_max_lifetime: 1h
+    conn_max_idle_time: 30m
 
 redis:
-  addr: ""
+  host: 127.0.0.1
+  port: 6379
   username: ""
   password: ""
+  db: 1
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+  pool:
+    pool_size: 10
+    min_idle_conns: 1
+    max_idle_conns: 2
+    max_active_conns: 0
+    pool_timeout: 4s
+    conn_max_idle_time: 30m
+    conn_max_lifetime: 0s
 
 auth:
   jwt_secret: test-secret
