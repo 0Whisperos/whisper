@@ -3,7 +3,8 @@ package mysql
 import (
 	"fmt"
 
-	"github.com/0Whisperos/whisper/im-server/internal/model"
+	"github.com/0Whisperos/whisper/im-server/internal/global"
+	"github.com/0Whisperos/whisper/im-server/internal/model/entity"
 )
 
 func MigrateAuthentication() error {
@@ -11,12 +12,11 @@ func MigrateAuthentication() error {
 }
 
 func MigrateSchema() error {
-	database, err := connection()
-	if err != nil {
-		return err
+	if global.MysqlDB == nil {
+		return ErrNotInitialized
 	}
 
-	if err := database.AutoMigrate(migrationModels()...); err != nil {
+	if err := global.MysqlDB.AutoMigrate(migrationModels()...); err != nil {
 		return fmt.Errorf("migrate database schema: %w", err)
 	}
 
@@ -25,11 +25,11 @@ func MigrateSchema() error {
 
 func migrationModels() []interface{} {
 	return []interface{}{
-		&model.User{},
-		&model.Conversation{},
-		&model.ConversationMember{},
-		&model.Message{},
-		&model.OutboxEvent{},
-		&model.ConversationMemberCursor{},
+		&entity.User{},
+		&entity.Conversation{},
+		&entity.ConversationMember{},
+		&entity.Message{},
+		&entity.OutboxEvent{},
+		&entity.ConversationMemberCursor{},
 	}
 }
