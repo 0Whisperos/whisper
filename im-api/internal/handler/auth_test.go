@@ -36,6 +36,12 @@ func TestWriteErrorUsesAuthMappingsAndSafeFallback(t *testing.T) {
 			body:       `{"error_code":"invalid_refresh_token","message":"invalid refresh token"}`,
 		},
 		{
+			name:       "no available chat node",
+			err:        auth.ErrNoAvailableChatNode,
+			statusCode: http.StatusServiceUnavailable,
+			body:       `{"error_code":"no_available_chat_node","message":"no available chat node"}`,
+		},
+		{
 			name:       "internal error",
 			err:        errors.New("database unavailable"),
 			statusCode: http.StatusInternalServerError,

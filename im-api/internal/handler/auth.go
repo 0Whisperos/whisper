@@ -23,6 +23,7 @@ func Login(context *gin.Context) {
 		result.AccessToken,
 		result.RefreshToken,
 		result.AccessTokenExpiresAt,
+		result.IMChatWSURL,
 	))
 }
 
@@ -39,6 +40,7 @@ func Refresh(context *gin.Context) {
 	context.JSON(http.StatusOK, response.NewRefresh(
 		result.AccessToken,
 		result.AccessTokenExpiresAt,
+		result.IMChatWSURL,
 	))
 }
 
@@ -58,4 +60,5 @@ var authErrorMappings = []errorMapping{
 	{Err: auth.ErrInvalidRequest, StatusCode: http.StatusBadRequest, ErrorCode: "invalid_request", Message: "invalid request"},
 	{Err: auth.ErrInvalidCredentials, StatusCode: http.StatusUnauthorized, ErrorCode: "invalid_credentials", Message: "account or password is incorrect"},
 	{Err: auth.ErrInvalidRefreshToken, StatusCode: http.StatusUnauthorized, ErrorCode: "invalid_refresh_token", Message: "invalid refresh token"},
+	{Err: auth.ErrNoAvailableChatNode, StatusCode: http.StatusServiceUnavailable, ErrorCode: "no_available_chat_node", Message: "no available chat node"},
 }

@@ -6,6 +6,7 @@ type AuthResult struct {
 	AccessToken          string
 	RefreshToken         string
 	AccessTokenExpiresAt time.Time
+	IMChatWSURL          string
 }
 
 type RefreshTokenRecord struct {

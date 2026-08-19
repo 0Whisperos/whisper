@@ -56,7 +56,15 @@ func Login(account string, password string) (authmodel.AuthResult, error) {
 	if err != nil {
 		return authmodel.AuthResult{}, err
 	}
+	chatNode, found, err := redisrepo.SelectReadyChatNode()
+	if err != nil {
+		return authmodel.AuthResult{}, err
+	}
+	if !found {
+		return authmodel.AuthResult{}, ErrNoAvailableChatNode
+	}
 	result.RefreshToken = refreshToken
+	result.IMChatWSURL = chatNode.PublicWSURL
 	return result, nil
 }
 
@@ -79,7 +87,19 @@ func Refresh(refreshToken string) (authmodel.AuthResult, error) {
 		}
 		return authmodel.AuthResult{}, err
 	}
-	return issueAccessResult(record.UserID, now)
+	result, err := issueAccessResult(record.UserID, now)
+	if err != nil {
+		return authmodel.AuthResult{}, err
+	}
+	chatNode, found, err := redisrepo.SelectReadyChatNode()
+	if err != nil {
+		return authmodel.AuthResult{}, err
+	}
+	if !found {
+		return authmodel.AuthResult{}, ErrNoAvailableChatNode
+	}
+	result.IMChatWSURL = chatNode.PublicWSURL
+	return result, nil
 }
 
 func Logout(refreshToken string) error {
