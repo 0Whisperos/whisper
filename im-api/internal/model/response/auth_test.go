@@ -15,13 +15,14 @@ func TestNewLoginFormatsDocumentedProtocolFields(t *testing.T) {
 		"jwt-access-token",
 		"refresh-token",
 		fixedProtocolTime(),
+		"ws://127.0.0.1:9001/ws",
 	)
 
 	contents, err := json.Marshal(response)
 	if err != nil {
 		t.Fatalf("marshal login response: %v", err)
 	}
-	want := `{"access_token":"jwt-access-token","refresh_token":"refresh-token","access_token_expires_at":"2026-08-16T12:15:00+08:00"}`
+	want := `{"access_token":"jwt-access-token","refresh_token":"refresh-token","access_token_expires_at":"2026-08-16T12:15:00+08:00","im_chat_ws_url":"ws://127.0.0.1:9001/ws"}`
 	if got := string(contents); got != want {
 		t.Fatalf("login response JSON = %s, want %s", got, want)
 	}
@@ -35,13 +36,14 @@ func TestNewRefreshOmitsRefreshToken(t *testing.T) {
 	response := NewRefresh(
 		"new-jwt-access-token",
 		fixedProtocolTime(),
+		"ws://127.0.0.1:9001/ws",
 	)
 
 	contents, err := json.Marshal(response)
 	if err != nil {
 		t.Fatalf("marshal refresh response: %v", err)
 	}
-	want := `{"access_token":"new-jwt-access-token","access_token_expires_at":"2026-08-16T12:15:00+08:00"}`
+	want := `{"access_token":"new-jwt-access-token","access_token_expires_at":"2026-08-16T12:15:00+08:00","im_chat_ws_url":"ws://127.0.0.1:9001/ws"}`
 	if got := string(contents); got != want {
 		t.Fatalf("refresh response JSON = %s, want %s", got, want)
 	}

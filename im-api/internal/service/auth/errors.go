@@ -8,4 +8,5 @@ var (
 	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 	ErrInvalidAccessToken  = errors.New("invalid access token")
 	ErrAccessTokenExpired  = errors.New("access token expired")
+	ErrNoAvailableChatNode = errors.New("no available chat node")
 )
