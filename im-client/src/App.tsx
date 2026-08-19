@@ -10,7 +10,7 @@ export function App() {
   const [config, setConfig] = useState<ClientConfig | null>(null);
   const [isConfigLoading, setIsConfigLoading] = useState(true);
   const [hasConfigError, setHasConfigError] = useState(false);
-  const { session, acceptSession, isRestoringSession, isLoggingOut, logout } = useAuthSession(config?.apiBaseUrl ?? "");
+  const { session, acceptSession, refreshSession, isRestoringSession, isLoggingOut, logout } = useAuthSession(config?.apiBaseUrl ?? "");
 
   useEffect(() => {
     let isMounted = true;
@@ -45,7 +45,14 @@ export function App() {
     return <main className="status-page">正在恢复登录状态...</main>;
   }
   if (session) {
-    return <AuthenticatedPage imChatWsUrl={session.imChatWsUrl} isLoggingOut={isLoggingOut} onLogout={() => void logout()} />;
+    return (
+      <AuthenticatedPage
+        session={session}
+        refreshSession={refreshSession}
+        isLoggingOut={isLoggingOut}
+        onLogout={() => void logout()}
+      />
+    );
   }
   return <LoginPage apiBaseUrl={config.apiBaseUrl} onAuthenticated={acceptSession} />;
 }

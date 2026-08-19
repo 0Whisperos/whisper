@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthSession } from "./useAuthSession";
 
@@ -32,6 +32,10 @@ describe("useAuthSession", () => {
     saveRefreshTokenMock.mockResolvedValue(undefined);
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("restores a saved refresh token on startup", async () => {
     // 测试目标：验证启动时存在本地 refresh token 会自动调用 refresh 并进入已登录态。
     // 构造方法：mock 本地凭证读取和 refresh API 成功，再渲染 hook。
@@ -51,6 +55,7 @@ describe("useAuthSession", () => {
 
     expect(refreshMock).toHaveBeenCalledWith("http://127.0.0.1:8080", "refresh-token");
     expect(result.current.session?.accessToken).toBe("new-jwt-access-token");
+    expect(result.current.session?.imChatWsUrl).toBe("ws://127.0.0.1:9001/ws");
   });
 
   it("deletes saved refresh token when refresh is invalid", async () => {
@@ -105,6 +110,41 @@ describe("useAuthSession", () => {
 
     expect(saveRefreshTokenMock).toHaveBeenCalledWith("refresh-token");
     expect(result.current.session?.refreshToken).toBe("refresh-token");
+    expect(result.current.session?.imChatWsUrl).toBe("ws://127.0.0.1:9001/ws");
+  });
+
+  it("refreshes the current session and keeps the saved refresh token", async () => {
+    // 测试目标：验证 refreshSession 复用当前 refresh token 并更新内存 session。
+    // 构造方法：先 acceptSession 建立当前会话，再 mock refresh API 成功返回新 access token。
+    // 输入数据：当前 refreshToken=refresh-token，刷新响应 accessToken=new-jwt-access-token。
+    // 预期行为：refresh API 收到原 refresh token，hook session 更新为新 access token 和 ws_url。
+    loadSavedRefreshTokenMock.mockResolvedValueOnce(null);
+    refreshMock.mockResolvedValueOnce({
+      accessToken: "new-jwt-access-token",
+      refreshToken: "refresh-token",
+      accessTokenExpiresAt: "2026-08-16T12:30:00+08:00",
+      imChatWsUrl: "ws://127.0.0.1:9002/ws",
+    });
+    const { result } = renderHook(() => useAuthSession("http://127.0.0.1:8080"));
+    await waitFor(() => expect(result.current.isRestoringSession).toBe(false));
+    await act(async () => {
+      await result.current.acceptSession({
+        accessToken: "old-jwt-access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
+        imChatWsUrl: "ws://127.0.0.1:9001/ws",
+      });
+    });
+
+    await act(async () => {
+      await expect(result.current.refreshSession()).resolves.toMatchObject({
+        accessToken: "new-jwt-access-token",
+        imChatWsUrl: "ws://127.0.0.1:9002/ws",
+      });
+    });
+
+    expect(refreshMock).toHaveBeenCalledWith("http://127.0.0.1:8080", "refresh-token");
+    expect(result.current.session?.accessToken).toBe("new-jwt-access-token");
   });
 
   it("clears local credentials even when logout request fails", async () => {

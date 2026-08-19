@@ -49,6 +49,23 @@ export function useAuthSession(apiBaseUrl: string) {
     setSession(nextSession);
   }, []);
 
+  const refreshSession = useCallback(async (): Promise<AuthSession | null> => {
+    if (!session) {
+      return null;
+    }
+    try {
+      const nextSession = await refresh(apiBaseUrl, session.refreshToken);
+      setSession(nextSession);
+      return nextSession;
+    } catch (error) {
+      if (shouldDeleteSavedRefreshToken(error)) {
+        await deleteRefreshToken().catch(() => undefined);
+        setSession(null);
+      }
+      return null;
+    }
+  }, [apiBaseUrl, session]);
+
   const logout = useCallback(async () => {
     if (!session) {
       return;
@@ -65,7 +82,7 @@ export function useAuthSession(apiBaseUrl: string) {
     }
   }, [apiBaseUrl, session]);
 
-  return { session, acceptSession, isRestoringSession, isLoggingOut, logout };
+  return { session, acceptSession, refreshSession, isRestoringSession, isLoggingOut, logout };
 }
 
 function shouldDeleteSavedRefreshToken(error: unknown): boolean {
