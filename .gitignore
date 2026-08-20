@@ -20,6 +20,7 @@
 **/config.test.local.yaml
 **/config.test.local.yml
 **/*.local.json
+**/config.toml
 
 # 私钥、证书与凭据存储
 *.pem
