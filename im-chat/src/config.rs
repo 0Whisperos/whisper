@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::PathBuf;
 use serde::Deserialize;
 use crate::error::{Error, Result};
 

@@ -42,4 +42,16 @@ pub enum Error {
 
     #[error("invalid access token")]
     InvalidAccessToken,
+
+    #[error("serialize: {source}")]
+    Serialize {
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error("send websocket frame: {source}")]
+    WebSocketSend {
+        #[source]
+        source: axum::Error,
+    },
 }
