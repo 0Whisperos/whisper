@@ -1,4 +1,4 @@
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket};
 use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 
@@ -26,8 +26,6 @@ pub(crate) struct FailedPayload {
     pub(crate) message: &'static str,
 }
 
-type FailedFrame = Frame<FailedPayload>;
-
 pub(crate) async fn send<T>(socket: &mut WebSocket, frame: &Frame<T>) -> Result<()>
 where T: Serialize{
     let text = serde_json::to_string(frame)
@@ -35,4 +33,14 @@ where T: Serialize{
     socket.send(Message::Text(text.into())).await
         .map_err(|source| {Error::WebSocketSend { source }})?;
     Ok(())
+}
+
+pub(crate) async fn close(socket: &mut WebSocket, code: u16, reason: impl Into<Utf8Bytes>) {
+    let frame = CloseFrame {
+        code,
+        reason: reason.into(),
+    };
+    if let Err(err) = socket.send(Message::Close(Some(frame))).await {
+        tracing::debug!(%err, "failed to send close frame");
+    }
 }
