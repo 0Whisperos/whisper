@@ -7,3 +7,15 @@ jwt_secret = ""
 
 [logging]
 level = "debug"
+
+[redis]
+username = "whisper"
+password = "root"
+ip = "127.0.0.1"
+port = 6379
+db = 0
+
+[node]
+node_id = "node-1"
+public_ws_url = "ws://127.0.0.1:9090/ws"
+rpc_addr = "127.0.0.1:9000"
