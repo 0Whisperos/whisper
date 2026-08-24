@@ -4,20 +4,27 @@ use axum::response::Response;
 use axum::Router;
 use axum::routing::get;
 use tokio::net::TcpListener;
-use crate::{config, handle};
+use crate::{config, handle, heartbeat};
 use crate::error::{Error, Result};
+use crate::presence::PresenceManager;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub config: Arc<config::Config>,
+    pub presence: Arc<PresenceManager>
 }
 
 pub async fn run() -> Result<()> {
-    let config = config::load_config()?;
+    let config = Arc::new(config::load_config()?);
+    let presence = Arc::new(PresenceManager::new(&config.redis_config).map_err(|source| Error::Redis { source })?);
+    let _heartbeat_handle = heartbeat::spawn(presence.clone(), config.node_config.node_id.clone()).await;
     tracing_subscriber::fmt()
         .with_env_filter(config.logging_config.level.as_str())
         .init();
-    let state = AppState{config: Arc::new(config)};
+    let state = AppState{
+        config: config.clone(),
+        presence: presence.clone()
+    };
     let listen_addr = format!("{}:{}", state.config.server_config.ip, state.config.server_config.port);
     let app = Router::new().route("/ws", get(ws_handler)).with_state(state);
     let listener =
@@ -25,11 +32,19 @@ pub async fn run() -> Result<()> {
             addr: listen_addr,
             source,
         })?;
+    presence.register_node(
+        &config.node_config.node_id,
+        &config.node_config.public_ws_url,
+        &config.node_config.rpc_addr,
+    )
+    .await
+    .map_err(|source| Error::Redis { source })?;
     axum::serve(listener, app).await.map_err(|source| Error::Serve { source })?;
     Ok(())
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     let config = state.config.clone();
-    ws.on_upgrade(|socket| handle::handle_socket(socket, config))
+    let presence = state.presence.clone();
+    ws.on_upgrade(|socket| handle::handle_socket(socket, config, presence))
 }
