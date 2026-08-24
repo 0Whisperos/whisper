@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{close_code, Message, WebSocket};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use jsonwebtoken::errors::ErrorKind;
 use serde::{Deserialize, Serialize};
@@ -55,6 +55,7 @@ pub(crate) async fn certification(mut socket: WebSocket, config: Arc<Config>) ->
         Message::Text(text) => text,
         Message::Close(_) => return Ok(None),
         Message::Binary(_) | Message::Ping(_) | Message::Pong(_) => {
+            frame::close(&mut socket, close_code::POLICY, "invalid auth frame").await;
             return Err(Error::InvalidAuthFrame);
         }
     };
@@ -69,6 +70,7 @@ pub(crate) async fn certification(mut socket: WebSocket, config: Arc<Config>) ->
             }
         );
         frame::send(&mut socket, &response).await?;
+        frame::close(&mut socket, close_code::POLICY, "invalid auth frame").await;
         return Err(Error::InvalidAuthFrame);
     }
     let verified = match verify_access_token(&frame.payload.access_token, &config.auth_config.jwt_secret) {
@@ -89,6 +91,7 @@ pub(crate) async fn certification(mut socket: WebSocket, config: Arc<Config>) ->
                 }
             );
             frame::send(&mut socket, &response).await?;
+            frame::close(&mut socket, close_code::POLICY, message).await;
             return Err(error);
         }
     };
