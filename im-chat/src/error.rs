@@ -54,4 +54,10 @@ pub enum Error {
         #[source]
         source: axum::Error,
     },
+
+    #[error("redis error: {source}")]
+    Redis {
+        #[source]
+        source: redis::RedisError,
+    },
 }

@@ -4,3 +4,5 @@ mod handle;
 mod config;
 mod auth;
 mod frame;
+mod presence;
+mod heartbeat;
