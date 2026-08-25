@@ -77,7 +77,7 @@ impl PresenceManager {
         Ok(refreshed == 1)
     }
 
-    pub(crate) async fn update_presence(
+    pub(crate) async fn register_presence(
         &self,
         user_id: u64,
         connection_id: &str,
@@ -108,6 +108,41 @@ impl PresenceManager {
             .query_async(&mut conn)
             .await?;
         Ok(())
+    }
+
+    pub(crate) async fn refresh_presence(
+        &self,
+        user_id: u64,
+        connection_id: &str,
+    ) -> Result<bool, redis::RedisError> {
+        let key = format!("presence:user:{}", user_id);
+        let now = OffsetDateTime::now_utc()
+            .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap())
+            .to_string();
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+
+        let script = redis::Script::new(
+            r#"
+            local current = redis.call("HGET", KEYS[1], "connection_id")
+            if current == ARGV[1] then
+                redis.call("HSET", KEYS[1], "last_heartbeat_at", ARGV[2])
+                redis.call("EXPIRE", KEYS[1], ARGV[3])
+                return 1
+            else
+                return 0
+            end
+        "#,
+        );
+
+        let refreshed: i64 = script
+            .key(&key)
+            .arg(connection_id)
+            .arg(now.as_str())
+            .arg(30)
+            .invoke_async(&mut conn)
+            .await?;
+
+        Ok(refreshed == 1)
     }
 
     pub(crate) async fn leave_presence(
