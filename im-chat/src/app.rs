@@ -20,7 +20,6 @@ pub async fn run() -> Result<()> {
     let config = Arc::new(config::load_config()?);
     let presence = Arc::new(PresenceManager::new(&config.redis_config).map_err(|source| Error::Redis { source })?);
     let connections = ConnectionRegistry::new();
-    let _heartbeat_handle = heartbeat::spawn(presence.clone(), config.node_config.node_id.clone()).await;
     tracing_subscriber::fmt()
         .with_env_filter(config.logging_config.level.as_str())
         .init();
@@ -43,6 +42,7 @@ pub async fn run() -> Result<()> {
     )
     .await
     .map_err(|source| Error::Redis { source })?;
+    let _heartbeat_handle = heartbeat::spawn(presence.clone(), config.node_config.node_id.clone()).await;
     axum::serve(listener, app).await.map_err(|source| Error::Serve { source })?;
     Ok(())
 }

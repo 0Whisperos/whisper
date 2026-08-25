@@ -48,7 +48,7 @@ impl PresenceManager {
             .ignore()
             .query_async(&mut conn)
             .await?;
-
+        tracing::debug!(node_id, "node register");
         Ok(())
     }
 
