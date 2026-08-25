@@ -21,11 +21,11 @@ const session = {
 };
 
 describe("AuthenticatedPage", () => {
-  it("shows the authenticated chat connection state", () => {
-    // 测试目标：验证页面向用户展示聊天连接在线状态和 connection_id。
-    // 构造方法：mock useChatConnection 返回 authenticated 状态后渲染页面。
-    // 输入数据：connectionId=connection-uuid。
-    // 预期行为：页面显示聊天连接在线和对应 connection_id。
+  it("renders the authenticated chat workspace with connection state", () => {
+    // 测试目标：验证登录后渲染聊天工作台，并把 WebSocket 在线状态展示给用户。
+    // 构造方法：mock useChatConnection 返回 authenticated 状态后渲染 AuthenticatedPage。
+    // 输入数据：connectionId=connection-uuid，默认 mock 会话为林晓。
+    // 预期行为：页面显示消息/好友入口、默认聊天标题和聊天连接在线状态。
     useChatConnectionMock.mockReturnValueOnce({
       state: {
         status: "authenticated",
@@ -38,7 +38,11 @@ describe("AuthenticatedPage", () => {
 
     render(<AuthenticatedPage session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
 
-    expect(screen.getByText("聊天连接在线：connection-uuid")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "已登录" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "消息" })[0]).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "好友" })[0]).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "林晓" })).toBeInTheDocument();
+    expect(screen.getByText(/聊天连接在线：connection-uuid/)).toBeInTheDocument();
   });
 
   it("shows auth_failed using the stable error code", () => {
@@ -53,13 +57,13 @@ describe("AuthenticatedPage", () => {
 
     render(<AuthenticatedPage session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
 
-    expect(screen.getByText("聊天连接认证失败：invalid_token")).toBeInTheDocument();
+    expect(screen.getByText(/聊天连接认证失败：invalid_token/)).toBeInTheDocument();
   });
 
   it("closes the chat connection before logging out", async () => {
     // 测试目标：验证主动退出登录前会先关闭当前 WebSocket 连接。
-    // 构造方法：mock useChatConnection 返回可观察 close 函数，点击退出登录按钮。
-    // 输入数据：用户点击“退出登录”。
+    // 构造方法：mock useChatConnection 返回可观察 close 函数，打开账号面板后点击退出登录按钮。
+    // 输入数据：用户点击“账号与设置”，再点击“退出登录”。
     // 预期行为：close 先被调用，随后触发 onLogout。
     const events: string[] = [];
     useChatConnectionMock.mockReturnValueOnce({
@@ -69,6 +73,7 @@ describe("AuthenticatedPage", () => {
     const onLogout = vi.fn(() => events.push("logout"));
 
     render(<AuthenticatedPage session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={onLogout} />);
+    await userEvent.click(screen.getAllByRole("button", { name: "账号与设置" })[0]);
     await userEvent.click(screen.getByRole("button", { name: "退出登录" }));
 
     expect(events).toEqual(["close", "logout"]);

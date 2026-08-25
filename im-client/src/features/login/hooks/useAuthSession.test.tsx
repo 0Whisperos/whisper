@@ -113,6 +113,30 @@ describe("useAuthSession", () => {
     expect(result.current.session?.imChatWsUrl).toBe("ws://127.0.0.1:9001/ws");
   });
 
+  it("keeps an accepted login session in memory when saving the refresh token fails", async () => {
+    // Test goal: verify the temporary development fallback allows login to continue when local credential storage is unavailable.
+    // Construction: render the hook, make saveRefreshToken reject, then call acceptSession with a successful login session.
+    // Input data: AuthSession with refreshToken "refresh-token" and a credential storage rejection.
+    // Expected behavior: acceptSession resolves and the in-memory session is set, but the refresh token is not persisted.
+    loadSavedRefreshTokenMock.mockResolvedValueOnce(null);
+    saveRefreshTokenMock.mockRejectedValueOnce(new Error("credential_unavailable"));
+    const { result } = renderHook(() => useAuthSession("http://127.0.0.1:8080"));
+    await waitFor(() => expect(result.current.isRestoringSession).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.acceptSession({
+        accessToken: "jwt-access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
+        imChatWsUrl: "ws://127.0.0.1:9001/ws",
+      })).resolves.toBeUndefined();
+    });
+
+    expect(saveRefreshTokenMock).toHaveBeenCalledWith("refresh-token");
+    expect(result.current.session?.refreshToken).toBe("refresh-token");
+    expect(result.current.session?.imChatWsUrl).toBe("ws://127.0.0.1:9001/ws");
+  });
+
   it("refreshes the current session and keeps the saved refresh token", async () => {
     // 测试目标：验证 refreshSession 复用当前 refresh token 并更新内存 session。
     // 构造方法：先 acceptSession 建立当前会话，再 mock refresh API 成功返回新 access token。

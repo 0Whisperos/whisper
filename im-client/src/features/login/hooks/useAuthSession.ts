@@ -45,7 +45,13 @@ export function useAuthSession(apiBaseUrl: string) {
   }, [apiBaseUrl]);
 
   const acceptSession = useCallback(async (nextSession: AuthSession) => {
-    await saveRefreshToken(nextSession.refreshToken);
+    try {
+      await saveRefreshToken(nextSession.refreshToken);
+    } catch {
+      // TODO: Temporary development fallback. src-tauri/src/credentials.rs does not yet
+      // use real secure local credential storage, so keep this session in memory only.
+      // Replace this with the formal local storage solution and remove this fallback.
+    }
     setSession(nextSession);
   }, []);
 

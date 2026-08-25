@@ -1,0 +1,167 @@
+import type { ChatMockData, ChatMessage } from "./types";
+
+const SELF_USER_ID = 20001;
+
+function textMessage(
+  sequence: number,
+  conversationId: number,
+  senderUserId: number,
+  text: string,
+  displayTime: string,
+  showTime: boolean,
+  showAvatar: boolean,
+  receipt?: "已读" | "已送达",
+): ChatMessage {
+  return {
+    messageId: `00000000-0000-4000-8000-${String(conversationId).padStart(6, "0")}${String(sequence).padStart(6, "0")}`,
+    conversationId,
+    conversationSeq: sequence,
+    senderUserId,
+    clientMessageId: `client-${conversationId}-${sequence}`,
+    messageType: "text",
+    content: { text },
+    createdAt: `2026-08-16T10:${String(sequence).padStart(2, "0")}:00+08:00`,
+    displayTime,
+    showTime,
+    showAvatar,
+    receipt,
+  };
+}
+
+export const chatMockData: ChatMockData = {
+  self: { userId: SELF_USER_ID, name: "林澈", avatar: "林", tone: "blue", account: "lin@whisper.local" },
+  sessions: [
+    { id: "files", conversationId: 10001, name: "文件传输助手", avatar: "文", tone: "gray", type: "assistant", preview: "已保存到本机", time: "10:42", pinned: true },
+    { id: "linxiao", conversationId: 10002, name: "林晓", avatar: "晓", tone: "teal", type: "direct", preview: "晚饭回家吃吗？", time: "10:28", unread: 2 },
+    { id: "family", conversationId: 10003, name: "家庭群", avatar: "家", tone: "gold", type: "group", preview: "妈妈：周末一起吃饭", time: "09:50", mentionsMe: true },
+    { id: "product", conversationId: 10004, name: "产品讨论组", avatar: "产", tone: "blue", type: "group", preview: "周然：版本说明已更新", time: "昨天", unread: 5 },
+    { id: "zhouran", conversationId: 10005, name: "周然", avatar: "周", tone: "orange", type: "direct", preview: "收到，明天同步", time: "昨天", draft: true },
+    { id: "chenmo", conversationId: 10006, name: "陈默", avatar: "陈", tone: "purple", type: "direct", preview: "骑行路线我来定", time: "周二", muted: true },
+    { id: "bike", conversationId: 10007, name: "骑行小队", avatar: "骑", tone: "green", type: "group", preview: "阿舟：周六七点集合", time: "周二", unread: 3 },
+    { id: "xuyan", conversationId: 10008, name: "许言", avatar: "许", tone: "rose", type: "direct", preview: "下午茶别忘了", time: "周一" },
+  ],
+  conversations: {
+    10001: {
+      conversationId: 10001,
+      type: "assistant",
+      name: "文件传输助手",
+      avatar: "文",
+      tone: "gray",
+      status: "仅自己可见",
+      participants: { 90001: { userId: 90001, name: "文件传输助手", avatar: "文", tone: "gray" } },
+      messages: [
+        textMessage(1, 10001, 90001, "会议纪要.pdf 已保存到本机。", "10:36", true, true),
+        textMessage(2, 10001, SELF_USER_ID, "好的，稍后打开。", "10:42", false, true, "已送达"),
+      ],
+    },
+    10002: {
+      conversationId: 10002,
+      type: "direct",
+      name: "林晓",
+      avatar: "晓",
+      tone: "teal",
+      status: "在线",
+      participants: { 20002: { userId: 20002, name: "林晓", avatar: "晓", tone: "teal" } },
+      messages: [
+        textMessage(1, 10002, 20002, "晚饭回家吃吗？", "10:25", true, true),
+        textMessage(2, 10002, SELF_USER_ID, "好，我六点前到。", "10:28", false, true, "已读"),
+      ],
+    },
+    10003: {
+      conversationId: 10003,
+      type: "group",
+      name: "家庭群",
+      avatar: "家",
+      tone: "gold",
+      status: "4 位成员",
+      participants: {
+        20003: { userId: 20003, name: "妈妈", avatar: "妈", tone: "rose" },
+        20004: { userId: 20004, name: "爸爸", avatar: "爸", tone: "teal" },
+      },
+      messages: [
+        textMessage(1, 10003, 20003, "周末一起吃饭，想吃什么？", "09:40", true, true),
+        textMessage(2, 10003, 20004, "我负责订位置。", "09:42", false, true),
+        textMessage(3, 10003, SELF_USER_ID, "我都可以，听你们安排。", "09:50", false, true, "已读"),
+        textMessage(4, 10003, 20003, "周末一起吃饭，想吃什么？", "09:55", true, true),
+        textMessage(5, 10003, 20004, "我负责订位置。", "09:56", false, true),
+        textMessage(6, 10003, SELF_USER_ID, "我都可以，听你们安排。", "09:57", false, true, "已读"),
+      ],
+    },
+    10004: {
+      conversationId: 10004,
+      type: "group",
+      name: "产品讨论组",
+      avatar: "产",
+      tone: "blue",
+      status: "12 位成员",
+      participants: { 20005: { userId: 20005, name: "周然", avatar: "周", tone: "orange" } },
+      messages: [
+        textMessage(1, 10004, 20005, "@林澈 版本说明已更新，麻烦看下最后两项。", "昨天 16:20", true, true),
+        textMessage(2, 10004, 20005, "截图也放到共享文件夹了。", "昨天 16:21", false, false),
+        textMessage(3, 10004, SELF_USER_ID, "收到，我午饭前确认。", "昨天 16:25", false, true, "已读"),
+      ],
+    },
+    10005: {
+      conversationId: 10005,
+      type: "direct",
+      name: "周然",
+      avatar: "周",
+      tone: "orange",
+      status: "手机在线",
+      participants: { 20005: { userId: 20005, name: "周然", avatar: "周", tone: "orange" } },
+      messages: [
+        textMessage(1, 10005, 20005, "明天十点同步可以吗？", "昨天 18:04", true, true),
+        textMessage(2, 10005, SELF_USER_ID, "可以，我会准备好。", "昨天 18:05", false, true, "已送达"),
+      ],
+    },
+    10006: {
+      conversationId: 10006,
+      type: "direct",
+      name: "陈默",
+      avatar: "陈",
+      tone: "purple",
+      status: "离线",
+      participants: { 20006: { userId: 20006, name: "陈默", avatar: "陈", tone: "purple" } },
+      messages: [textMessage(1, 10006, 20006, "骑行路线我来定。", "周二 20:12", true, true)],
+    },
+    10007: {
+      conversationId: 10007,
+      type: "group",
+      name: "骑行小队",
+      avatar: "骑",
+      tone: "green",
+      status: "8 位成员",
+      participants: {
+        20007: { userId: 20007, name: "阿舟", avatar: "舟", tone: "green" },
+        20006: { userId: 20006, name: "陈默", avatar: "陈", tone: "purple" },
+      },
+      messages: [
+        textMessage(1, 10007, 20007, "周六七点在北门集合。", "周二 19:30", true, true),
+        textMessage(2, 10007, 20006, "记得带水和补胎工具。", "周二 19:31", false, true),
+        textMessage(3, 10007, SELF_USER_ID, "收到。", "周二 19:35", false, true, "已送达"),
+      ],
+    },
+    10008: {
+      conversationId: 10008,
+      type: "direct",
+      name: "许言",
+      avatar: "许",
+      tone: "rose",
+      status: "忙碌中",
+      participants: { 20008: { userId: 20008, name: "许言", avatar: "许", tone: "rose" } },
+      messages: [textMessage(1, 10008, 20008, "下午茶别忘了。", "周一 14:00", true, true)],
+    },
+  },
+  contacts: [
+    { id: "linxiao", userId: 20002, name: "林晓", avatar: "晓", tone: "teal", account: "linxiao", region: "上海", status: "在线", conversationId: 10002, section: "L" },
+    { id: "chenmo", userId: 20006, name: "陈默", avatar: "陈", tone: "purple", account: "chenmo", region: "杭州", status: "离线", conversationId: 10006, section: "C" },
+    { id: "xuyan", userId: 20008, name: "许言", avatar: "许", tone: "rose", account: "xuyan", region: "北京", status: "忙碌中", conversationId: 10008, section: "X" },
+    { id: "zhouran", userId: 20005, name: "周然", avatar: "周", tone: "orange", account: "zhouran", region: "深圳", status: "手机在线", conversationId: 10005, section: "Z" },
+  ],
+  contactSections: [
+    { id: "C", label: "C" },
+    { id: "L", label: "L" },
+    { id: "X", label: "X" },
+    { id: "Z", label: "Z" },
+  ],
+};
