@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deleteRefreshToken, loadSavedRefreshToken, saveRefreshToken } from "./credentials";
+import { deleteRefreshToken, listSavedUsers, loadSavedRefreshToken, saveRefreshToken } from "./credentials";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -12,39 +12,55 @@ describe("login credential API", () => {
     invokeMock.mockReset();
   });
 
-  it("loads the saved refresh token through a Tauri command", async () => {
-    // 测试目标：验证前端通过封装层读取本地 refresh token，而不是直接访问平台存储。
-    // 构造方法：mock Tauri invoke 返回 refresh-token，并调用 loadSavedRefreshToken。
-    // 输入数据：command 返回 "refresh-token"。
-    // 预期行为：调用 load_saved_refresh_token，并返回 refresh-token。
+  it("lists saved users through a Tauri command", async () => {
+    // Test goal: verify the frontend reads saved user labels through the credentials wrapper.
+    // Construction: mock Tauri invoke to return a valid saved-user array and call listSavedUsers.
+    // Input data: command response [{ userId: 20001, account: "00123456" }].
+    // Expected behavior: list_saved_users is invoked and the saved-user array is returned.
+    invokeMock.mockResolvedValueOnce([{ userId: 20001, account: "00123456" }]);
+
+    await expect(listSavedUsers()).resolves.toEqual([{ userId: 20001, account: "00123456" }]);
+
+    expect(invokeMock).toHaveBeenCalledWith("list_saved_users");
+  });
+
+  it("loads a saved refresh token for a user through a Tauri command", async () => {
+    // Test goal: verify refresh tokens are loaded by user_id instead of a single global slot.
+    // Construction: mock Tauri invoke to return refresh-token and call loadSavedRefreshToken.
+    // Input data: userId 20001 and command response "refresh-token".
+    // Expected behavior: load_saved_refresh_token receives { userId } and returns refresh-token.
     invokeMock.mockResolvedValueOnce("refresh-token");
 
-    await expect(loadSavedRefreshToken()).resolves.toBe("refresh-token");
+    await expect(loadSavedRefreshToken(20001)).resolves.toBe("refresh-token");
 
-    expect(invokeMock).toHaveBeenCalledWith("load_saved_refresh_token");
+    expect(invokeMock).toHaveBeenCalledWith("load_saved_refresh_token", { userId: 20001 });
   });
 
-  it("saves the refresh token through a Tauri command", async () => {
-    // 测试目标：验证登录成功后 refresh token 会通过稳定 command 保存。
-    // 构造方法：mock Tauri invoke 成功，再调用 saveRefreshToken。
-    // 输入数据：refresh token "refresh-token"。
-    // 预期行为：调用 save_refresh_token，参数为 { refreshToken }。
+  it("saves the refresh token with its user and account label through a Tauri command", async () => {
+    // Test goal: verify saving a refresh token also sends the account label needed by the saved-user selector.
+    // Construction: mock Tauri invoke to resolve and call saveRefreshToken.
+    // Input data: userId 20001, account 00123456, refresh token refresh-token.
+    // Expected behavior: save_refresh_token receives userId, account, and refreshToken.
     invokeMock.mockResolvedValueOnce(undefined);
 
-    await expect(saveRefreshToken("refresh-token")).resolves.toBeUndefined();
+    await expect(saveRefreshToken(20001, "00123456", "refresh-token")).resolves.toBeUndefined();
 
-    expect(invokeMock).toHaveBeenCalledWith("save_refresh_token", { refreshToken: "refresh-token" });
+    expect(invokeMock).toHaveBeenCalledWith("save_refresh_token", {
+      userId: 20001,
+      account: "00123456",
+      refreshToken: "refresh-token",
+    });
   });
 
-  it("deletes the saved refresh token through a Tauri command", async () => {
-    // 测试目标：验证主动退出登录时通过稳定 command 删除本地 refresh token。
-    // 构造方法：mock Tauri invoke 成功，再调用 deleteRefreshToken。
-    // 输入数据：无参数。
-    // 预期行为：调用 delete_refresh_token。
+  it("deletes a saved refresh token for a user through a Tauri command", async () => {
+    // Test goal: verify deleting local auto-login credentials targets one saved user.
+    // Construction: mock Tauri invoke to resolve and call deleteRefreshToken.
+    // Input data: userId 20001.
+    // Expected behavior: delete_refresh_token receives { userId }.
     invokeMock.mockResolvedValueOnce(undefined);
 
-    await expect(deleteRefreshToken()).resolves.toBeUndefined();
+    await expect(deleteRefreshToken(20001)).resolves.toBeUndefined();
 
-    expect(invokeMock).toHaveBeenCalledWith("delete_refresh_token");
+    expect(invokeMock).toHaveBeenCalledWith("delete_refresh_token", { userId: 20001 });
   });
 });
