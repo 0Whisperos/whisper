@@ -30,7 +30,8 @@
 | --- | --- | --- | --- | --- |
 | `chat_nodes:{node_id}` | Hash | `im-chat` | 30s | 保存 `im-chat` 节点注册信息，供 `im-api` 选择 WebSocket 连接地址。 |
 | `presence:user:{user_id}` | Hash | `im-chat` | 30s | 保存用户当前 WebSocket 在线路由，供 Kafka Consumer 投递在线消息。 |
-| `refresh_token:{token_hash}` | String 或 Hash | `im-api` | 由认证策略决定 | 保存 refresh token 的服务端有效性状态，用于免登录续期；不属于在线状态。 |
+| `refresh_token:{token_hash}` | String | `im-api` | 由认证策略决定 | 保存 refresh token 的服务端有效性状态，用于免登录续期；不属于在线状态。 |
+| `refresh_token_by_user:{user_id}` | String | `im-api` | 与对应 refresh token 对齐 | 保存当前用户最新 refresh token hash，用于登录替换和 logout 清理；不属于在线状态。 |
 
 ## `chat_nodes:{node_id}`
 
@@ -173,11 +174,11 @@ else
   do nothing
 ```
 
-## `refresh_token:{token_hash}`
+## `refresh_token:{token_hash}` 与 `refresh_token_by_user:{user_id}`
 
 ### 用途边界
 
-`refresh_token:{token_hash}` 保存 refresh token 的服务端有效性状态，用于客户端免登录续期。它属于认证续期状态，不属于在线状态。
+`refresh_token:{token_hash}` 保存 refresh token 的服务端有效性状态，用于客户端免登录续期。`refresh_token_by_user:{user_id}` 保存当前用户最新 refresh token hash，用于同一用户重新账号密码登录时替换旧 token。二者都属于认证续期状态，不属于在线状态。
 
 ```text
 Key: refresh_token:{token_hash}
@@ -186,13 +187,21 @@ Purpose: 免登录续期凭证
 Not presence: refresh token 有效不代表 WebSocket 在线
 TTL: 由认证策略决定
 Delete: 主动退出登录时删除；自然过期依赖 TTL
+
+Key: refresh_token_by_user:{user_id}
+Owner: im-api
+Purpose: 当前用户最新 refresh token hash 索引
+Not presence: 该索引存在不代表 WebSocket 在线
+TTL: 与对应 refresh_token:{token_hash} 对齐
+Delete: 同一用户重新登录替换时删除旧索引；主动退出登录且索引值匹配时删除；自然过期依赖 TTL
 ```
 
 ### 边界规则
 
 - 客户端关闭、断网或崩溃只表示 WebSocket 离线，不删除 refresh token。
-- 主动退出登录时，`im-api` 删除 refresh token，客户端删除本地 access token 和 refresh token。
-- refresh token 有效时，客户端可以调用 `/auth/refresh` 换取新的 access token，并重新获取可用 `im-chat` 地址。
+- 同一用户重新账号密码登录成功时，`im-api` 删除旧 refresh token，并写入新的 `refresh_token:{token_hash}` 与 `refresh_token_by_user:{user_id}`。
+- 主动退出登录时，`im-api` 删除 refresh token，并在索引值仍匹配该 token 时删除 `refresh_token_by_user:{user_id}`；客户端删除本地 access token 和 refresh token。
+- refresh token 有效时，客户端可以调用 `/v1/auth/refresh` 换取新的 access token，并重新获取可用 `im-chat` 地址。
 - refresh token 无效或过期时，客户端清理本地凭证并回到登录页。
 
 ## Consumer 在线投递规则
@@ -229,3 +238,4 @@ Kafka Consumer 处理 `message_created` 事件时：
 - presence 删除必须校验 `connection_id`。
 - Redis presence 不能作为消息已送达或已读依据。
 - refresh token 不能作为用户在线依据。
+- `refresh_token_by_user:{user_id}` 不能作为用户在线依据。

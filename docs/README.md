@@ -35,6 +35,7 @@ access_token
 refresh_token
   长期随机 token。用于免输入账号密码刷新 access_token。
   服务端只保存 refresh_token hash，并通过 Redis TTL 控制有效期。
+  当前认证实现按单用户单 refresh token 处理，同一用户重新账号密码登录会替换旧 token。
 
 WebSocket 在线状态
   表示用户当前是否有一条活着的 im-chat 连接。
@@ -46,11 +47,13 @@ WebSocket 在线状态
 ```text
 客户端输入账号密码
   -> im-api 校验账号密码
+  -> im-api 删除同用户旧 refresh_token 主记录和用户索引
   -> im-api 签发短期 JWT access_token
   -> im-api 生成长期 refresh_token
   -> im-api 将 refresh_token hash 写入 Redis，并设置 TTL
+  -> im-api 写入 refresh_token_by_user:{user_id}，记录当前用户最新 refresh token hash
   -> im-api 查询 Redis service registry，选择一个可用 im-chat 节点
-  -> im-api 返回 access_token、refresh_token、access_token 过期时间和 im-chat WebSocket 地址
+  -> im-api 返回 user_id、access_token、refresh_token、access_token 过期时间和 im-chat WebSocket 地址
 ```
 
 客户端保存策略：
@@ -68,9 +71,10 @@ refresh_token
 
 ```text
 客户端读取本地 refresh_token
-  -> 调用 im-api /auth/refresh
+  -> 调用 im-api /v1/auth/refresh
   -> im-api 查询 Redis 中的 refresh_token hash
-  -> refresh_token 有效：签发新的 access_token，并返回可用 im-chat 地址
+  -> refresh_token 有效：签发新的 access_token，并返回 user_id 和可用 im-chat 地址
+  -> refresh_token 保持原 token，不生成、不返回新的 refresh_token
   -> refresh_token 无效或过期：客户端清理本地凭证并回到登录页
 ```
 
@@ -83,8 +87,8 @@ refresh_token
   不删除 refresh_token，下次仍可免登录。
 
 主动退出登录
-  客户端调用 im-api /auth/logout。
-  im-api 删除 Redis 中的 refresh_token hash。
+  客户端调用 im-api /v1/auth/logout。
+  im-api 删除 Redis 中的 refresh_token hash，并在索引值匹配时删除 refresh_token_by_user:{user_id}。
   客户端删除本地 access_token / refresh_token。
   WebSocket 断开后，im-chat 清理连接状态。
 ```
@@ -113,7 +117,7 @@ TTL = 30s
   -> 校验失败：返回 auth_failed 或关闭连接
 ```
 
-如果 access_token 已过期，客户端应调用 `im-api /auth/refresh` 获取新的 access_token，再重新连接 `im-chat`。
+如果 access_token 已过期，客户端应调用 `im-api /v1/auth/refresh` 获取新的 access_token，再重新连接 `im-chat`。
 
 WebSocket 认证消息示例：
 
@@ -141,7 +145,7 @@ WebSocket 认证消息示例：
 }
 ```
 
-认证失败时，`im-chat` 可以回复 `auth_failed` 后关闭连接。若失败原因是 access_token 过期，客户端再调用 `im-api /auth/refresh`。
+认证失败时，`im-chat` 可以回复 `auth_failed` 后关闭连接。若失败原因是 access_token 过期，客户端再调用 `im-api /v1/auth/refresh`。
 
 当前阶段按单用户单连接语义实现，`im-chat` 本机连接表可以简化为：
 
