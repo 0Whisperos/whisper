@@ -51,6 +51,16 @@ func TestRefreshTokenRepositorySaveStoresProtocolJSONWithTTL(t *testing.T) {
 	if server.TTL("refresh_token:hash-1") <= 0 {
 		t.Fatal("refresh token key has no TTL")
 	}
+	indexValue, err := server.Get("refresh_token_by_user:20001")
+	if err != nil {
+		t.Fatalf("read refresh token user index: %v", err)
+	}
+	if indexValue != "hash-1" {
+		t.Fatalf("refresh token user index = %q, want hash-1", indexValue)
+	}
+	if server.TTL("refresh_token_by_user:20001") <= 0 {
+		t.Fatal("refresh token user index has no TTL")
+	}
 }
 
 func TestRefreshTokenRepositoryFindReturnsMissingForRedisNil(t *testing.T) {
@@ -126,11 +136,11 @@ func TestRefreshTokenRepositoryUpdateMissingReturnsInvalidRefreshToken(t *testin
 	}
 }
 
-func TestRefreshTokenRepositoryDeleteRemovesKey(t *testing.T) {
-	// 测试目标：验证 logout 通过 repository 删除 refresh token Redis key。
+func TestRefreshTokenRepositoryDeleteRemovesTokenAndUserIndex(t *testing.T) {
+	// 测试目标：验证 logout 通过 repository 删除 refresh token 时也会清理 user_id 反向索引。
 	// 构造方法：先保存 refresh token，再调用 DeleteRefreshToken。
-	// 输入数据：tokenHash=hash-1。
-	// 预期行为：Redis 中 refresh_token:hash-1 不再存在。
+	// 输入数据：tokenHash=hash-1，userID=20001。
+	// 预期行为：Redis 中 refresh_token:hash-1 和 refresh_token_by_user:20001 都不再存在。
 	server := newRedisServer(t)
 	setTestClient(t, server)
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
@@ -149,6 +159,127 @@ func TestRefreshTokenRepositoryDeleteRemovesKey(t *testing.T) {
 
 	if server.Exists("refresh_token:hash-1") {
 		t.Fatal("refresh token key still exists")
+	}
+	if server.Exists("refresh_token_by_user:20001") {
+		t.Fatal("refresh token user index still exists")
+	}
+}
+
+func TestRefreshTokenRepositoryDeleteDoesNotRemoveIndexForNewerToken(t *testing.T) {
+	// 测试目标：验证按 token hash 删除旧 token 时不会误删同用户更新后的反向索引。
+	// 构造方法：先保存旧 token，再保存同用户的新 token，最后调用 DeleteRefreshToken 删除旧 token。
+	// 输入数据：userID=20001，旧 tokenHash=hash-1，新 tokenHash=hash-2。
+	// 预期行为：旧主记录被删除，refresh_token_by_user:20001 仍指向 hash-2。
+	server := newRedisServer(t)
+	setTestClient(t, server)
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	if err := SaveRefreshToken(authmodel.RefreshTokenRecord{
+		TokenHash: "hash-1",
+		UserID:    20001,
+		IssuedAt:  now,
+		ExpiresAt: now.Add(30 * time.Minute),
+	}, 30*time.Minute); err != nil {
+		t.Fatalf("SaveRefreshToken old token returned an error: %v", err)
+	}
+	if err := SaveRefreshToken(authmodel.RefreshTokenRecord{
+		TokenHash: "hash-2",
+		UserID:    20001,
+		IssuedAt:  now,
+		ExpiresAt: now.Add(30 * time.Minute),
+	}, 30*time.Minute); err != nil {
+		t.Fatalf("SaveRefreshToken new token returned an error: %v", err)
+	}
+
+	if err := DeleteRefreshToken("hash-1"); err != nil {
+		t.Fatalf("DeleteRefreshToken returned an error: %v", err)
+	}
+
+	if server.Exists("refresh_token:hash-1") {
+		t.Fatal("old refresh token key still exists")
+	}
+	indexValue, err := server.Get("refresh_token_by_user:20001")
+	if err != nil {
+		t.Fatalf("read refresh token user index: %v", err)
+	}
+	if indexValue != "hash-2" {
+		t.Fatalf("refresh token user index = %q, want hash-2", indexValue)
+	}
+}
+
+func TestRefreshTokenRepositoryFindHashByUserReturnsSavedTokenHash(t *testing.T) {
+	// 测试目标：验证 repository 可以通过 user_id 找到当前用户最新 refresh token hash。
+	// 构造方法：启动 miniredis，保存一条 refresh token 记录，再调用 FindRefreshTokenHashByUser。
+	// 输入数据：userID=20001，tokenHash=hash-1。
+	// 预期行为：返回 found=true，tokenHash=hash-1。
+	server := newRedisServer(t)
+	setTestClient(t, server)
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	if err := SaveRefreshToken(authmodel.RefreshTokenRecord{
+		TokenHash: "hash-1",
+		UserID:    20001,
+		IssuedAt:  now,
+		ExpiresAt: now.Add(30 * time.Minute),
+	}, 30*time.Minute); err != nil {
+		t.Fatalf("SaveRefreshToken returned an error: %v", err)
+	}
+
+	tokenHash, found, err := FindRefreshTokenHashByUser(20001)
+
+	if err != nil {
+		t.Fatalf("FindRefreshTokenHashByUser returned an error: %v", err)
+	}
+	if !found {
+		t.Fatal("found = false, want true")
+	}
+	if tokenHash != "hash-1" {
+		t.Fatalf("tokenHash = %q, want hash-1", tokenHash)
+	}
+}
+
+func TestRefreshTokenRepositoryDeleteByUserRemovesTokenAndIndex(t *testing.T) {
+	// 测试目标：验证按 user_id 删除 refresh token 时同时删除主记录和反向索引。
+	// 构造方法：保存一条 refresh token 记录后调用 DeleteRefreshTokenByUser。
+	// 输入数据：userID=20001，tokenHash=hash-1。
+	// 预期行为：Redis 中 refresh_token:hash-1 和 refresh_token_by_user:20001 都不存在。
+	server := newRedisServer(t)
+	setTestClient(t, server)
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	if err := SaveRefreshToken(authmodel.RefreshTokenRecord{
+		TokenHash: "hash-1",
+		UserID:    20001,
+		IssuedAt:  now,
+		ExpiresAt: now.Add(30 * time.Minute),
+	}, 30*time.Minute); err != nil {
+		t.Fatalf("SaveRefreshToken returned an error: %v", err)
+	}
+
+	if err := DeleteRefreshTokenByUser(20001); err != nil {
+		t.Fatalf("DeleteRefreshTokenByUser returned an error: %v", err)
+	}
+
+	if server.Exists("refresh_token:hash-1") {
+		t.Fatal("refresh token key still exists")
+	}
+	if server.Exists("refresh_token_by_user:20001") {
+		t.Fatal("refresh token user index still exists")
+	}
+}
+
+func TestRefreshTokenRepositoryDeleteByUserRemovesStaleIndex(t *testing.T) {
+	// 测试目标：验证旧主记录已经缺失时，按 user_id 删除仍会清理残留反向索引且保持幂等。
+	// 构造方法：只写入 refresh_token_by_user:20001，不写入 refresh_token:hash-1，再调用 DeleteRefreshTokenByUser。
+	// 输入数据：userID=20001，索引值 hash-1。
+	// 预期行为：DeleteRefreshTokenByUser 返回 nil，残留索引被删除。
+	server := newRedisServer(t)
+	setTestClient(t, server)
+	server.Set("refresh_token_by_user:20001", "hash-1")
+
+	if err := DeleteRefreshTokenByUser(20001); err != nil {
+		t.Fatalf("DeleteRefreshTokenByUser returned an error: %v", err)
+	}
+
+	if server.Exists("refresh_token_by_user:20001") {
+		t.Fatal("refresh token user index still exists")
 	}
 }
 

@@ -37,7 +37,11 @@ func SaveRefreshToken(record authmodel.RefreshTokenRecord, ttl time.Duration) er
 	if err != nil {
 		return fmt.Errorf("marshal refresh token value: %w", err)
 	}
-	if err := global.RedisClient.Set(context.Background(), refreshTokenKey(record.TokenHash), string(contents), ttl).Err(); err != nil {
+	ctx := context.Background()
+	pipeline := global.RedisClient.TxPipeline()
+	pipeline.Set(ctx, refreshTokenKey(record.TokenHash), string(contents), ttl)
+	pipeline.Set(ctx, refreshTokenByUserKey(record.UserID), record.TokenHash, ttl)
+	if _, err := pipeline.Exec(ctx); err != nil {
 		return fmt.Errorf("save refresh token: %w", err)
 	}
 	return nil
@@ -93,8 +97,57 @@ func DeleteRefreshToken(tokenHash string) error {
 	if global.RedisClient == nil {
 		return ErrNotInitialized
 	}
-	if err := global.RedisClient.Del(context.Background(), refreshTokenKey(tokenHash)).Err(); err != nil {
+	keys := []string{refreshTokenKey(tokenHash)}
+	record, found, err := FindRefreshToken(tokenHash)
+	if err != nil {
+		return err
+	}
+	if found {
+		indexValue, indexFound, err := FindRefreshTokenHashByUser(record.UserID)
+		if err != nil {
+			return err
+		}
+		if indexFound && indexValue == tokenHash {
+			keys = append(keys, refreshTokenByUserKey(record.UserID))
+		}
+	}
+	if err := global.RedisClient.Del(context.Background(), keys...).Err(); err != nil {
 		return fmt.Errorf("delete refresh token: %w", err)
+	}
+	return nil
+}
+
+func FindRefreshTokenHashByUser(userID uint64) (string, bool, error) {
+	if global.RedisClient == nil {
+		return "", false, ErrNotInitialized
+	}
+	tokenHash, err := global.RedisClient.Get(context.Background(), refreshTokenByUserKey(userID)).Result()
+	if errors.Is(err, goredis.Nil) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("find refresh token user index: %w", err)
+	}
+	return tokenHash, true, nil
+}
+
+func DeleteRefreshTokenByUser(userID uint64) error {
+	if global.RedisClient == nil {
+		return ErrNotInitialized
+	}
+	tokenHash, found, err := FindRefreshTokenHashByUser(userID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	keys := []string{refreshTokenByUserKey(userID)}
+	if tokenHash != "" {
+		keys = append(keys, refreshTokenKey(tokenHash))
+	}
+	if err := global.RedisClient.Del(context.Background(), keys...).Err(); err != nil {
+		return fmt.Errorf("delete refresh token by user: %w", err)
 	}
 	return nil
 }
@@ -129,6 +182,10 @@ func parseRefreshTokenRecord(tokenHash string, contents string) (authmodel.Refre
 
 func refreshTokenKey(tokenHash string) string {
 	return "refresh_token:" + tokenHash
+}
+
+func refreshTokenByUserKey(userID uint64) string {
+	return "refresh_token_by_user:" + strconv.FormatUint(userID, 10)
 }
 
 func formatProtocolTime(value time.Time) string {
