@@ -3,6 +3,7 @@ package auth
 import "time"
 
 type AuthResult struct {
+	UserID               uint64
 	AccessToken          string
 	RefreshToken         string
 	AccessTokenExpiresAt time.Time

@@ -20,6 +20,7 @@ func Login(context *gin.Context) {
 		return
 	}
 	context.JSON(http.StatusOK, response.NewLogin(
+		result.UserID,
 		result.AccessToken,
 		result.RefreshToken,
 		result.AccessTokenExpiresAt,
@@ -38,6 +39,7 @@ func Refresh(context *gin.Context) {
 		return
 	}
 	context.JSON(http.StatusOK, response.NewRefresh(
+		result.UserID,
 		result.AccessToken,
 		result.AccessTokenExpiresAt,
 		result.IMChatWSURL,
