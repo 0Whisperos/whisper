@@ -1,4 +1,10 @@
-import type { AuthErrorCode, AuthSession, LoginCredentials, LoginResponseDto, RefreshResponseDto } from "./types";
+import type {
+  AuthErrorCode,
+  AuthSession,
+  LoginCredentials,
+  LoginResponseDto,
+  RefreshResponseDto,
+} from "./types";
 
 export class AuthApiError extends Error {
   constructor(readonly code: AuthErrorCode) {
@@ -80,10 +86,12 @@ function mapLoginResponse(value: unknown): AuthSession {
     throw new AuthApiError("internal_error");
   }
   return {
+    userId: value.user_id,
     accessToken: value.access_token,
     refreshToken: value.refresh_token,
     accessTokenExpiresAt: value.access_token_expires_at,
     imChatWsUrl: value.im_chat_ws_url,
+    refreshTokenPersistence: "session_only",
   };
 }
 
@@ -92,10 +100,12 @@ function mapRefreshResponse(value: unknown, refreshToken: string): AuthSession {
     throw new AuthApiError("internal_error");
   }
   return {
+    userId: value.user_id,
     accessToken: value.access_token,
     refreshToken,
     accessTokenExpiresAt: value.access_token_expires_at,
     imChatWsUrl: value.im_chat_ws_url,
+    refreshTokenPersistence: "session_only",
   };
 }
 
@@ -112,6 +122,8 @@ function isLoginResponseDto(value: unknown): value is LoginResponseDto {
   return (
     typeof value === "object"
     && value !== null
+    && "user_id" in value
+    && typeof value.user_id === "number"
     && "access_token" in value
     && typeof value.access_token === "string"
     && "refresh_token" in value
@@ -127,6 +139,8 @@ function isRefreshResponseDto(value: unknown): value is RefreshResponseDto {
   return (
     typeof value === "object"
     && value !== null
+    && "user_id" in value
+    && typeof value.user_id === "number"
     && "access_token" in value
     && typeof value.access_token === "string"
     && "access_token_expires_at" in value

@@ -28,10 +28,12 @@ class MockWebSocket implements ChatWebSocket {
 }
 
 const initialSession: AuthSession = {
+  userId: 20001,
   accessToken: "expired-access-token",
   refreshToken: "refresh-token",
   accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
   imChatWsUrl: "ws://127.0.0.1:9001/ws",
+  refreshTokenPersistence: "session_only",
 };
 
 describe("useChatConnection", () => {
@@ -74,17 +76,21 @@ describe("useChatConnection", () => {
     };
     const requestIdFactory = () => `req-${sockets.length}`;
     const refreshSession = vi.fn().mockResolvedValueOnce({
+      userId: 20001,
       accessToken: "new-access-token",
       refreshToken: "refresh-token",
       accessTokenExpiresAt: "2026-08-16T12:30:00+08:00",
       imChatWsUrl: "ws://127.0.0.1:9002/ws",
+      refreshTokenPersistence: "session_only",
     });
 
     const refreshedSession: AuthSession = {
+      userId: 20001,
       accessToken: "new-access-token",
       refreshToken: "refresh-token",
       accessTokenExpiresAt: "2026-08-16T12:30:00+08:00",
       imChatWsUrl: "ws://127.0.0.1:9002/ws",
+      refreshTokenPersistence: "session_only",
     };
     const { result, rerender } = renderHook(
       ({ session }) => useChatConnection({

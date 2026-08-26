@@ -14,10 +14,12 @@ vi.mock("../features/chat-connection/hooks/useChatConnection", () => ({
 }));
 
 const session = {
+  userId: 20001,
   accessToken: "jwt-access-token",
   refreshToken: "refresh-token",
   accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
   imChatWsUrl: "ws://127.0.0.1:9001/ws",
+  refreshTokenPersistence: "session_only" as const,
 };
 
 describe("AuthenticatedPage", () => {

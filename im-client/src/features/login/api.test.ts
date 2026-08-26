@@ -11,6 +11,7 @@ describe("authentication API", () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(
         JSON.stringify({
+          user_id: 20001,
           access_token: "jwt-access-token",
           refresh_token: "refresh-token",
           access_token_expires_at: "2026-08-16T12:15:00+08:00",
@@ -22,10 +23,12 @@ describe("authentication API", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(login("http://127.0.0.1:8080/", { account: "12345678", password: "secret" })).resolves.toEqual({
+      userId: 20001,
       accessToken: "jwt-access-token",
       refreshToken: "refresh-token",
       accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
       imChatWsUrl: "ws://127.0.0.1:9001/ws",
+      refreshTokenPersistence: "session_only",
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -47,6 +50,7 @@ describe("authentication API", () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(
         JSON.stringify({
+          user_id: 20001,
           access_token: "new-jwt-access-token",
           access_token_expires_at: "2026-08-16T12:30:00+08:00",
           im_chat_ws_url: "ws://127.0.0.1:9001/ws",
@@ -57,10 +61,12 @@ describe("authentication API", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(refresh("http://127.0.0.1:8080", "refresh-token")).resolves.toEqual({
+      userId: 20001,
       accessToken: "new-jwt-access-token",
       refreshToken: "refresh-token",
       accessTokenExpiresAt: "2026-08-16T12:30:00+08:00",
       imChatWsUrl: "ws://127.0.0.1:9001/ws",
+      refreshTokenPersistence: "session_only",
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
