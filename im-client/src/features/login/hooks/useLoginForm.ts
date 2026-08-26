@@ -1,11 +1,11 @@
 import { useState } from "react";
 
-import { AuthApiError, login } from "../api";
-import type { AuthSession } from "../types";
+import { AuthApiError } from "../api";
 
-export function useLoginForm(apiBaseUrl: string, onAuthenticated: (session: AuthSession) => void | Promise<void>) {
+export function useLoginForm(onPasswordLogin: (account: string, password: string, autoLogin: boolean) => void | Promise<void>) {
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
+  const [autoLogin, setAutoLogin] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -18,7 +18,7 @@ export function useLoginForm(apiBaseUrl: string, onAuthenticated: (session: Auth
     setErrorMessage(null);
     setIsSubmitting(true);
     try {
-      await onAuthenticated(await login(apiBaseUrl, { account, password }));
+      await onPasswordLogin(account, password, autoLogin);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -26,7 +26,7 @@ export function useLoginForm(apiBaseUrl: string, onAuthenticated: (session: Auth
     }
   };
 
-  return { account, password, errorMessage, isSubmitting, setAccount, setPassword, submit };
+  return { account, password, autoLogin, errorMessage, isSubmitting, setAccount, setPassword, setAutoLogin, submit };
 }
 
 function validateCredentials(account: string, password: string): string | null {

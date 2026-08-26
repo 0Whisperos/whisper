@@ -36,11 +36,19 @@ describe("LoginPage", () => {
   });
 
   it("renders the login content without the HTML preview window shell", () => {
-    // 测试目标：验证 Tauri 内容区只渲染登录主体，不再套用 HTML 预览页的假窗口外框。
-    // 构造方法：模拟 canvas 运行环境后渲染 LoginPage，并检查用户可见内容和壳层 class。
-    // 输入数据：无用户输入，只检查初始页面结构。
-    // 预期行为：登录表单和小游戏区域存在，`.client-window`、`.client-titlebar`、`.window-dot` 不存在。
-    const { container } = render(<LoginPage apiBaseUrl="http://127.0.0.1:8080" onAuthenticated={() => undefined} />);
+    // Test goal: verify the Tauri content area renders the login experience without the old preview window chrome.
+    // Construction: mock the canvas runtime, render LoginPage, and inspect user-visible content plus shell classes.
+    // Input data: no saved users and no user input.
+    // Expected behavior: the login form and game area exist while preview-window classes are absent.
+    const { container } = render(
+      <LoginPage
+        savedUsers={[]}
+        credentialWarning={null}
+        isLoadingSavedUsers={false}
+        onPasswordLogin={() => undefined}
+        onSavedUserLogin={() => undefined}
+      />,
+    );
 
     expect(screen.getByLabelText("小恐龙小游戏区域")).toBeInTheDocument();
     expect(screen.getByLabelText("账号")).toBeInTheDocument();

@@ -1,16 +1,40 @@
 import type { FormEvent, MouseEvent } from "react";
+import { useState } from "react";
 
+import { AuthApiError } from "../api";
 import { useLoginForm } from "../hooks/useLoginForm";
-import type { AuthSession } from "../types";
+import type { SavedUser } from "../types";
 
 interface LoginPanelProps {
-  apiBaseUrl: string;
-  onAuthenticated: (session: AuthSession) => void | Promise<void>;
+  savedUsers: SavedUser[];
+  credentialWarning: string | null;
+  isLoadingSavedUsers: boolean;
+  onPasswordLogin: (account: string, password: string, autoLogin: boolean) => void | Promise<void>;
+  onSavedUserLogin: (userId: number) => void | Promise<void>;
   onPauseGame: () => void;
 }
 
-export function LoginPanel({ apiBaseUrl, onAuthenticated, onPauseGame }: LoginPanelProps) {
-  const { account, password, errorMessage, isSubmitting, setAccount, setPassword, submit } = useLoginForm(apiBaseUrl, onAuthenticated);
+export function LoginPanel({
+  savedUsers,
+  credentialWarning,
+  isLoadingSavedUsers,
+  onPasswordLogin,
+  onSavedUserLogin,
+  onPauseGame,
+}: LoginPanelProps) {
+  const {
+    account,
+    password,
+    autoLogin,
+    errorMessage,
+    isSubmitting,
+    setAccount,
+    setPassword,
+    setAutoLogin,
+    submit,
+  } = useLoginForm(onPasswordLogin);
+  const [savedUserError, setSavedUserError] = useState<string | null>(null);
+  const [activeSavedUserId, setActiveSavedUserId] = useState<number | null>(null);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -21,6 +45,19 @@ export function LoginPanel({ apiBaseUrl, onAuthenticated, onPauseGame }: LoginPa
   const handleForgotPassword = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     onPauseGame();
+  };
+
+  const handleSavedUserLogin = async (user: SavedUser) => {
+    onPauseGame();
+    setSavedUserError(null);
+    setActiveSavedUserId(user.userId);
+    try {
+      await onSavedUserLogin(user.userId);
+    } catch (error) {
+      setSavedUserError(toSavedUserErrorMessage(error));
+    } finally {
+      setActiveSavedUserId(null);
+    }
   };
 
   return (
@@ -68,17 +105,66 @@ export function LoginPanel({ apiBaseUrl, onAuthenticated, onPauseGame }: LoginPa
             />
           </div>
 
+          <label className="auto-login-toggle">
+            <input
+              type="checkbox"
+              checked={autoLogin}
+              onChange={(event) => setAutoLogin(event.target.checked)}
+            />
+            <span>自动登录</span>
+          </label>
+
           <div className="form-actions">
             <a className="forgot-link" href="#" data-forgot-link onClick={handleForgotPassword}>
               忘记密码
             </a>
             <button className="login-button" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "登录中" : "登录"}
+              {isSubmitting ? "登录中..." : "登录"}
             </button>
           </div>
+          {credentialWarning ? <p className="login-warning" role="status">{credentialWarning}</p> : null}
           {errorMessage ? <p className="login-error" role="alert">{errorMessage}</p> : null}
         </form>
+
+        <div className="saved-users" aria-label="已保存用户">
+          <div className="saved-users-title">已保存用户</div>
+          {isLoadingSavedUsers ? <p className="saved-users-empty">正在读取...</p> : null}
+          {!isLoadingSavedUsers && savedUsers.length === 0 ? <p className="saved-users-empty">暂无已保存用户</p> : null}
+          {!isLoadingSavedUsers && savedUsers.length > 0 ? (
+            <div className="saved-user-list">
+              {savedUsers.map((user) => (
+                <button
+                  className="saved-user-button"
+                  type="button"
+                  key={user.userId}
+                  disabled={activeSavedUserId !== null}
+                  onClick={() => void handleSavedUserLogin(user)}
+                >
+                  {activeSavedUserId === user.userId ? "登录中..." : user.account}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {savedUserError ? <p className="login-error" role="alert">{savedUserError}</p> : null}
+        </div>
       </div>
     </section>
   );
+}
+
+function toSavedUserErrorMessage(error: unknown): string {
+  if (error instanceof AuthApiError) {
+    switch (error.code) {
+      case "invalid_refresh_token":
+      case "refresh_token_expired":
+        return "保存的登录已失效，请重新输入账号密码。";
+      case "network_error":
+        return "网络连接失败，请检查服务是否启动。";
+      case "no_available_chat_node":
+        return "当前没有可用的聊天服务，请稍后重试。";
+      default:
+        return "保存用户登录失败，请重新输入账号密码。";
+    }
+  }
+  return "保存用户登录失败，请重新输入账号密码。";
 }
