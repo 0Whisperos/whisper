@@ -6,6 +6,7 @@ import (
 	"time"
 
 	authmodel "github.com/0Whisperos/whisper/im-server/internal/model/auth"
+	"github.com/0Whisperos/whisper/im-server/internal/model/entity"
 	authjwt "github.com/0Whisperos/whisper/im-server/internal/pkg/jwt"
 	"github.com/0Whisperos/whisper/im-server/internal/repository/mysql"
 	redisrepo "github.com/0Whisperos/whisper/im-server/internal/repository/redis"
@@ -13,6 +14,7 @@ import (
 )
 
 var refreshTokenTTL time.Duration
+var findUserByAccount = mysql.FindUserByAccount
 
 func SetTokenConfig(secret []byte, accessTTL time.Duration, refreshTTL time.Duration) {
 	authjwt.Configure(secret, accessTTL)
@@ -20,39 +22,43 @@ func SetTokenConfig(secret []byte, accessTTL time.Duration, refreshTTL time.Dura
 }
 
 func Login(account string, password string) (authmodel.AuthResult, error) {
-	if err := ValidateCredentials(account, password); err != nil {
-		return authmodel.AuthResult{}, ErrInvalidRequest
-	}
-	user, found, err := mysql.FindUserByAccount(account)
+	user, err := authenticateUser(account, password)
 	if err != nil {
 		return authmodel.AuthResult{}, err
 	}
+	if err := redisrepo.DeleteRefreshTokenByUser(user.ID); err != nil {
+		return authmodel.AuthResult{}, err
+	}
+	return issueLoginResult(user.ID)
+}
+
+func authenticateUser(account string, password string) (entity.User, error) {
+	if err := ValidateCredentials(account, password); err != nil {
+		return entity.User{}, ErrInvalidRequest
+	}
+	user, found, err := findUserByAccount(account)
+	if err != nil {
+		return entity.User{}, err
+	}
 	if !found {
-		return authmodel.AuthResult{}, ErrInvalidCredentials
+		return entity.User{}, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-			return authmodel.AuthResult{}, ErrInvalidCredentials
+			return entity.User{}, ErrInvalidCredentials
 		}
-		return authmodel.AuthResult{}, fmt.Errorf("compare password hash: %v", err)
+		return entity.User{}, fmt.Errorf("compare password hash: %v", err)
 	}
+	return user, nil
+}
 
+func issueLoginResult(userID uint64) (authmodel.AuthResult, error) {
 	refreshToken, err := generateRefreshToken()
 	if err != nil {
 		return authmodel.AuthResult{}, fmt.Errorf("generate refresh token: %w", err)
 	}
 	now := time.Now()
-	refreshRecord := authmodel.RefreshTokenRecord{
-		TokenHash: hashRefreshToken(refreshToken),
-		UserID:    user.ID,
-		IssuedAt:  now,
-		ExpiresAt: now.Add(refreshTokenTTL),
-	}
-	if err := redisrepo.SaveRefreshToken(refreshRecord, refreshTokenTTL); err != nil {
-		return authmodel.AuthResult{}, err
-	}
-
-	result, err := issueAccessResult(user.ID, now)
+	result, err := issueAccessResult(userID, now)
 	if err != nil {
 		return authmodel.AuthResult{}, err
 	}
@@ -62,6 +68,15 @@ func Login(account string, password string) (authmodel.AuthResult, error) {
 	}
 	if !found {
 		return authmodel.AuthResult{}, ErrNoAvailableChatNode
+	}
+	refreshRecord := authmodel.RefreshTokenRecord{
+		TokenHash: hashRefreshToken(refreshToken),
+		UserID:    userID,
+		IssuedAt:  now,
+		ExpiresAt: now.Add(refreshTokenTTL),
+	}
+	if err := redisrepo.SaveRefreshToken(refreshRecord, refreshTokenTTL); err != nil {
+		return authmodel.AuthResult{}, err
 	}
 	result.RefreshToken = refreshToken
 	result.IMChatWSURL = chatNode.PublicWSURL
@@ -126,6 +141,7 @@ func issueAccessResult(userID uint64, now time.Time) (authmodel.AuthResult, erro
 		return authmodel.AuthResult{}, err
 	}
 	return authmodel.AuthResult{
+		UserID:               userID,
 		AccessToken:          accessToken,
 		AccessTokenExpiresAt: expiresAt,
 	}, nil
