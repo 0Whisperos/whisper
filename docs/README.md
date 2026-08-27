@@ -39,6 +39,7 @@ refresh_token
 
 WebSocket 在线状态
   表示用户当前是否有一条活着的 im-chat 连接。
+  im-chat 只有持续收到客户端 WebSocket heartbeat 时，才继续维护 Redis presence。
   它不等于登录凭证，也不决定 refresh_token 是否有效。
 ```
 
@@ -83,7 +84,7 @@ refresh_token
 ```text
 关闭客户端 / 断网 / 崩溃
   只代表 WebSocket 离线。
-  im-chat 清理本机连接状态和 Redis presence。
+  im-chat 通过连接断开或客户端 heartbeat 超时清理本机连接状态和 Redis presence。
   不删除 refresh_token，下次仍可免登录。
 
 主动退出登录
@@ -114,6 +115,7 @@ TTL = 30s
   -> 发送 auth 消息，携带 JWT access_token
   -> im-chat 校验 JWT 签名、过期时间和用户身份
   -> 校验通过：创建 ActiveConnection，并写入 ConnectionRegistry / Redis presence
+  -> 客户端开始每 10s 发送 heartbeat，im-chat 基于该心跳继续刷新 Redis presence
   -> 校验失败：返回 auth_failed 或关闭连接
 ```
 
@@ -145,6 +147,20 @@ WebSocket 认证消息示例：
 }
 ```
 
+认证成功后，客户端应开始发送业务心跳：
+
+```json
+{
+  "type": "heartbeat",
+  "request_id": "req-uuid",
+  "payload": {
+    "sent_at": "2026-08-14T10:15:01.000Z"
+  }
+}
+```
+
+`im-chat` 收到后回复 `heartbeat_ok`，并记录当前连接最近一次客户端心跳时间。客户端建议每 10s 发送一次；如果 `im-chat` 超过 30s 未收到心跳，就停止刷新 Redis presence 并清理连接。
+
 认证失败时，`im-chat` 可以回复 `auth_failed` 后关闭连接。若失败原因是 access_token 过期，客户端再调用 `im-api /v1/auth/refresh`。
 
 当前阶段按单用户单连接语义实现，`im-chat` 本机连接表可以简化为：
@@ -169,12 +185,14 @@ WebSocket 认证成功后，`im-chat` 同步写入 Redis presence：
 presence:user:{user_id} -> {
   node_id,
   connection_id,
-  connected_at
+  connected_at,
+  last_heartbeat_at,
+  access_token_expires_at
 }
 TTL = 30s
 ```
 
-连接存活期间定期刷新 presence TTL，连接断开时主动删除。当前单节点阶段，presence 查询结果通常指向当前 `im-chat`；若后续出现 `presence.node_id != current_node_id`，再通过 RPC 转发到目标节点。
+连接存活期间，`im-chat` 每 10s 尝试刷新 presence TTL；刷新前必须确认最近 30s 内收到过客户端 `heartbeat`，并且 Redis 中的 `connection_id` 仍然匹配当前连接。连接断开或客户端心跳超时时主动清理。当前单节点阶段，presence 查询结果通常指向当前 `im-chat`；若后续出现 `presence.node_id != current_node_id`，再通过 RPC 转发到目标节点。
 
 ### 2.2 事务外校验
 
@@ -840,7 +858,8 @@ ConnectionRegistry
   本机内存连接表，结构为 user_id -> ActiveConnection。
 
 Redis presence
-  用户在线路由表，结构为 presence:user:{user_id} -> node_id / connection_id / connected_at。
+  用户在线路由表，结构为 presence:user:{user_id} -> node_id / connection_id / connected_at / last_heartbeat_at / access_token_expires_at。
+  该 key 由 im-chat 在最近 30s 内收到客户端 heartbeat 且 connection_id 匹配时续期。
 ```
 
 `ActiveConnection` 保存真实 WebSocket 发送句柄：
@@ -866,7 +885,7 @@ ActiveConnection
 6. 如果 presence 不存在，说明该用户当前离线，本次实时投递跳过该用户，不推进 `delivered_seq`。
 7. 如果 `presence.node_id == current_node_id`，从本机 `ConnectionRegistry` 按 `member_user_id` 查询 `ActiveConnection`。
 8. 如果本机连接存在，且 `ActiveConnection.connection_id == presence.connection_id`，通过 `ActiveConnection.sender` 推送 `message_created`。
-9. 如果本机连接不存在，或 connection_id 不一致，说明 presence 可能已经过期或连接刚发生重连。本次实时投递可视为未送达，并删除该 presence 或等待 TTL 自动过期。
+9. 如果本机连接不存在，或 connection_id 不一致，说明 presence 可能已经过期或连接刚发生重连。本次实时投递可视为未送达；若实现主动删除 stale presence，也必须先校验 Redis 中的 `connection_id` 仍等于待删除的旧连接 ID，否则等待 TTL 自动过期。
 10. 如果 `presence.node_id != current_node_id`，当前阶段不做跨节点转发，先保留 `TODO: 后续通过 RPC 转发到目标 im-chat 节点`。
 11. 当前事件的投递决策完成后，再提交 Kafka offset。
 

@@ -262,7 +262,7 @@ Redis refresh token value 第一阶段不包含 `token_id` 和 `rotated_from`。
 | `connection_id` | `string` | 是 | 当前 WebSocket 连接 ID，用于区分快速重连前后的新旧连接。 |
 | `access_token_expires_at` | `string` | 是 | 当前 WebSocket 连接使用的 access token 过期时间，使用 GB/T 7408 扩展格式。 |
 
-认证成功后，`im-chat` 写入本机 `ConnectionRegistry` 和 Redis presence。Redis presence 字段和 TTL 规则见 `docs/redis-routing-presence.md`。
+认证成功后，`im-chat` 写入本机 `ConnectionRegistry` 和 Redis presence。客户端应开始每 10s 发送 WebSocket `heartbeat`，`im-chat` 只有在最近 30s 内收到该连接心跳时才继续刷新 Redis presence。Redis presence 字段和 TTL 规则见 `docs/redis-routing-presence.md`，心跳帧结构见 `docs/message-ack-protocol.md`。
 
 ## WebSocket `auth_failed`
 
@@ -298,7 +298,7 @@ Redis refresh token value 第一阶段不包含 `token_id` 和 `rotated_from`。
 | `/v1/auth/refresh` 成功 | 签发新的短期 JWT | 保持原 token，不轮换、不删除 | 不自动在线，客户端仍需连接或重连 WebSocket |
 | `/v1/auth/logout` 成功 | 客户端删除本地 token | 服务端删除 Redis 主记录，并在匹配时删除用户索引；客户端删除本地 token | 客户端应关闭 WebSocket；presence 由连接断开流程清理 |
 | 关闭客户端 | 本地可清理内存中的 access token | 不删除 | WebSocket 离线，presence 清理或 TTL 过期 |
-| 断网或崩溃 | access token 可能仍未过期，但不可用 | 不删除 | presence 依赖连接清理或 TTL 过期 |
+| 断网或崩溃 | access token 可能仍未过期，但不可用 | 不删除 | 客户端 heartbeat 超时后清理连接，或依赖 presence TTL 过期 |
 | `access_token` 过期 | 失效 | 不受影响 | 连接侧按认证策略处理，客户端可 refresh 后重连 |
 | Redis TTL 到期 | 不直接影响现有 access token | 失效 | 不影响 presence |
 
@@ -354,5 +354,6 @@ HTTP 边界不返回内部错误细节。客户端业务分支依赖稳定错误
 - JWT claims 不包含 `jti`。
 - Redis refresh token value 不包含 `token_id` 和 `rotated_from`。
 - WebSocket `auth` 成功返回 `auth_ok`，失败返回 `auth_failed` 并关闭连接。
+- WebSocket `auth_ok` 后客户端应开始发送 `heartbeat`，连接侧 presence 续期依赖该心跳。
 - WebSocket 在线状态和 refresh token 有效性互不等价。
 - 所有时间文本使用 GB/T 7408 扩展格式。

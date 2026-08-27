@@ -19,7 +19,7 @@
 - Redis 中的路由和在线状态都是软状态。key 不存在时，系统必须能按“节点不可用”或“用户离线”处理。
 - Redis presence 不表示消息已送达，也不表示用户已读。送达和已读事实由 MySQL `conversation_member_cursors` 保存。
 - `refresh_token` 的有效性不表示 WebSocket 在线。它只表示客户端可以尝试换取新的 `access_token`。
-- `chat_nodes` 和 `presence` 的 TTL 均为 30s，刷新间隔为 10s。
+- `chat_nodes` 和 `presence` 的 TTL 均为 30s，刷新间隔为 10s；presence 刷新前必须确认当前连接最近 30s 内收到过客户端 `heartbeat`。
 - Redis value 中的时间文本使用 GB/T 7408 扩展格式，包含日期、时间和时区偏移。
 - 第一阶段保持单用户单连接语义。同一用户的新连接会覆盖旧连接的 presence。
 - 涉及 `connection_id` 的 presence 续期和删除必须做条件校验，避免旧连接的迟到清理影响新连接。
@@ -103,8 +103,8 @@ Owner: im-chat
 TTL: 30s
 Refresh interval: 10s
 Create: WebSocket auth 成功后写入
-Refresh: 连接存活期间每 10s 刷新字段和 TTL
-Delete: WebSocket 断开且 connection_id 匹配时删除；异常断开依赖 TTL 自动过期
+Refresh: 连接存活且最近 30s 内收到客户端 heartbeat 时，每 10s 刷新字段和 TTL
+Delete: WebSocket 断开、客户端 heartbeat 超时，且 connection_id 匹配时删除；异常断开依赖 TTL 自动过期
 ```
 
 ### 字段说明
@@ -142,16 +142,27 @@ EXPIRE presence:user:20001 30
 5. 写入 `presence:user:{user_id}` 并设置 30s TTL。
 6. 同一用户新连接覆盖旧 presence，符合第一阶段单用户单连接语义。
 
-### 续期规则
+### 客户端心跳与续期规则
 
-presence 续期必须确认当前 Redis 中的 `connection_id` 仍等于本连接 ID。
+`presence:user:{user_id}` 的续期由 `im-chat` 定时执行，但它不是无条件刷新。认证成功后，客户端应每 10s 通过 WebSocket 发送 `heartbeat`，`im-chat` 记录当前连接最近一次收到客户端心跳的时间。
 
-如果一致：
+每次 presence 续期前必须同时满足两个条件：
+
+1. 当前连接最近 30s 内收到过客户端 `heartbeat`。
+2. Redis 中的 `connection_id` 仍等于本连接 ID。
+
+如果两个条件都满足：
 
 - 更新 `last_heartbeat_at`。
 - 续期 `presence:user:{user_id}` 到 30s。
 
-如果不一致：
+如果客户端 `heartbeat` 超过 30s 未到达：
+
+- 不刷新 TTL。
+- 当前连接应停止维护 presence，并进入本机连接清理流程。
+- 如果 Redis 中的 `connection_id` 仍匹配，本机清理流程会删除 `presence:user:{user_id}`；否则不影响新连接。
+
+如果 Redis `connection_id` 不一致：
 
 - 不刷新 TTL。
 - 不覆盖 Redis 中的新 presence。
@@ -223,7 +234,7 @@ Kafka Consumer 处理 `message_created` 事件时：
 | 场景 | 处理 |
 | --- | --- |
 | `im-chat` 异常宕机 | `chat_nodes:{node_id}` 和该节点维护的 presence 依靠 TTL 自动过期。 |
-| 用户网络断开但服务端未立即收到 close | presence 依靠 TTL 自动过期，过期前可能短暂误判在线；WebSocket 推送失败时不推进 `delivered_seq`。 |
+| 用户网络断开但服务端未立即收到 close | `im-chat` 最多等待 30s 客户端 heartbeat 超时；超时后停止刷新 presence 并清理连接。异常情况下仍可依赖 TTL 自动过期。 |
 | 用户快速重连 | 新连接覆盖 `presence:user:{user_id}`；旧连接清理时因 `connection_id` 不匹配而不能删除新 presence。 |
 | Consumer 看到 presence 但本机无连接 | 视为 stale presence，本次不算送达，可删除或等待 TTL。 |
 | refresh token 仍有效但 presence 不存在 | 用户可免登录，但当前 WebSocket 离线。 |
@@ -234,6 +245,7 @@ Kafka Consumer 处理 `message_created` 事件时：
 - `chat_nodes:{node_id}` 使用 Hash，字段包括 `node_id`、`public_ws_url`、`rpc_addr`、`state`、`started_at`、`last_heartbeat_at`。
 - `presence:user:{user_id}` 使用 Hash，字段包括 `user_id`、`node_id`、`connection_id`、`connected_at`、`last_heartbeat_at`、`access_token_expires_at`。
 - `chat_nodes` 和 `presence` TTL 均为 30s，刷新间隔均为 10s。
+- presence 刷新前必须确认最近 30s 内收到客户端 `heartbeat`。
 - presence 续期必须校验 `connection_id`。
 - presence 删除必须校验 `connection_id`。
 - Redis presence 不能作为消息已送达或已读依据。

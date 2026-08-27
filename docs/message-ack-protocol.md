@@ -1,6 +1,6 @@
 # 消息与回执协议规范
 
-本文档定义 WebSocket 上的消息发送、服务端确认、实时推送、送达回执和已读回执协议。本文档只描述线协议和语义边界；Redis 路由与在线状态见 `docs/redis-routing-presence.md`，MySQL 表结构见 `docs/database-schema.md`。
+本文档定义 WebSocket 上的客户端心跳、消息发送、服务端确认、实时推送、送达回执和已读回执协议。本文档只描述线协议和语义边界；Redis 路由与在线状态见 `docs/redis-routing-presence.md`，MySQL 表结构见 `docs/database-schema.md`。
 
 ## 总体原则
 
@@ -8,6 +8,7 @@
 - 所有客户端请求都必须携带 `request_id`，服务端响应必须原样返回对应的 `request_id`。
 - 服务端主动推送可以不携带 `request_id`，因为它不是对某个客户端请求的直接响应。
 - 所有时间文本使用 GB/T 7408 扩展格式，包含日期、时间和时区偏移，例如 `2026-08-16T12:00:01.123+08:00`。
+- 客户端认证成功后应每 10s 发送 `heartbeat`。`heartbeat` 只用于维护 WebSocket 连接活性，不表示消息送达或已读。
 - 第一阶段只支持 `message_type = "text"`，消息内容使用 `{ "text": "..." }`。
 - `server_accepted` 只表示消息已经成功写入 MySQL，不表示 Kafka 已发布、对方已送达或用户已读。
 - `message_created` 表示服务端正式时间线出现该消息。发送方也会收到该推送，用于合并本地临时消息。
@@ -30,6 +31,44 @@
 | `type` | `string` | 是 | 帧类型。客户端和服务端根据该字段选择对应 payload 结构。 |
 | `request_id` | `string` | 客户端请求必填；服务端主动推送可省略 | 请求 ID。客户端请求携带后，服务端响应必须原样返回，用于客户端匹配请求和响应。 |
 | `payload` | `object` | 是 | 帧业务内容。不同 `type` 对应不同 payload 结构。 |
+
+## `heartbeat` 请求与响应
+
+`heartbeat` 是客户端到 `im-chat` 的业务心跳。认证成功后，客户端应每 10s 发送一次；`im-chat` 超过 30s 未收到该连接的 `heartbeat` 时，会停止刷新 Redis presence 并清理连接。
+
+### `heartbeat` 请求
+
+```json
+{
+  "type": "heartbeat",
+  "request_id": "req-uuid",
+  "payload": {
+    "sent_at": "2026-08-16T12:00:00.000+08:00"
+  }
+}
+```
+
+| 字段名 | 类型 | 是否必填 | 字段含义 |
+| --- | --- | --- | --- |
+| `sent_at` | `string` | 是 | 客户端发送心跳的时间，使用 GB/T 7408 扩展格式。该字段用于排查和延迟观察，不作为服务端排序依据。 |
+
+### `heartbeat_ok` 响应
+
+```json
+{
+  "type": "heartbeat_ok",
+  "request_id": "req-uuid",
+  "payload": {
+    "sent_at": "2026-08-16T12:00:00.100+08:00"
+  }
+}
+```
+
+| 字段名 | 类型 | 是否必填 | 字段含义 |
+| --- | --- | --- | --- |
+| `sent_at` | `string` | 是 | `im-chat` 发送心跳响应的时间，使用 GB/T 7408 扩展格式。 |
+
+`heartbeat_ok` 只表示 `im-chat` 收到了该次心跳并完成响应写入，不表示 Redis presence 已经刷新，也不表示任何聊天消息已送达或已读。
 
 ## 共享对象定义
 
@@ -384,6 +423,7 @@
 
 - 所有客户端请求都携带 `request_id`。
 - 所有请求响应都原样返回 `request_id`。
+- `heartbeat` 成功返回 `heartbeat_ok`，且不承载消息送达或已读语义。
 - `send_message` 成功返回 `server_accepted`，失败返回 `send_message_rejected`。
 - `delivered_ack` 成功返回 `delivered_ack_accepted`，失败返回 `delivered_ack_rejected`。
 - `read_ack` 成功返回 `read_ack_accepted`，失败返回 `read_ack_rejected`。
