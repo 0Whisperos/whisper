@@ -24,6 +24,14 @@ export interface ChatAuthFrame {
   };
 }
 
+export interface ChatHeartbeatFrame {
+  type: "heartbeat";
+  request_id: string;
+  payload: {
+    sent_at: string;
+  };
+}
+
 export interface ChatAuthOkFrame {
   type: "auth_ok";
   request_id: string;
@@ -43,7 +51,15 @@ export interface ChatAuthFailedFrame {
   };
 }
 
-export type ChatServerAuthFrame = ChatAuthOkFrame | ChatAuthFailedFrame;
+export interface ChatHeartbeatOkFrame {
+  type: "heartbeat_ok";
+  request_id: string;
+  payload: {
+    sent_at: string;
+  };
+}
+
+export type ChatServerFrame = ChatAuthOkFrame | ChatAuthFailedFrame | ChatHeartbeatOkFrame;
 
 export interface ChatConnectionOptions {
   session: AuthSession;

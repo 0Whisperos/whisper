@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useChatConnection } from "./useChatConnection";
 import type { AuthSession } from "../../login/types";
@@ -22,6 +22,11 @@ class MockWebSocket implements ChatWebSocket {
     this.onclose?.(new CloseEvent("close"));
   }
 
+  open(): void {
+    this.readyState = WebSocket.OPEN;
+    this.onopen?.(new Event("open"));
+  }
+
   receive(data: unknown): void {
     this.onmessage?.(new MessageEvent("message", { data }));
   }
@@ -37,6 +42,12 @@ const initialSession: AuthSession = {
 };
 
 describe("useChatConnection", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
   it("opens a WebSocket when a session is available and closes it on unmount", () => {
     // 测试目标：验证已登录 session 会触发聊天 WebSocket 连接，并在组件卸载时关闭。
     // 构造方法：渲染 hook，注入收集 socket 实例的 webSocketFactory。
@@ -145,5 +156,81 @@ describe("useChatConnection", () => {
 
     expect(refreshSession).not.toHaveBeenCalled();
     expect(result.current.state).toMatchObject({ status: "auth_failed", errorCode: "invalid_token" });
+  });
+
+  it("stops the old heartbeat and starts a new one after token refresh reconnects", async () => {
+    // 测试目标：验证 token 过期重连时旧 socket 的 heartbeat 停止，新 socket 认证后重新启动 heartbeat。
+    // 构造方法：先让第一条 socket 认证并启动心跳，再注入 token_expired，刷新 session 后重渲染并认证第二条 socket。
+    // 输入数据：旧连接收到 auth_failed token_expired，新 session 使用 new-access-token 和 ws://127.0.0.1:9002/ws。
+    // 预期行为：旧 socket 发送数量不再增长，新 socket 在 auth_ok 后发送 heartbeat。
+    vi.useFakeTimers();
+    const sockets: MockWebSocket[] = [];
+    let requestId = 0;
+    const webSocketFactory = () => {
+      const socket = new MockWebSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const requestIdFactory = () => `req-${requestId += 1}`;
+    const refreshedSession: AuthSession = {
+      userId: 20001,
+      accessToken: "new-access-token",
+      refreshToken: "refresh-token",
+      accessTokenExpiresAt: "2026-08-16T12:30:00+08:00",
+      imChatWsUrl: "ws://127.0.0.1:9002/ws",
+      refreshTokenPersistence: "session_only",
+    };
+    const refreshSession = vi.fn().mockResolvedValueOnce(refreshedSession);
+    const { rerender } = renderHook(
+      ({ session }) => useChatConnection({
+        session,
+        refreshSession,
+        webSocketFactory,
+        requestIdFactory,
+      }),
+      { initialProps: { session: initialSession } },
+    );
+
+    act(() => {
+      sockets[0].open();
+      sockets[0].receive(JSON.stringify({
+        type: "auth_ok",
+        request_id: "req-1",
+        payload: {
+          user_id: 20001,
+          connection_id: "old-connection",
+          access_token_expires_at: "2026-08-16T12:15:00+08:00",
+        },
+      }));
+    });
+    const oldSentCount = sockets[0].sent.length;
+
+    await act(async () => {
+      sockets[0].receive(JSON.stringify({
+        type: "auth_failed",
+        payload: { error_code: "token_expired", message: "access token expired" },
+      }));
+    });
+    rerender({ session: refreshedSession });
+    expect(sockets).toHaveLength(2);
+    act(() => {
+      sockets[1].open();
+      sockets[1].receive(JSON.stringify({
+        type: "auth_ok",
+        request_id: "req-3",
+        payload: {
+          user_id: 20001,
+          connection_id: "new-connection",
+          access_token_expires_at: "2026-08-16T12:30:00+08:00",
+        },
+      }));
+      vi.advanceTimersByTime(10_000);
+    });
+
+    expect(refreshSession).toHaveBeenCalled();
+    expect(sockets[0].sent).toHaveLength(oldSentCount);
+    expect(JSON.parse(sockets[1].sent[0]).payload.access_token).toBe("new-access-token");
+    expect(JSON.parse(sockets[1].sent[1])).toMatchObject({ type: "heartbeat" });
+    expect(JSON.parse(sockets[1].sent[2])).toMatchObject({ type: "heartbeat" });
   });
 });
