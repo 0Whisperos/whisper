@@ -26,14 +26,14 @@
 
 ### 2.1 鉴权模型、服务发现与连接状态
 
-鉴权模型采用“短期 JWT `access_token` + Redis `refresh_token`”。登录、免登录和 WebSocket 在线状态需要分开理解：
+鉴权模型采用“短期 JWT `access_token` + Redis `refresh_token`”。登录、已保存账号登录和 WebSocket 在线状态需要分开理解：
 
 ```text
 access_token
   短期 JWT。用于认证 API 请求和 WebSocket 连接。
 
 refresh_token
-  长期随机 token。用于免输入账号密码刷新 access_token。
+  长期随机 token。用于已保存账号登录和 access token 续期。
   服务端只保存 refresh_token hash，并通过 Redis TTL 控制有效期。
   当前认证实现按单用户单 refresh token 处理，同一用户重新账号密码登录会替换旧 token。
 
@@ -51,9 +51,10 @@ WebSocket 在线状态
   -> im-api 删除同用户旧 refresh_token 主记录和用户索引
   -> im-api 签发短期 JWT access_token
   -> im-api 生成长期 refresh_token
+  -> im-api 查询 Redis service registry，选择一个可用 im-chat 节点
+  -> 如果没有可用 im-chat 节点，返回 no_available_chat_node，且不返回新 token
   -> im-api 将 refresh_token hash 写入 Redis，并设置 TTL
   -> im-api 写入 refresh_token_by_user:{user_id}，记录当前用户最新 refresh token hash
-  -> im-api 查询 Redis service registry，选择一个可用 im-chat 节点
   -> im-api 返回 user_id、access_token、refresh_token、access_token 过期时间和 im-chat WebSocket 地址
 ```
 
@@ -64,14 +65,17 @@ access_token
   可放在内存中，过期后通过 refresh_token 换新。
 
 refresh_token
-  需要持久化到客户端本地安全存储，用于下次启动免登录。
+  如果用户选择自动登录，则持久化到客户端本地安全存储，用于后续已保存账号登录。
+  如果用户不选择自动登录，则不持久化，只作为 session_only 凭据由当前运行时会话持有。
   客户端不会直接查询 Redis，Redis 只由服务端访问。
 ```
 
-客户端启动后的免登录流程：
+客户端启动后的已保存账号登录流程：
 
 ```text
-客户端读取本地 refresh_token
+客户端加载本地已保存用户列表
+  -> 用户选择某个已保存账号
+  -> 客户端读取该用户本地 refresh_token
   -> 调用 im-api /v1/auth/refresh
   -> im-api 查询 Redis 中的 refresh_token hash
   -> refresh_token 有效：签发新的 access_token，并返回 user_id 和可用 im-chat 地址
@@ -82,10 +86,15 @@ refresh_token
 主动退出登录和关闭客户端需要区分：
 
 ```text
-关闭客户端 / 断网 / 崩溃
+关闭 session_only 客户端
+  客户端在关闭前 best-effort 调用 im-api /v1/auth/logout。
+  im-api 删除 Redis 中的 refresh_token hash，并在索引值匹配时删除 refresh_token_by_user:{user_id}。
+  WebSocket 断开后，im-chat 清理连接状态和 Redis presence。
+
+关闭已保存 token 的客户端 / 断网 / 崩溃
   只代表 WebSocket 离线。
   im-chat 通过连接断开或客户端 heartbeat 超时清理本机连接状态和 Redis presence。
-  不删除 refresh_token，下次仍可免登录。
+  不删除已保存 refresh_token，下次仍可通过已保存账号登录。
 
 主动退出登录
   客户端调用 im-api /v1/auth/logout。

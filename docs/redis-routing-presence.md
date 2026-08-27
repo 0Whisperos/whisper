@@ -18,7 +18,7 @@
 
 - Redis 中的路由和在线状态都是软状态。key 不存在时，系统必须能按“节点不可用”或“用户离线”处理。
 - Redis presence 不表示消息已送达，也不表示用户已读。送达和已读事实由 MySQL `conversation_member_cursors` 保存。
-- `refresh_token` 的有效性不表示 WebSocket 在线。它只表示客户端可以尝试换取新的 `access_token`。
+- `refresh_token` 的有效性不表示 WebSocket 在线。它只表示客户端可以尝试换取新的 `access_token`，或在用户选择已保存账号时尝试恢复会话。
 - `chat_nodes` 和 `presence` 的 TTL 均为 30s；`chat_nodes` 刷新间隔为 10s，presence 刷新间隔为 5s；presence 刷新前必须确认当前连接最近 30s 内收到过客户端 `heartbeat`。
 - Redis value 中的时间文本使用 GB/T 7408 扩展格式，包含日期、时间和时区偏移。
 - 第一阶段保持单用户单连接语义。同一用户的新连接会覆盖旧连接的 presence。
@@ -30,7 +30,7 @@
 | --- | --- | --- | --- | --- |
 | `chat_nodes:{node_id}` | Hash | `im-chat` | 30s | 保存 `im-chat` 节点注册信息，供 `im-api` 选择 WebSocket 连接地址。 |
 | `presence:user:{user_id}` | Hash | `im-chat` | 30s | 保存用户当前 WebSocket 在线路由，供 Kafka Consumer 投递在线消息。 |
-| `refresh_token:{token_hash}` | String | `im-api` | 由认证策略决定 | 保存 refresh token 的服务端有效性状态，用于免登录续期；不属于在线状态。 |
+| `refresh_token:{token_hash}` | String | `im-api` | 由认证策略决定 | 保存 refresh token 的服务端有效性状态，用于已保存账号登录和 access token 续期；不属于在线状态。 |
 | `refresh_token_by_user:{user_id}` | String | `im-api` | 与对应 refresh token 对齐 | 保存当前用户最新 refresh token hash，用于登录替换和 logout 清理；不属于在线状态。 |
 
 ## `chat_nodes:{node_id}`
@@ -189,27 +189,28 @@ else
 
 ### 用途边界
 
-`refresh_token:{token_hash}` 保存 refresh token 的服务端有效性状态，用于客户端免登录续期。`refresh_token_by_user:{user_id}` 保存当前用户最新 refresh token hash，用于同一用户重新账号密码登录时替换旧 token。二者都属于认证续期状态，不属于在线状态。
+`refresh_token:{token_hash}` 保存 refresh token 的服务端有效性状态，用于已保存账号登录和 access token 续期。`refresh_token_by_user:{user_id}` 保存当前用户最新 refresh token hash，用于同一用户重新账号密码登录时替换旧 token。二者都属于认证续期状态，不属于在线状态。
 
 ```text
 Key: refresh_token:{token_hash}
 Owner: im-api
-Purpose: 免登录续期凭证
+Purpose: 已保存账号登录和 access token 续期凭证
 Not presence: refresh token 有效不代表 WebSocket 在线
 TTL: 由认证策略决定
-Delete: 主动退出登录时删除；自然过期依赖 TTL
+Delete: 主动退出登录、session_only 客户端关闭清理时删除；自然过期依赖 TTL
 
 Key: refresh_token_by_user:{user_id}
 Owner: im-api
 Purpose: 当前用户最新 refresh token hash 索引
 Not presence: 该索引存在不代表 WebSocket 在线
 TTL: 与对应 refresh_token:{token_hash} 对齐
-Delete: 同一用户重新登录替换时删除旧索引；主动退出登录且索引值匹配时删除；自然过期依赖 TTL
+Delete: 同一用户重新登录替换时删除旧索引；主动退出登录或 session_only 客户端关闭清理且索引值匹配时删除；自然过期依赖 TTL
 ```
 
 ### 边界规则
 
-- 客户端关闭、断网或崩溃只表示 WebSocket 离线，不删除 refresh token。
+- 关闭 `session_only` 客户端时，客户端会 best-effort 调用 `/v1/auth/logout` 清理服务端 refresh token。
+- 关闭已保存 token 的客户端、断网或崩溃只表示 WebSocket 离线，不删除已保存 refresh token。
 - 同一用户重新账号密码登录成功时，`im-api` 删除旧 refresh token，并写入新的 `refresh_token:{token_hash}` 与 `refresh_token_by_user:{user_id}`。
 - 主动退出登录时，`im-api` 删除 refresh token，并在索引值仍匹配该 token 时删除 `refresh_token_by_user:{user_id}`；客户端删除本地 access token 和 refresh token。
 - refresh token 有效时，客户端可以调用 `/v1/auth/refresh` 换取新的 access token，并重新获取可用 `im-chat` 地址。
@@ -237,7 +238,7 @@ Kafka Consumer 处理 `message_created` 事件时：
 | 用户网络断开但服务端未立即收到 close | `im-chat` 最多等待 30s 客户端 heartbeat 超时；超时后停止刷新 presence 并清理连接。异常情况下仍可依赖 TTL 自动过期。 |
 | 用户快速重连 | 新连接覆盖 `presence:user:{user_id}`；旧连接清理时因 `connection_id` 不匹配而不能删除新 presence。 |
 | Consumer 看到 presence 但本机无连接 | 视为 stale presence，本次不算送达，可删除或等待 TTL。 |
-| refresh token 仍有效但 presence 不存在 | 用户可免登录，但当前 WebSocket 离线。 |
+| refresh token 仍有效但 presence 不存在 | 用户可通过已保存账号登录或刷新 access token，但当前 WebSocket 离线。 |
 | presence 存在但 refresh token 已删除 | 当前 WebSocket 连接是否继续有效由 access token 过期时间决定；refresh token 删除不等于立即删除 presence。 |
 
 ## 实现检查清单
