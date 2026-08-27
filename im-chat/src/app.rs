@@ -42,7 +42,7 @@ pub async fn run() -> Result<()> {
     )
     .await
     .map_err(|source| Error::Redis { source })?;
-    let _heartbeat_handle = heartbeat::spawn(presence.clone(), config.node_config.node_id.clone()).await;
+    let _heartbeat_handle = heartbeat::node::spawn(presence.clone(), config.node_config.node_id.clone()).await;
     axum::serve(listener, app).await.map_err(|source| Error::Serve { source })?;
     Ok(())
 }
