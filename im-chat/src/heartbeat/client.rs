@@ -9,7 +9,7 @@ use tokio::time::{Instant, Interval};
 pub(crate) const HEARTBEAT: &str = "heartbeat";
 pub(crate) const HEARTBEAT_OK: &str = "heartbeat_ok";
 
-const PRESENCE_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+const PRESENCE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -252,13 +252,27 @@ mod tests {
     async fn presence_refresh_waits_for_first_client_heartbeat() {
         // 测试目标：验证未收到首个客户端心跳时，服务端不会刷新 Redis presence。
         // 构造方法：创建 ClientHeartbeat，并在未调用 mark_received 的情况下检查刷新资格。
-        // 输入数据：初始时间 now，检查时间 now + 10s。
+        // 输入数据：初始时间 now，检查时间 now + 5s。
         // 预期行为：can_refresh_presence 返回 false，避免未收到 heartbeat 也续期在线状态。
         let now = Instant::now();
         let (sender, _receiver) = mpsc::channel(1);
         let heartbeat = ClientHeartbeat::new(now, sender, 20001, "connection-1".to_string());
 
-        assert!(!heartbeat.can_refresh_presence(now + Duration::from_secs(10)));
+        assert!(!heartbeat.can_refresh_presence(now + Duration::from_secs(5)));
+    }
+
+    #[tokio::test]
+    async fn presence_refresh_ticker_uses_five_second_interval() {
+        // 测试目标：验证服务端 presence 刷新 ticker 使用 5s 间隔，避免与客户端 10s heartbeat 同频贴边。
+        // 构造方法：创建 ClientHeartbeat，并直接检查内部 refresh_ticker 的周期配置。
+        // 输入数据：初始时间 now，连接用户 20001，connection_id="connection-1"。
+        // 预期行为：refresh_ticker.period 返回 5s，客户端 30s 超时窗口不被缩短。
+        let now = Instant::now();
+        let (sender, _receiver) = mpsc::channel(1);
+        let heartbeat = ClientHeartbeat::new(now, sender, 20001, "connection-1".to_string());
+
+        assert_eq!(heartbeat.refresh_ticker.period(), Duration::from_secs(5));
+        assert!(!heartbeat.is_expired(now + Duration::from_secs(29)));
     }
 
     #[tokio::test]

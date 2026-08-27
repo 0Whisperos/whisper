@@ -19,7 +19,7 @@
 - Redis 中的路由和在线状态都是软状态。key 不存在时，系统必须能按“节点不可用”或“用户离线”处理。
 - Redis presence 不表示消息已送达，也不表示用户已读。送达和已读事实由 MySQL `conversation_member_cursors` 保存。
 - `refresh_token` 的有效性不表示 WebSocket 在线。它只表示客户端可以尝试换取新的 `access_token`。
-- `chat_nodes` 和 `presence` 的 TTL 均为 30s，刷新间隔为 10s；presence 刷新前必须确认当前连接最近 30s 内收到过客户端 `heartbeat`。
+- `chat_nodes` 和 `presence` 的 TTL 均为 30s；`chat_nodes` 刷新间隔为 10s，presence 刷新间隔为 5s；presence 刷新前必须确认当前连接最近 30s 内收到过客户端 `heartbeat`。
 - Redis value 中的时间文本使用 GB/T 7408 扩展格式，包含日期、时间和时区偏移。
 - 第一阶段保持单用户单连接语义。同一用户的新连接会覆盖旧连接的 presence。
 - 涉及 `connection_id` 的 presence 续期和删除必须做条件校验，避免旧连接的迟到清理影响新连接。
@@ -101,9 +101,9 @@ Key: presence:user:{user_id}
 Type: Hash
 Owner: im-chat
 TTL: 30s
-Refresh interval: 10s
+Refresh interval: 5s
 Create: WebSocket auth 成功后写入
-Refresh: 连接存活且最近 30s 内收到客户端 heartbeat 时，每 10s 刷新字段和 TTL
+Refresh: 连接存活且最近 30s 内收到客户端 heartbeat 时，每 5s 刷新字段和 TTL
 Delete: WebSocket 断开、客户端 heartbeat 超时，且 connection_id 匹配时删除；异常断开依赖 TTL 自动过期
 ```
 
@@ -144,7 +144,7 @@ EXPIRE presence:user:20001 30
 
 ### 客户端心跳与续期规则
 
-`presence:user:{user_id}` 的续期由 `im-chat` 定时执行，但它不是无条件刷新。认证成功后，客户端应每 10s 通过 WebSocket 发送 `heartbeat`，`im-chat` 记录当前连接最近一次收到客户端心跳的时间。
+`presence:user:{user_id}` 的续期由 `im-chat` 每 5s 定时执行，但它不是无条件刷新。认证成功后，客户端应每 10s 通过 WebSocket 发送 `heartbeat`，`im-chat` 记录当前连接最近一次收到客户端心跳的时间。
 
 每次 presence 续期前必须同时满足两个条件：
 
@@ -244,7 +244,7 @@ Kafka Consumer 处理 `message_created` 事件时：
 
 - `chat_nodes:{node_id}` 使用 Hash，字段包括 `node_id`、`public_ws_url`、`rpc_addr`、`state`、`started_at`、`last_heartbeat_at`。
 - `presence:user:{user_id}` 使用 Hash，字段包括 `user_id`、`node_id`、`connection_id`、`connected_at`、`last_heartbeat_at`、`access_token_expires_at`。
-- `chat_nodes` 和 `presence` TTL 均为 30s，刷新间隔均为 10s。
+- `chat_nodes` 和 `presence` TTL 均为 30s；`chat_nodes` 刷新间隔为 10s，presence 刷新间隔为 5s。
 - presence 刷新前必须确认最近 30s 内收到客户端 `heartbeat`。
 - presence 续期必须校验 `connection_id`。
 - presence 删除必须校验 `connection_id`。

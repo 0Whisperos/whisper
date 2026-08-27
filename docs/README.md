@@ -192,7 +192,7 @@ presence:user:{user_id} -> {
 TTL = 30s
 ```
 
-连接存活期间，`im-chat` 每 10s 尝试刷新 presence TTL；刷新前必须确认最近 30s 内收到过客户端 `heartbeat`，并且 Redis 中的 `connection_id` 仍然匹配当前连接。连接断开或客户端心跳超时时主动清理。当前单节点阶段，presence 查询结果通常指向当前 `im-chat`；若后续出现 `presence.node_id != current_node_id`，再通过 RPC 转发到目标节点。
+连接存活期间，`im-chat` 每 5s 尝试刷新 presence TTL；刷新前必须确认最近 30s 内收到过客户端 `heartbeat`，并且 Redis 中的 `connection_id` 仍然匹配当前连接。连接断开或客户端心跳超时时主动清理。当前单节点阶段，presence 查询结果通常指向当前 `im-chat`；若后续出现 `presence.node_id != current_node_id`，再通过 RPC 转发到目标节点。
 
 ### 2.2 事务外校验
 
