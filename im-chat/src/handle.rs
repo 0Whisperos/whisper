@@ -1,17 +1,18 @@
 use crate::auth;
 use crate::config::Config;
 use crate::connection::{ActiveConnection, ConnectionRegistry};
+use crate::frame;
+use crate::heartbeat::client::{self, ClientFrameHandleResult, ClientHeartbeat};
 use crate::presence::PresenceManager;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::Instant;
 
 const SOCKET_WRITE_QUEUE_BUFFER_SIZE: usize = 64;
-const PRESENCE_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 
 pub(crate) async fn handle_socket(
     socket: WebSocket,
@@ -38,7 +39,7 @@ pub(crate) async fn handle_socket(
         user_id,
         &connection_id,
         access_token_expires_at,
-        write_tx,
+        write_tx.clone(),
     );
 
     if let Err(error) = presence
@@ -72,6 +73,7 @@ pub(crate) async fn handle_socket(
         user_id,
         &connection_id,
         access_token_expires_at,
+        write_tx,
         presence.clone(),
     )
     .await;
@@ -145,30 +147,17 @@ async fn run_connection_loop(
     user_id: u64,
     connection_id: &str,
     access_token_expires_at: OffsetDateTime,
+    write_tx: mpsc::Sender<Message>,
     presence: Arc<PresenceManager>,
 ) {
     // TODO: 当前循环先搭建连接生命周期骨架，后续补充 token 刷新通知、客户端消息分发和关闭原因。
-    let mut presence_refresh = tokio::time::interval(PRESENCE_REFRESH_INTERVAL);
-    presence_refresh.tick().await;
+    let mut client_heartbeat =
+        ClientHeartbeat::new(Instant::now(), write_tx, user_id, connection_id.to_string());
     loop {
         tokio::select! {
-            _ = presence_refresh.tick() => {
-                match presence.refresh_presence(user_id, connection_id).await {
-                    Ok(true) => {
-                        tracing::debug!(user_id, %connection_id, "presence refreshed");
-                    }
-                    Ok(false) => {
-                        tracing::debug!(
-                            user_id,
-                            %connection_id,
-                            "stop websocket connection: presence connection_id mismatch or key missing"
-                        );
-                        break;
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, user_id, %connection_id, "failed to refresh presence");
-                        break;
-                    }
+            should_continue = client_heartbeat.refresh_presence(presence.as_ref()) => {
+                if !should_continue {
+                    break;
                 }
             }
             _ = sleep_until(access_token_expires_at) => {
@@ -185,8 +174,23 @@ async fn run_connection_loop(
                 };
                 match result {
                     Ok(Message::Close(_)) => break,
-                    Ok(Message::Text(_)) | Ok(Message::Binary(_)) => {
-                        tracing::debug!(user_id, %connection_id, "received websocket frame after authentication");
+                    Ok(Message::Text(text)) => {
+                        if !handle_client_frame(
+                            text.as_str().as_bytes(),
+                            &mut client_heartbeat,
+                            user_id,
+                            connection_id,
+                        ).await {
+                            break;
+                        }
+                    }
+                    Ok(Message::Binary(bytes)) => {
+                        tracing::debug!(
+                            user_id,
+                            %connection_id,
+                            bytes_len = bytes.len(),
+                            "ignore binary websocket frame after authentication"
+                        );
                     }
                     Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
                     Err(error) => {
@@ -195,6 +199,45 @@ async fn run_connection_loop(
                     }
                 }
             }
+        }
+    }
+}
+
+async fn handle_client_frame(
+    bytes: &[u8],
+    client_heartbeat: &mut ClientHeartbeat,
+    user_id: u64,
+    connection_id: &str,
+) -> bool {
+    let raw_frame: frame::Frame<serde_json::Value> = match serde_json::from_slice(bytes) {
+        Ok(frame) => frame,
+        Err(error) => {
+            tracing::debug!(
+                %error,
+                user_id,
+                %connection_id,
+                "ignore invalid websocket frame after authentication"
+            );
+            return true;
+        }
+    };
+
+    let frame_type = raw_frame.frame_type.clone();
+    match frame_type.as_str() {
+        client::HEARTBEAT => {
+            matches!(
+                client_heartbeat.handle_frame(raw_frame).await,
+                ClientFrameHandleResult::Continue
+            )
+        }
+        frame_type => {
+            tracing::debug!(
+                user_id,
+                %connection_id,
+                %frame_type,
+                "ignore unsupported websocket frame after authentication"
+            );
+            true
         }
     }
 }
