@@ -19,6 +19,7 @@
 | 表名 | 用途 |
 | --- | --- |
 | `users` | 保存账号凭证，并作为聊天相关表中 `user_id` 的来源。 |
+| `friendships` | 保存用户之间的好友关系事实。 |
 | `conversations` | 保存会话主记录和该会话当前已分配的最大消息序号。 |
 | `conversation_members` | 保存会话成员关系和成员状态。 |
 | `messages` | 保存正式聊天消息，是聊天历史的事实来源。 |
@@ -56,6 +57,41 @@ CREATE TABLE users (
 | `avatar_object_key` | `VARCHAR(255)` | 是 | `NULL` | 无 | 用户头像在 OSS Bucket 内的对象 key，例如 `avatars/users/20001/<uuid>.webp`。该字段不保存完整 URL 或签名 URL；后续 API 根据 OSS、CDN 或签名策略生成客户端可访问的头像地址。 |
 | `created_at` | `DATETIME(6)` | 否 | 无 | 无 | 用户记录创建时间。数据库保存时间值；系统边界输出时使用 GB/T 7408 扩展格式。 |
 | `updated_at` | `DATETIME(6)` | 否 | 无 | 无 | 用户记录最后更新时间。数据库保存时间值；系统边界输出时使用 GB/T 7408 扩展格式。 |
+
+## `friendships`
+
+### 表用途
+
+`friendships` 保存用户之间已经建立的好友关系。第一阶段只需要支持 `active` 状态，用于让种子账号具备真实的好友关系事实；好友申请、同意、删除、拉黑、备注和好友列表 API 后续单独设计。
+
+好友关系不替代 `conversation_members`。后续发送消息时，仍然使用 `conversation_members` 校验发送者是否为会话有效成员。
+
+### DDL 草案
+
+```sql
+CREATE TABLE friendships (
+  user_id BIGINT UNSIGNED NOT NULL,
+  friend_user_id BIGINT UNSIGNED NOT NULL,
+  friendship_state VARCHAR(16) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+
+  PRIMARY KEY (user_id, friend_user_id),
+  INDEX idx_friendships_friend_user (friend_user_id, friendship_state)
+);
+```
+
+### 字段说明
+
+| 字段名 | 类型 | 是否为空 | 默认值 | 索引/约束 | 字段含义 |
+| --- | --- | --- | --- | --- | --- |
+| `user_id` | `BIGINT UNSIGNED` | 否 | 无 | 联合主键 `(user_id, friend_user_id)` | 关系拥有者用户 ID。 |
+| `friend_user_id` | `BIGINT UNSIGNED` | 否 | 无 | 联合主键 `(user_id, friend_user_id)`；索引 `idx_friendships_friend_user` | 好友用户 ID。 |
+| `friendship_state` | `VARCHAR(16)` | 否 | 无 | 索引 `idx_friendships_friend_user` | 好友状态。第一阶段固定使用 `active`。 |
+| `created_at` | `DATETIME(6)` | 否 | 无 | 无 | 好友关系创建时间。 |
+| `updated_at` | `DATETIME(6)` | 否 | 无 | 无 | 好友关系最后更新时间。 |
+
+第一阶段 seed 会为两个种子账号创建双向两行好友关系，并直接创建一条 `direct` 会话、两条 `conversation_members active` 和两条初始 `conversation_member_cursors`。
 
 ## `conversations`
 
