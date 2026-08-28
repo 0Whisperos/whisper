@@ -26,6 +26,7 @@ func MigrateSchema() error {
 func migrationModels() []interface{} {
 	return []interface{}{
 		&entity.User{},
+		&entity.Friendship{},
 		&entity.Conversation{},
 		&entity.ConversationMember{},
 		&entity.Message{},
