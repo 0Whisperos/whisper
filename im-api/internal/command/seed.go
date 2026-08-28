@@ -9,7 +9,7 @@ func newSeedCommand() *cobra.Command {
 	var configPath string
 	command := &cobra.Command{
 		Use:   "seed",
-		Short: "Create or verify the fixed seed account",
+		Short: "Create seed users, friendship and direct conversation base data",
 		Args:  cobra.NoArgs,
 		RunE:  func(_ *cobra.Command, _ []string) error { return app.RunSeed(configPath) },
 	}

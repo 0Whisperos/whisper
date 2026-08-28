@@ -266,6 +266,10 @@ type CORSConfig struct {
 }
 
 type SeedConfig struct {
+	Users []SeedUserConfig `yaml:"users"`
+}
+
+type SeedUserConfig struct {
 	Account  string `yaml:"account"`
 	Password string `yaml:"password"`
 }

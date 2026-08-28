@@ -47,5 +47,8 @@ cors:
     - http://127.0.0.1:1420
 
 seed:
-  account: ""
-  password: ""
+  users:
+    - account: "00100001"
+      password: "password"
+    - account: "00100002"
+      password: "password"

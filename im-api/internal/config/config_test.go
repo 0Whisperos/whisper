@@ -65,7 +65,10 @@ func validConfig() Config {
 			RefreshTokenTTL: "720h",
 		},
 		CORS: CORSConfig{AllowedOrigins: []string{"http://127.0.0.1:1420"}},
-		Seed: SeedConfig{Account: "00123456", Password: "development-password"},
+		Seed: SeedConfig{Users: []SeedUserConfig{
+			{Account: "00100001", Password: "development-password"},
+			{Account: "00100002", Password: "development-password"},
+		}},
 	}
 }
 
@@ -119,8 +122,11 @@ cors:
   allowed_origins:
     - http://127.0.0.1:1420
 seed:
-  account: "00123456"
-  password: development-password
+  users:
+    - account: "00100001"
+      password: development-password
+    - account: "00100002"
+      password: development-password
 `)
 
 	config, err := Load(path)
@@ -141,6 +147,9 @@ seed:
 	}
 	if config.Auth.JWTSecret != "development-secret" || config.Auth.AccessTokenTTL != "15m" || config.Auth.RefreshTokenTTL != "720h" {
 		t.Errorf("Auth = %#v, want configured JWT secret and TTLs", config.Auth)
+	}
+	if len(config.Seed.Users) != 2 || config.Seed.Users[0].Account != "00100001" || config.Seed.Users[1].Account != "00100002" {
+		t.Errorf("Seed.Users = %#v, want two configured seed users", config.Seed.Users)
 	}
 }
 
