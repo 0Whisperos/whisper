@@ -27,11 +27,11 @@ func FindUserByAccount(account string) (entity.User, bool, error) {
 	return user, true, nil
 }
 
-func CreateUser(user entity.User) error {
+func CreateUser(user *entity.User) error {
 	if global.MysqlDB == nil {
 		return ErrNotInitialized
 	}
-	if err := global.MysqlDB.Create(&user).Error; err != nil {
+	if err := global.MysqlDB.Create(user).Error; err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
 
