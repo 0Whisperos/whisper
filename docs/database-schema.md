@@ -40,6 +40,8 @@ CREATE TABLE users (
   account VARCHAR(12) NOT NULL,
   password_hash VARCHAR(60) NOT NULL,
   avatar_object_key VARCHAR(255) NULL,
+  nickname VARCHAR(64) NOT NULL DEFAULT '',
+  signature VARCHAR(255) NOT NULL DEFAULT '',
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
 

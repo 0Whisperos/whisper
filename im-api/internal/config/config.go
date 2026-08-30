@@ -270,8 +270,10 @@ type SeedConfig struct {
 }
 
 type SeedUserConfig struct {
-	Account  string `yaml:"account"`
-	Password string `yaml:"password"`
+	Account   string `yaml:"account"`
+	Password  string `yaml:"password"`
+	Nickname  string `yaml:"nickname"`
+	Signature string `yaml:"signature"`
 }
 
 func Load(path string) (*Config, error) {

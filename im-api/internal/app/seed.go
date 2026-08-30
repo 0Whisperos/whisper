@@ -82,7 +82,12 @@ func handleAccount(seedUser config.SeedUserConfig) (entity.User, error) {
 	if err != nil {
 		return entity.User{}, fmt.Errorf("hash seed password: %w", err)
 	}
-	user = entity.User{Account: seedUser.Account, PasswordHash: string(hash)}
+	user = entity.User{
+		Account:      seedUser.Account,
+		PasswordHash: string(hash),
+		Nickname:     seedUser.Nickname,
+		Signature:    seedUser.Signature,
+	}
 	if err := createSeedUser(&user); err != nil {
 		return entity.User{}, fmt.Errorf("create seed user: %w", err)
 	}
