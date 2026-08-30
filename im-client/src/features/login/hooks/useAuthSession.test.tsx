@@ -237,7 +237,7 @@ describe("useAuthSession", () => {
     // Test goal: verify closing the app revokes a temporary refresh token that was not saved for auto-login.
     // Construction: login with autoLogin=false and call cleanupBeforeAppClose.
     // Input data: session-only refresh token refresh-token.
-    // Expected behavior: logout is called with refresh-token and the in-memory session is cleared.
+    // Expected behavior: logout is called with refresh-token while the in-memory session remains unchanged until the window exits.
     loginMock.mockResolvedValueOnce(session({ userId: 20001, refreshToken: "refresh-token" }));
     const { result } = renderHook(() => useAuthSession("http://127.0.0.1:8080"));
     await waitFor(() => expect(result.current.isLoadingSavedUsers).toBe(false));
@@ -250,7 +250,7 @@ describe("useAuthSession", () => {
     });
 
     expect(logoutMock).toHaveBeenCalledWith("http://127.0.0.1:8080", "refresh-token");
-    expect(result.current.session).toBeNull();
+    expect(result.current.session?.refreshToken).toBe("refresh-token");
   });
 
   it("keeps saved refresh tokens when app close cleanup runs", async () => {
@@ -277,7 +277,7 @@ describe("useAuthSession", () => {
     // Test goal: verify best-effort close cleanup does not reject when the server logout request fails.
     // Construction: login with autoLogin=false, make logout reject, and call cleanupBeforeAppClose.
     // Input data: session-only refresh token and AuthApiError("network_error").
-    // Expected behavior: cleanupBeforeAppClose resolves and clears the in-memory session.
+    // Expected behavior: cleanupBeforeAppClose resolves and keeps the in-memory session so a failed window close can be retried.
     loginMock.mockResolvedValueOnce(session({ userId: 20001, refreshToken: "refresh-token" }));
     logoutMock.mockRejectedValueOnce(new AuthApiError("network_error"));
     const { result } = renderHook(() => useAuthSession("http://127.0.0.1:8080"));
@@ -290,7 +290,7 @@ describe("useAuthSession", () => {
       await expect(result.current.cleanupBeforeAppClose()).resolves.toBeUndefined();
     });
 
-    expect(result.current.session).toBeNull();
+    expect(result.current.session?.refreshToken).toBe("refresh-token");
   });
 });
 

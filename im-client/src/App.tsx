@@ -63,7 +63,12 @@ export function App() {
       } catch {
         // Window closing is best-effort cleanup; the app should still close.
       } finally {
-        await destroyAppWindow().catch(() => undefined);
+        try {
+          await destroyAppWindow();
+        } catch (error) {
+          isDestroyingWindowRef.current = false;
+          console.error("Failed to destroy the app window", error);
+        }
       }
     })
       .then((nextUnlisten) => {

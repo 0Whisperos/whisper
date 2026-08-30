@@ -165,7 +165,6 @@ export function useAuthSession(apiBaseUrl: string) {
     }
     if (session.refreshTokenPersistence === "session_only") {
       await requestLogout(apiBaseUrl, session.refreshToken).catch(() => undefined);
-      setSession(null);
     }
   }, [apiBaseUrl, session]);
 

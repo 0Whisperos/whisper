@@ -127,7 +127,14 @@ describe("App", () => {
     });
     loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
     useAuthSessionMock.mockReturnValue({
-      session: null,
+      session: {
+        userId: 20001,
+        accessToken: "jwt-access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
+        imChatWsUrl: "ws://127.0.0.1:9001/ws",
+        refreshTokenPersistence: "session_only",
+      },
       savedUsers: [],
       credentialWarning: null,
       authenticateWithPassword: vi.fn(),
@@ -140,6 +147,7 @@ describe("App", () => {
     });
     render(<App />);
     await waitFor(() => expect(closeHandlers).toHaveLength(1));
+    expect(await screen.findByText(/chat api: ws:\/\/127\.0\.0\.1:9001\/ws/)).toBeInTheDocument();
     const event = closeEvent();
 
     await act(async () => {
@@ -148,6 +156,7 @@ describe("App", () => {
 
     expect(event.preventDefault).toHaveBeenCalled();
     expect(events).toEqual(["cleanup", "destroy"]);
+    expect(screen.queryByText("login users:")).not.toBeInTheDocument();
   });
 
   it("destroys the window even when close cleanup fails", async () => {
@@ -179,6 +188,30 @@ describe("App", () => {
 
     expect(event.preventDefault).toHaveBeenCalled();
     expect(destroyAppWindowMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a second close request after window destruction fails", async () => {
+    // Test goal: verify a failed native window destruction does not permanently block later close requests.
+    // Construction: make the first destroy call reject and the second call resolve, then invoke the captured close handler twice.
+    // Input data: destroyAppWindow rejects with Error("permission_denied") once, then succeeds.
+    // Expected behavior: the handler retries destruction on the second close request and logs the first failure.
+    const destroyError = new Error("permission_denied");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    destroyAppWindowMock
+      .mockRejectedValueOnce(destroyError)
+      .mockResolvedValueOnce(undefined);
+    loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
+    render(<App />);
+    await waitFor(() => expect(closeHandlers).toHaveLength(1));
+
+    await act(async () => {
+      await closeHandlers[0](closeEvent());
+      await closeHandlers[0](closeEvent());
+    });
+
+    expect(destroyAppWindowMock).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith("Failed to destroy the app window", destroyError);
+    errorSpy.mockRestore();
   });
 
   it("ignores repeated close requests while window destruction is already in progress", async () => {
