@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import type { ChatApiError } from "../api";
 import type { ChatConversation, ChatSelfProfile } from "../types";
 import { Avatar, Icon, IconButton } from "./ui";
 import { Composer } from "./Composer";
@@ -11,6 +12,9 @@ interface ChatPanelProps {
   draft: string;
   canSend: boolean;
   statusMessage: string;
+  isHistoryLoading: boolean;
+  historyError: ChatApiError | null;
+  onRetryHistory: () => void;
   isDetailOpen: boolean;
   onReturnToSessions: () => void;
   onOpenDetail: (trigger: HTMLButtonElement) => void;
@@ -25,6 +29,9 @@ export function ChatPanel({
   draft,
   canSend,
   statusMessage,
+  isHistoryLoading,
+  historyError,
+  onRetryHistory,
   isDetailOpen,
   onReturnToSessions,
   onOpenDetail,
@@ -66,6 +73,9 @@ export function ChatPanel({
         </div>
       </header>
       <section ref={messageListRef} className="auth-message-list" aria-label="消息列表" aria-live="polite">
+        {conversation.messages.length === 0 && !isHistoryLoading && !historyError ? (
+          <p className="auth-empty-state">暂无聊天记录</p>
+        ) : null}
         {conversation.messages.map((message, index) => {
           const profile = message.senderUserId === self.userId ? self : conversation.participants[message.senderUserId];
           const isSelf = message.senderUserId === self.userId;
@@ -92,6 +102,13 @@ export function ChatPanel({
           );
         })}
       </section>
+      {isHistoryLoading ? <output className="auth-panel-status" aria-live="polite">姝ｅ湪鍔犺浇娑堟伅...</output> : null}
+      {historyError ? (
+        <div className="auth-panel-error" role="alert">
+          <span>娑堟伅鍔犺浇澶辫触锛?{historyError.code}</span>
+          <button type="button" onClick={onRetryHistory}>閲嶈瘯</button>
+        </div>
+      ) : null}
       <Composer
         draft={draft}
         canSend={canSend}

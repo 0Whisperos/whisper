@@ -90,6 +90,7 @@ export function App() {
   if (session) {
     return (
       <AuthenticatedPage
+        apiBaseUrl={config.apiBaseUrl}
         session={session}
         refreshSession={refreshSession}
         isLoggingOut={isLoggingOut}

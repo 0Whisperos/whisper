@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 
-import type { ChatContact, ChatMockData, MobilePanel, StatusScope, WorkspaceView } from "../types";
+import type { ChatContact, ChatConversation, ChatData, MobilePanel, StatusScope, WorkspaceView } from "../types";
 
 function isNarrowViewport(): boolean {
   return window.innerWidth < 680;
@@ -12,7 +12,7 @@ interface StatusMessages {
   contacts: string;
 }
 
-export function useChatWorkspace(data: ChatMockData) {
+export function useChatWorkspace(data: ChatData) {
   const initialSession = data.sessions[1] ?? data.sessions[0];
   const initialContact = data.contacts.find((contact) => contact.conversationId === initialSession?.conversationId) ?? data.contacts[0];
   const [view, setViewState] = useState<WorkspaceView>("messages");
@@ -21,8 +21,10 @@ export function useChatWorkspace(data: ChatMockData) {
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("sessions");
   const [statusMessages, setStatusMessages] = useState<StatusMessages>({ session: "", chat: "", contacts: "" });
 
-  const activeConversation = data.conversations[activeConversationId] ?? data.conversations[initialSession?.conversationId ?? 0];
-  const activeContact = data.contacts.find((contact) => contact.id === activeContactId) ?? data.contacts[0];
+  const activeConversation = data.conversations[activeConversationId]
+    ?? data.conversations[initialSession?.conversationId ?? 0]
+    ?? emptyConversation();
+  const activeContact = data.contacts.find((contact) => contact.id === activeContactId) ?? data.contacts[0] ?? emptyContact();
 
   const showStatus = useCallback((message: string, scope: StatusScope) => {
     setStatusMessages((current) => ({ ...current, [scope]: message }));
@@ -102,4 +104,31 @@ export function useChatWorkspace(data: ChatMockData) {
     statusMessages,
     view,
   ]);
+}
+
+function emptyConversation(): ChatConversation {
+  return {
+    conversationId: 0,
+    type: "direct",
+    name: "鏆傛棤浼氳瘽",
+    avatar: "?",
+    tone: "gray",
+    status: "鐘舵€佹湭鐭?",
+    participants: {},
+    messages: [],
+  };
+}
+
+function emptyContact(): ChatContact {
+  return {
+    id: "",
+    userId: 0,
+    name: "鏆傛棤濂藉弸",
+    avatar: "?",
+    tone: "gray",
+    account: "",
+    region: "鏈彁渚?",
+    status: "鐘舵€佹湭鐭?",
+    section: "friends",
+  };
 }

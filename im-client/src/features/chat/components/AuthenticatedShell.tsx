@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-import { chatMockData } from "../mockData";
-import type { StatusScope } from "../types";
+import type { ChatApiError } from "../api";
+import type { ChatData, StatusScope } from "../types";
 import { useChatDrafts } from "../hooks/useChatDrafts";
 import { useChatLayout } from "../hooks/useChatLayout";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
@@ -16,13 +16,26 @@ import { IconSprite } from "./ui";
 import { SessionPanel } from "./SessionPanel";
 
 interface AuthenticatedShellProps {
+  data: ChatData;
   connectionLabel: string;
   isLoggingOut: boolean;
   onLogout: () => void;
+  loadConversationHistory?: (conversationId: number) => Promise<void>;
+  retryConversationHistory?: (conversationId: number) => void;
+  loadingConversationId?: number | null;
+  getConversationHistoryError?: (conversationId: number) => ChatApiError | null;
 }
 
-export function AuthenticatedShell({ connectionLabel, isLoggingOut, onLogout }: AuthenticatedShellProps) {
-  const data = chatMockData;
+export function AuthenticatedShell({
+  data,
+  connectionLabel,
+  isLoggingOut,
+  onLogout,
+  loadConversationHistory,
+  retryConversationHistory,
+  loadingConversationId = null,
+  getConversationHistoryError = () => null,
+}: AuthenticatedShellProps) {
   const workspace = useChatWorkspace(data);
   const drafts = useChatDrafts(workspace.activeConversationId);
   const layout = useChatLayout();
@@ -35,6 +48,12 @@ export function AuthenticatedShell({ connectionLabel, isLoggingOut, onLogout }: 
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const detailPanelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (workspace.activeConversationId > 0 && loadConversationHistory) {
+      void loadConversationHistory(workspace.activeConversationId);
+    }
+  }, [loadConversationHistory, workspace.activeConversationId]);
 
   const showToolPreview = (name: string, scope?: StatusScope) => {
     const resolvedScope = scope ?? (workspace.view === "contacts" ? "contacts" : "session");
@@ -154,6 +173,9 @@ export function AuthenticatedShell({ connectionLabel, isLoggingOut, onLogout }: 
         draft={drafts.draft}
         canSend={drafts.canSend}
         statusMessage={workspace.statusMessages.chat}
+        isHistoryLoading={loadingConversationId === workspace.activeConversationId}
+        historyError={getConversationHistoryError(workspace.activeConversationId)}
+        onRetryHistory={() => retryConversationHistory?.(workspace.activeConversationId)}
         isDetailOpen={isDetailOpen}
         onReturnToSessions={workspace.returnToSessions}
         onOpenDetail={openDetailPanel}

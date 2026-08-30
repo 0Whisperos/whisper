@@ -10,6 +10,8 @@ export interface ChatProfile {
   name: string;
   avatar: string;
   tone: AvatarTone;
+  signature?: string;
+  avatarObjectKey?: string | null;
 }
 
 export interface ChatSelfProfile extends ChatProfile {
@@ -73,6 +75,8 @@ export interface ChatContact {
   status: string;
   conversationId?: number;
   section: string;
+  signature?: string;
+  avatarObjectKey?: string | null;
 }
 
 export interface ChatContactSection {
@@ -80,10 +84,43 @@ export interface ChatContactSection {
   label: string;
 }
 
-export interface ChatMockData {
+export interface ChatData {
   self: ChatSelfProfile;
   sessions: ChatSessionItem[];
   conversations: Record<number, ChatConversation>;
   contacts: ChatContact[];
   contactSections: ChatContactSection[];
+}
+
+export type ChatMockData = ChatData;
+
+export interface ChatUserProfileDto {
+  userId: number;
+  account: string;
+  nickname: string;
+  signature: string;
+  avatarObjectKey: string | null;
+}
+
+export interface ChatFriendDto extends ChatUserProfileDto {
+  friendshipState: "active";
+  conversationId: number | null;
+}
+
+export interface ChatMessageDto {
+  messageId: string;
+  conversationId: number;
+  conversationSeq: number;
+  senderUserId: number;
+  clientMessageId: string;
+  messageType: "text";
+  content: TextMessageContent;
+  createdAt: string;
+}
+
+export interface ChatMessagePageDto {
+  messages: ChatMessageDto[];
+  hasMore: boolean;
+  nextBeforeSeq?: number;
+  nextFromSeq?: number;
 }

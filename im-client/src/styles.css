@@ -1058,6 +1058,22 @@ canvas {
   background: var(--chat-surface);
 }
 
+.auth-empty-state {
+  margin: auto;
+  color: var(--auth-muted);
+  font-size: 13px;
+}
+
+.auth-panel-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 16px;
+  color: var(--auth-muted);
+  font-size: 12px;
+}
+
 .auth-message-group {
   display: flex;
   flex-direction: column;

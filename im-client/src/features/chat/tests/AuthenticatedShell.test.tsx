@@ -3,9 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AuthenticatedShell } from "../components/AuthenticatedShell";
+import { chatMockData } from "../mockData";
 
 function renderShell() {
-  return render(<AuthenticatedShell connectionLabel="聊天连接在线：connection-uuid" isLoggingOut={false} onLogout={() => undefined} />);
+  return render(<AuthenticatedShell data={chatMockData} connectionLabel="聊天连接在线：connection-uuid" isLoggingOut={false} onLogout={() => undefined} />);
 }
 
 afterEach(() => {
