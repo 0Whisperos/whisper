@@ -27,6 +27,23 @@ func FindUserByAccount(account string) (entity.User, bool, error) {
 	return user, true, nil
 }
 
+func FindUserByID(userID uint64) (entity.User, bool, error) {
+	if global.MysqlDB == nil {
+		return entity.User{}, false, ErrNotInitialized
+	}
+
+	var user entity.User
+	err := global.MysqlDB.WithContext(context.Background()).Where("id = ?", userID).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.User{}, false, nil
+	}
+	if err != nil {
+		return entity.User{}, false, fmt.Errorf("find user by id: %w", err)
+	}
+
+	return user, true, nil
+}
+
 func CreateUser(user *entity.User) error {
 	if global.MysqlDB == nil {
 		return ErrNotInitialized

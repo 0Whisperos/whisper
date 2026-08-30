@@ -13,6 +13,7 @@ func New(allowedOrigins []string) *gin.Engine {
 		engine.Use(cors.New(cors.Config{
 			AllowOrigins: allowedOrigins,
 			AllowMethods: []string{
+				http.MethodGet,
 				http.MethodPost,
 				http.MethodOptions,
 			},
@@ -24,5 +25,6 @@ func New(allowedOrigins []string) *gin.Engine {
 	}
 	v1 := engine.Group("/v1")
 	registerAuthRoutes(v1)
+	registerChatRoutes(v1)
 	return engine
 }
