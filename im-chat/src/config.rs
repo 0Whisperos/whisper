@@ -14,6 +14,8 @@ pub(crate) struct Config {
     pub(crate) redis_config: RedisConfig,
     #[serde(rename = "node")]
     pub(crate) node_config: NodeConfig,
+    #[serde(rename = "mysql")]
+    pub(crate) mysql_config: MysqlConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +48,16 @@ pub(crate) struct NodeConfig {
     pub(crate) node_id: String,
     pub(crate) public_ws_url: String,
     pub(crate) rpc_addr: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct MysqlConfig {
+    pub(crate) username: String,
+    pub(crate) password: String,
+    pub(crate) ip: String,
+    pub(crate) port: u16,
+    pub(crate) db: String,
+    pub(crate) max_connections: u32,
 }
 
 pub(crate) fn load_config() -> Result<Config> {

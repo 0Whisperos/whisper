@@ -60,4 +60,10 @@ pub enum Error {
         #[source]
         source: redis::RedisError,
     },
+
+    #[error("connect mysql: {source}")]
+    MySql {
+        #[source]
+        source: sqlx::Error,
+    },
 }

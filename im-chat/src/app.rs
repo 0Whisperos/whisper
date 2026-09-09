@@ -3,6 +3,8 @@ use axum::extract::{State, ws::WebSocketUpgrade};
 use axum::response::Response;
 use axum::Router;
 use axum::routing::get;
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+use sqlx::MySqlPool;
 use tokio::net::TcpListener;
 use crate::{config, handle, heartbeat};
 use crate::connection::ConnectionRegistry;
@@ -14,10 +16,22 @@ pub(crate) struct AppState {
     pub config: Arc<config::Config>,
     pub presence: Arc<PresenceManager>,
     pub connections: ConnectionRegistry,
+    pub mysql_pool: MySqlPool,
 }
 
 pub async fn run() -> Result<()> {
     let config = Arc::new(config::load_config()?);
+    let mysql_options = MySqlConnectOptions::new()
+        .username(&config.mysql_config.username)
+        .password(&config.mysql_config.password)
+        .host(&config.mysql_config.ip)
+        .port(config.mysql_config.port)
+        .database(&config.mysql_config.db);
+    let mysql_pool = MySqlPoolOptions::new()
+        .max_connections(config.mysql_config.max_connections)
+        .connect_with(mysql_options)
+        .await
+        .map_err(|source| Error::MySql { source })?;
     let presence = Arc::new(PresenceManager::new(&config.redis_config).map_err(|source| Error::Redis { source })?);
     let connections = ConnectionRegistry::new();
     tracing_subscriber::fmt()
@@ -27,6 +41,7 @@ pub async fn run() -> Result<()> {
         config: config.clone(),
         presence: presence.clone(),
         connections: connections.clone(),
+        mysql_pool,
     };
     let listen_addr = format!("{}:{}", state.config.server_config.ip, state.config.server_config.port);
     let app = Router::new().route("/ws", get(ws_handler)).with_state(state);
@@ -51,5 +66,6 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Resp
     let config = state.config.clone();
     let presence = state.presence.clone();
     let connections = state.connections.clone();
-    ws.on_upgrade(|socket| handle::handle_socket(socket, config, presence, connections))
+    let mysql_pool = state.mysql_pool.clone();
+    ws.on_upgrade(|socket| handle::handle_socket(socket, config, presence, connections, mysql_pool))
 }
