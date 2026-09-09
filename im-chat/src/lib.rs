@@ -7,3 +7,4 @@ mod connection;
 mod frame;
 mod presence;
 mod heartbeat;
+mod message;
