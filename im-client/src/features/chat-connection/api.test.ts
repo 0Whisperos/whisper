@@ -232,6 +232,193 @@ describe("chat connection API", () => {
     expect(onStateChange).not.toHaveBeenCalledWith({ status: "error", message: "invalid chat server frame" });
   });
 
+  it("sends an authenticated text message with a fresh request id", () => {
+    // 测试目标：验证认证完成后的文本消息按协议编码，并为这次发送生成新的 request_id。
+    // 构造方法：使用顺序 requestIdFactory 建立并认证测试 socket，再调用 controller 的发送方法。
+    // 输入数据：conversationId=10001、clientMessageId=client-message-1、text="hello"、clientSentAt 为带时区时间。
+    // 预期行为：第三个发送帧是 send_message，完整保留业务字段且 request_id 不复用认证和心跳 ID。
+    vi.useFakeTimers();
+    const socket = new MockWebSocket();
+    const requestIds = ["req-auth", "req-heartbeat", "req-message"];
+    const controller = connectChatWebSocket({
+      session: testSession,
+      onStateChange: vi.fn(),
+      webSocketFactory: () => socket,
+      requestIdFactory: () => requestIds.shift() ?? "req-extra",
+    });
+    authenticateSocket(socket);
+
+    controller.sendTextMessage({
+      clientMessageId: "client-message-1",
+      conversationId: 10001,
+      text: "hello",
+      clientSentAt: "2026-08-16T12:00:00.000+08:00",
+    });
+
+    expect(JSON.parse(socket.sent[2])).toEqual({
+      type: "send_message",
+      request_id: "req-message",
+      payload: {
+        client_message_id: "client-message-1",
+        conversation_id: 10001,
+        message_type: "text",
+        content: { text: "hello" },
+        client_sent_at: "2026-08-16T12:00:00.000+08:00",
+      },
+    });
+  });
+
+  it("rejects sending messages until the socket is authenticated and open", () => {
+    // 测试目标：验证业务消息不会在认证前或 socket 已关闭时被写入 WebSocket。
+    // 构造方法：分别对刚创建的 controller 和认证后主动关闭的 controller 调用发送方法。
+    // 输入数据：两次均使用 conversationId=10001、clientMessageId=client-message-1 和文本 "hello"。
+    // 预期行为：两次调用均抛出连接未认证错误，且发送数组中没有 send_message 帧。
+    const beforeAuthSocket = new MockWebSocket();
+    const beforeAuthController = connectChatWebSocket({
+      session: testSession,
+      onStateChange: vi.fn(),
+      webSocketFactory: () => beforeAuthSocket,
+      requestIdFactory: () => "req-1",
+    });
+    const input = {
+      clientMessageId: "client-message-1",
+      conversationId: 10001,
+      text: "hello",
+      clientSentAt: "2026-08-16T12:00:00.000+08:00",
+    };
+
+    expect(() => beforeAuthController.sendTextMessage(input)).toThrow("not authenticated");
+
+    const closedSocket = new MockWebSocket();
+    const closedController = connectChatWebSocket({
+      session: testSession,
+      onStateChange: vi.fn(),
+      webSocketFactory: () => closedSocket,
+      requestIdFactory: () => "req-1",
+    });
+    authenticateSocket(closedSocket);
+    closedController.close();
+
+    expect(() => closedController.sendTextMessage(input)).toThrow("not authenticated");
+    expect(beforeAuthSocket.sent).not.toContainEqual(expect.stringContaining("send_message"));
+    expect(closedSocket.sent).not.toContainEqual(expect.stringContaining("send_message"));
+  });
+
+  it("forwards every valid authenticated business frame to the typed callback", () => {
+    // 测试目标：验证 accepted、rejected 和 message_created 三类业务帧都会交给聊天数据层。
+    // 构造方法：认证 socket 后依次注入三种符合协议的服务端 JSON 帧，并观察 onServerFrame。
+    // 输入数据：client_message_id=client-message-1，正式消息 message_id=message-1，事件 event_id=event-1。
+    // 预期行为：回调按接收顺序获得三个原始且类型正确的业务帧，连接保持打开。
+    vi.useFakeTimers();
+    const socket = new MockWebSocket();
+    const onServerFrame = vi.fn();
+    connectChatWebSocket({
+      session: testSession,
+      onStateChange: vi.fn(),
+      onServerFrame,
+      webSocketFactory: () => socket,
+      requestIdFactory: () => "req-1",
+    });
+    authenticateSocket(socket);
+    const message = {
+      message_id: "message-1",
+      conversation_id: 10001,
+      conversation_seq: 42,
+      sender_user_id: 20001,
+      client_message_id: "client-message-1",
+      message_type: "text",
+      content: { text: "hello" },
+      created_at: "2026-08-16T12:00:01.123+08:00",
+    };
+
+    socket.receive(JSON.stringify({
+      type: "server_accepted",
+      request_id: "req-message",
+      payload: { client_message_id: "client-message-1", message },
+    }));
+    socket.receive(JSON.stringify({
+      type: "send_message_rejected",
+      request_id: "req-rejected",
+      payload: { client_message_id: "client-message-1", error_code: "invalid_message", message: "invalid" },
+    }));
+    socket.receive(JSON.stringify({
+      type: "message_created",
+      payload: { event_id: "event-1", message },
+    }));
+
+    expect(onServerFrame).toHaveBeenCalledTimes(3);
+    expect(onServerFrame).toHaveBeenNthCalledWith(1, expect.objectContaining({ type: "server_accepted" }));
+    expect(onServerFrame).toHaveBeenNthCalledWith(2, expect.objectContaining({ type: "send_message_rejected" }));
+    expect(onServerFrame).toHaveBeenNthCalledWith(3, expect.objectContaining({ type: "message_created" }));
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it("rejects server_accepted when its envelope and message client ids disagree", () => {
+    // 测试目标：验证请求关联字段不一致的 accepted 帧不能被当作合法确认处理。
+    // 构造方法：认证测试 socket 后注入外层和内层 client_message_id 不同的 server_accepted JSON。
+    // 输入数据：外层 client_message_id=client-1，内层 client_message_id=client-2。
+    // 预期行为：连接报告非法服务端帧并关闭，业务帧回调不被调用。
+    vi.useFakeTimers();
+    const socket = new MockWebSocket();
+    const onStateChange = vi.fn();
+    const onServerFrame = vi.fn();
+    connectChatWebSocket({
+      session: testSession,
+      onStateChange,
+      onServerFrame,
+      webSocketFactory: () => socket,
+      requestIdFactory: () => "req-1",
+    });
+    authenticateSocket(socket);
+
+    socket.receive(JSON.stringify({
+      type: "server_accepted",
+      request_id: "req-message",
+      payload: {
+        client_message_id: "client-1",
+        message: {
+          message_id: "message-1",
+          conversation_id: 10001,
+          conversation_seq: 42,
+          sender_user_id: 20001,
+          client_message_id: "client-2",
+          message_type: "text",
+          content: { text: "hello" },
+          created_at: "2026-08-16T12:00:01.123+08:00",
+        },
+      },
+    }));
+
+    expect(onStateChange).toHaveBeenCalledWith({ status: "error", message: "invalid chat server frame" });
+    expect(onServerFrame).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+  });
+
+  it("closes an authenticated connection for an unknown server frame", () => {
+    // 测试目标：验证认证后仍严格拒绝未声明的服务端帧，避免静默忽略协议不兼容。
+    // 构造方法：完成认证并启动心跳后，向测试 socket 注入 type=unknown_frame 的 JSON。
+    // 输入数据：未知 type="unknown_frame" 和空 payload。
+    // 预期行为：状态变为 invalid chat server frame，socket 被关闭且不再继续发送心跳。
+    vi.useFakeTimers();
+    const socket = new MockWebSocket();
+    const onStateChange = vi.fn();
+    connectChatWebSocket({
+      session: testSession,
+      onStateChange,
+      webSocketFactory: () => socket,
+      requestIdFactory: () => "req-1",
+    });
+    authenticateSocket(socket);
+    const sentCount = socket.sent.length;
+
+    socket.receive(JSON.stringify({ type: "unknown_frame", payload: {} }));
+    vi.advanceTimersByTime(10_000);
+
+    expect(onStateChange).toHaveBeenCalledWith({ status: "error", message: "invalid chat server frame" });
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+    expect(socket.sent).toHaveLength(sentCount);
+  });
+
   it("rejects heartbeat_ok before authentication completes", () => {
     // 测试目标：验证认证完成前收到 heartbeat_ok 会被视为非法服务端帧。
     // 构造方法：建立连接但不注入 auth_ok，直接向 socket 注入 heartbeat_ok。

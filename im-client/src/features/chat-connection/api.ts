@@ -1,9 +1,15 @@
 import type {
   ChatAuthFrame,
+  ChatBusinessServerFrame,
   ChatConnectionOptions,
-  ChatConnectionState,
   ChatHeartbeatFrame,
+  ChatMessageCreatedFrame,
+  ChatSendMessageFrame,
+  ChatSendMessageRejectedFrame,
+  ChatSendTextMessageInput,
   ChatServerFrame,
+  ChatServerAcceptedFrame,
+  ChatTextMessage,
   ChatWebSocket,
 } from "./types";
 
@@ -11,6 +17,7 @@ const HEARTBEAT_INTERVAL_MS = 10_000;
 
 export interface ChatConnectionController {
   close: () => void;
+  sendTextMessage: (input: ChatSendTextMessageInput) => void;
 }
 
 export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnectionController {
@@ -57,10 +64,12 @@ export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnec
     if (frame.type === "heartbeat_ok" && completedAuth) {
       return;
     }
-    if (frame.type === "heartbeat_ok") {
-      options.onStateChange({ status: "error", message: "invalid chat server frame" });
-      stopHeartbeat();
-      closeSocket(socket);
+    if (isBusinessServerFrame(frame) && completedAuth) {
+      options.onServerFrame?.(frame);
+      return;
+    }
+    if (isBusinessServerFrame(frame) || frame.type === "heartbeat_ok") {
+      rejectInvalidServerFrame();
       return;
     }
     options.onStateChange({
@@ -97,6 +106,23 @@ export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnec
       stopHeartbeat();
       closeSocket(socket);
     },
+    sendTextMessage: (input) => {
+      if (!completedAuth || socket.readyState !== WebSocket.OPEN) {
+        throw new Error("chat connection is not authenticated");
+      }
+      const frame: ChatSendMessageFrame = {
+        type: "send_message",
+        request_id: createRequestId(),
+        payload: {
+          client_message_id: input.clientMessageId,
+          conversation_id: input.conversationId,
+          message_type: "text",
+          content: { text: input.text },
+          client_sent_at: input.clientSentAt,
+        },
+      };
+      socket.send(JSON.stringify(frame));
+    },
   };
 
   function startHeartbeat() {
@@ -111,6 +137,12 @@ export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnec
     }
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
+  }
+
+  function rejectInvalidServerFrame() {
+    options.onStateChange({ status: "error", message: "invalid chat server frame" });
+    stopHeartbeat();
+    closeSocket(socket);
   }
 
   function sendHeartbeat() {
@@ -138,10 +170,23 @@ function parseServerFrame(data: unknown): ChatServerFrame | null {
   } catch {
     return null;
   }
-  if (isAuthOkFrame(value) || isAuthFailedFrame(value) || isHeartbeatOkFrame(value)) {
+  if (
+    isAuthOkFrame(value)
+    || isAuthFailedFrame(value)
+    || isHeartbeatOkFrame(value)
+    || isServerAcceptedFrame(value)
+    || isSendMessageRejectedFrame(value)
+    || isMessageCreatedFrame(value)
+  ) {
     return value;
   }
   return null;
+}
+
+function isBusinessServerFrame(frame: ChatServerFrame): frame is ChatBusinessServerFrame {
+  return frame.type === "server_accepted"
+    || frame.type === "send_message_rejected"
+    || frame.type === "message_created";
 }
 
 function isAuthOkFrame(value: unknown): value is ChatServerFrame {
@@ -194,6 +239,77 @@ function isHeartbeatOkFrame(value: unknown): value is ChatServerFrame {
     && "sent_at" in value.payload
     && typeof value.payload.sent_at === "string"
   );
+}
+
+function isServerAcceptedFrame(value: unknown): value is ChatServerAcceptedFrame {
+  const isValid = hasFrameEnvelope(value, "server_accepted", true)
+    && hasStringProperty(value.payload, "client_message_id")
+    && hasTextMessageProperty(value.payload, "message");
+  if (!isValid) {
+    return false;
+  }
+  const payload = value.payload as { client_message_id: string; message: ChatTextMessage };
+  return payload.client_message_id === payload.message.client_message_id;
+}
+
+function isSendMessageRejectedFrame(value: unknown): value is ChatSendMessageRejectedFrame {
+  return hasFrameEnvelope(value, "send_message_rejected", true)
+    && hasStringProperty(value.payload, "client_message_id")
+    && hasStringProperty(value.payload, "error_code")
+    && hasStringProperty(value.payload, "message");
+}
+
+function isMessageCreatedFrame(value: unknown): value is ChatMessageCreatedFrame {
+  return hasFrameEnvelope(value, "message_created", false)
+    && hasStringProperty(value.payload, "event_id")
+    && hasTextMessageProperty(value.payload, "message");
+}
+
+function hasFrameEnvelope(value: unknown, type: string, requiresRequestId: boolean): value is {
+  type: string;
+  request_id?: string;
+  payload: Record<string, unknown>;
+} {
+  return typeof value === "object"
+    && value !== null
+    && "type" in value
+    && value.type === type
+    && (!requiresRequestId || ("request_id" in value && typeof value.request_id === "string"))
+    && "payload" in value
+    && typeof value.payload === "object"
+    && value.payload !== null;
+}
+
+function hasStringProperty(value: object, property: string): boolean {
+  return property in value && typeof (value as Record<string, unknown>)[property] === "string";
+}
+
+function hasNumberProperty(value: object, property: string): boolean {
+  return property in value && typeof (value as Record<string, unknown>)[property] === "number";
+}
+
+function hasTextMessageProperty(value: object, property: string): boolean {
+  if (!(property in value)) {
+    return false;
+  }
+  return isTextMessage((value as Record<string, unknown>)[property]);
+}
+
+function isTextMessage(value: unknown): value is ChatTextMessage {
+  return typeof value === "object"
+    && value !== null
+    && hasStringProperty(value, "message_id")
+    && hasNumberProperty(value, "conversation_id")
+    && hasNumberProperty(value, "conversation_seq")
+    && hasNumberProperty(value, "sender_user_id")
+    && hasStringProperty(value, "client_message_id")
+    && "message_type" in value
+    && value.message_type === "text"
+    && "content" in value
+    && typeof value.content === "object"
+    && value.content !== null
+    && hasStringProperty(value.content, "text")
+    && hasStringProperty(value, "created_at");
 }
 
 function isChatAuthErrorCode(value: unknown): boolean {
