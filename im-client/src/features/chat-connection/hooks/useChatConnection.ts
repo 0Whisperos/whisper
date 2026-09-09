@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import { connectChatWebSocket, type ChatConnectionController } from "../api";
-import type { ChatConnectionState, WebSocketFactory } from "../types";
+import type { ChatBusinessServerFrame, ChatConnectionState, ChatSendTextMessageInput, WebSocketFactory } from "../types";
 import type { AuthSession } from "../../login/types";
 
 interface UseChatConnectionOptions {
   session: AuthSession;
   refreshSession: () => Promise<AuthSession | null>;
+  onServerFrame?: (frame: ChatBusinessServerFrame) => void;
   webSocketFactory?: WebSocketFactory;
   requestIdFactory?: () => string;
 }
@@ -14,6 +15,7 @@ interface UseChatConnectionOptions {
 export function useChatConnection({
   session,
   refreshSession,
+  onServerFrame,
   webSocketFactory,
   requestIdFactory,
 }: UseChatConnectionOptions) {
@@ -21,10 +23,12 @@ export function useChatConnection({
   const controllerRef = useRef<ChatConnectionController | null>(null);
   const sessionRef = useRef(session);
   const refreshSessionRef = useRef(refreshSession);
+  const onServerFrameRef = useRef(onServerFrame);
   const reconnectAttemptRef = useRef(0);
 
   sessionRef.current = session;
   refreshSessionRef.current = refreshSession;
+  onServerFrameRef.current = onServerFrame;
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +48,7 @@ export function useChatConnection({
             void refreshAndReconnect();
           }
         },
+        onServerFrame: (frame) => onServerFrameRef.current?.(frame),
       });
     }
 
@@ -74,5 +79,11 @@ export function useChatConnection({
   return {
     state,
     close: () => controllerRef.current?.close(),
+    sendTextMessage: (input: ChatSendTextMessageInput) => {
+      if (!controllerRef.current) {
+        throw new Error("chat connection is not available");
+      }
+      controllerRef.current.sendTextMessage(input);
+    },
   };
 }

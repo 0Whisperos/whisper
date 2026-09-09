@@ -74,6 +74,64 @@ describe("useChatConnection", () => {
     expect(sockets[0].readyState).toBe(WebSocket.CLOSED);
   });
 
+  it("exposes text sending and business server frames through the hook", () => {
+    // 测试目标：验证页面可通过 hook 发送认证后的文本消息，并接收业务帧回调。
+    // 构造方法：渲染 hook、打开并认证测试 socket，调用返回的 sendTextMessage 后注入 server_accepted。
+    // 输入数据：clientMessageId=client-message-1、conversationId=10001、text="hello" 和正式 message_id=message-1。
+    // 预期行为：socket 发送 send_message，onServerFrame 收到 server_accepted，且 hook 保持 authenticated。
+    vi.useFakeTimers();
+    const socket = new MockWebSocket();
+    const onServerFrame = vi.fn();
+    const webSocketFactory = () => socket;
+    const requestIdFactory = () => "req-1";
+    const { result } = renderHook(() => useChatConnection({
+      session: initialSession,
+      refreshSession: vi.fn(),
+      onServerFrame,
+      webSocketFactory,
+      requestIdFactory,
+    }));
+    act(() => {
+      socket.open();
+      socket.receive(JSON.stringify({
+        type: "auth_ok",
+        request_id: "req-1",
+        payload: {
+          user_id: 20001,
+          connection_id: "connection-uuid",
+          access_token_expires_at: "2026-08-16T12:15:00+08:00",
+        },
+      }));
+      result.current.sendTextMessage({
+        clientMessageId: "client-message-1",
+        conversationId: 10001,
+        text: "hello",
+        clientSentAt: "2026-08-16T12:00:00.000+08:00",
+      });
+      socket.receive(JSON.stringify({
+        type: "server_accepted",
+        request_id: "req-message",
+        payload: {
+          client_message_id: "client-message-1",
+          message: {
+            message_id: "message-1",
+            conversation_id: 10001,
+            conversation_seq: 42,
+            sender_user_id: 20001,
+            client_message_id: "client-message-1",
+            message_type: "text",
+            content: { text: "hello" },
+            created_at: "2026-08-16T12:00:01.123+08:00",
+          },
+        },
+      }));
+    });
+
+    expect(JSON.parse(socket.sent[2])).toMatchObject({ type: "send_message" });
+    expect(onServerFrame).toHaveBeenCalledWith(expect.objectContaining({ type: "server_accepted" }));
+    expect(result.current.state.status).toBe("authenticated");
+  });
+
   it("refreshes the session and reconnects when auth fails because the token expired", async () => {
     // 测试目标：验证 auth_failed token_expired 会调用 refreshSession 并用新 session 重连。
     // 构造方法：渲染 hook，第一条 socket 注入 token_expired，refreshSession 返回新 access token 和 ws_url。
