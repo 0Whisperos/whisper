@@ -1,4 +1,4 @@
-use crate::auth;
+use crate::{auth, message};
 use crate::config::Config;
 use crate::connection::{ActiveConnection, ConnectionRegistry};
 use crate::frame;
@@ -8,6 +8,7 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use sqlx::MySqlPool;
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
@@ -19,6 +20,7 @@ pub(crate) async fn handle_socket(
     config: Arc<Config>,
     presence: Arc<PresenceManager>,
     connections: ConnectionRegistry,
+    mysql_pool: MySqlPool,
 ) {
     let authenticated = match auth::certification(socket, config.clone()).await {
         Ok(Some(authenticated)) => authenticated,
@@ -75,6 +77,7 @@ pub(crate) async fn handle_socket(
         access_token_expires_at,
         write_tx,
         presence.clone(),
+        mysql_pool,
     )
     .await;
     cleanup_connection(&connections, presence, user_id, &connection_id).await;
@@ -149,10 +152,11 @@ async fn run_connection_loop(
     access_token_expires_at: OffsetDateTime,
     write_tx: mpsc::Sender<Message>,
     presence: Arc<PresenceManager>,
+    mysql_pool: MySqlPool,
 ) {
     // TODO: 当前循环先搭建连接生命周期骨架，后续补充 token 刷新通知、客户端消息分发和关闭原因。
     let mut client_heartbeat =
-        ClientHeartbeat::new(Instant::now(), write_tx, user_id, connection_id.to_string());
+        ClientHeartbeat::new(Instant::now(), write_tx.clone(), user_id, connection_id.to_string());
     loop {
         tokio::select! {
             should_continue = client_heartbeat.refresh_presence(presence.as_ref()) => {
@@ -180,6 +184,8 @@ async fn run_connection_loop(
                             &mut client_heartbeat,
                             user_id,
                             connection_id,
+                            write_tx.clone(),
+                            &mysql_pool,
                         ).await {
                             break;
                         }
@@ -208,6 +214,8 @@ async fn handle_client_frame(
     client_heartbeat: &mut ClientHeartbeat,
     user_id: u64,
     connection_id: &str,
+    write_tx: mpsc::Sender<Message>,
+    mysql_pool: &MySqlPool,
 ) -> bool {
     let raw_frame: frame::Frame<serde_json::Value> = match serde_json::from_slice(bytes) {
         Ok(frame) => frame,
@@ -229,6 +237,9 @@ async fn handle_client_frame(
                 client_heartbeat.handle_frame(raw_frame).await,
                 ClientFrameHandleResult::Continue
             )
+        }
+        message::SEND_MESSAGE => {
+            message::handle_frame(raw_frame, mysql_pool, write_tx, user_id, connection_id).await
         }
         frame_type => {
             tracing::debug!(
