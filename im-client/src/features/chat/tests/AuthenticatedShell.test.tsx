@@ -1,12 +1,28 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthenticatedShell } from "../components/AuthenticatedShell";
 import { chatMockData } from "../mockData";
 
-function renderShell() {
-  return render(<AuthenticatedShell data={chatMockData} connectionLabel="聊天连接在线：connection-uuid" isLoggingOut={false} onLogout={() => undefined} />);
+interface RenderShellOptions {
+  canSendMessages?: boolean;
+  onSendText?: (conversationId: number, text: string) => boolean | void;
+  onRetryMessage?: (clientMessageId: string) => void;
+}
+
+function renderShell({ canSendMessages, onSendText, onRetryMessage }: RenderShellOptions = {}) {
+  return render(
+    <AuthenticatedShell
+      data={chatMockData}
+      connectionLabel="聊天连接在线：connection-uuid"
+      canSendMessages={canSendMessages}
+      isLoggingOut={false}
+      onLogout={() => undefined}
+      onSendText={onSendText}
+      onRetryMessage={onRetryMessage}
+    />,
+  );
 }
 
 afterEach(() => {
@@ -53,27 +69,124 @@ describe("AuthenticatedShell", () => {
     expect(screen.getByText("可以，我会准备好。")).toBeInTheDocument();
   });
 
-  it("keeps send as a preview-only action", async () => {
-    // 测试目标：验证发送按钮按 trim 后文本启用，但当前只展示预览反馈。
-    // 构造方法：记录初始消息数量，依次输入空白和非空文本后点击发送。
-    // 输入数据：空白文本三个空格，以及正文“测试预览”。
-    // 预期行为：空白不可发送，非空可发送；点击后消息数量不增加且输入不清空。
+  it("submits trimmed text and clears the current conversation draft after acceptance", async () => {
+    // 测试目标：验证已认证时发送按钮提交裁剪后的文本，并在数据层接受提交后清空当前草稿。
+    // 构造方法：渲染带可观察发送回调的工作台，输入带首尾空格的正文并点击发送按钮。
+    // 输入数据：当前会话 10002 的文本“  测试发送  ”。
+    // 预期行为：回调收到会话 10002 和“测试发送”，输入框清空，且不保留预览提示。
     const user = userEvent.setup();
-    renderShell();
+    const onSendText = vi.fn(() => true);
+    renderShell({ canSendMessages: true, onSendText });
     const input = screen.getByLabelText("输入消息");
     const send = screen.getByRole("button", { name: "发送消息" });
-    const initialMessages = screen.getAllByRole("article").length;
 
     await user.type(input, "   ");
     expect(send).toBeDisabled();
     await user.clear(input);
-    await user.type(input, "测试预览");
+    await user.type(input, "  测试发送  ");
     expect(send).toBeEnabled();
     await user.click(send);
 
-    expect(screen.getByText("发送仅作界面预览")).toBeInTheDocument();
-    expect(screen.getAllByRole("article")).toHaveLength(initialMessages);
-    expect(input).toHaveValue("测试预览");
+    expect(onSendText).toHaveBeenCalledWith(10002, "测试发送");
+    expect(input).toHaveValue("");
+    expect(screen.queryByText("发送仅作界面预览")).not.toBeInTheDocument();
+  });
+
+  it("keeps sending disabled while the chat connection is not authenticated", async () => {
+    // 测试目标：验证未认证连接不会暴露可用的发送操作，即使当前草稿包含正文。
+    // 构造方法：渲染未传入连接发送权限的工作台，在输入框中填写文本。
+    // 输入数据：正文“等待连接”。
+    // 预期行为：发送按钮保持禁用，且发送回调不会被调用。
+    const user = userEvent.setup();
+    const onSendText = vi.fn(() => true);
+    renderShell({ onSendText });
+
+    await user.type(screen.getByLabelText("输入消息"), "等待连接");
+
+    expect(screen.getByRole("button", { name: "发送消息" })).toBeDisabled();
+    expect(onSendText).not.toHaveBeenCalled();
+  });
+
+  it("renders a pending local message as sending", () => {
+    // 测试目标：验证尚未收到服务端确认的己方消息向用户显示发送中状态。
+    // 构造方法：复制 mock 数据并在当前会话追加 localStatus 为 sending 的临时消息。
+    // 输入数据：client_message_id=client-pending-1、正文“正在发送”。
+    // 预期行为：消息正文与带“发送中”标签的状态同时出现在消息列表中。
+    const data = structuredClone(chatMockData);
+    data.conversations[10002].messages.push({
+      localKey: "local:client-pending-1",
+      messageId: null,
+      conversationId: 10002,
+      conversationSeq: null,
+      senderUserId: 20001,
+      clientMessageId: "client-pending-1",
+      messageType: "text",
+      content: { text: "正在发送" },
+      createdAt: null,
+      clientSentAt: "2026-08-30T12:00:00+08:00",
+      localStatus: "sending",
+      displayTime: "12:00",
+      showTime: false,
+      showAvatar: true,
+    });
+
+    render(
+      <AuthenticatedShell
+        data={data}
+        connectionLabel="聊天连接在线：connection-uuid"
+        canSendMessages
+        isLoggingOut={false}
+        onLogout={() => undefined}
+        onSendText={() => true}
+      />,
+    );
+
+    expect(screen.getByText("正在发送")).toBeInTheDocument();
+    expect(screen.getByLabelText("发送中")).toBeInTheDocument();
+  });
+
+  it("renders failed messages with a retry action that preserves their client message identity", async () => {
+    // 测试目标：验证失败的本地消息提示发送失败，并把原 client_message_id 交给重试回调。
+    // 构造方法：复制 mock 数据并在当前会话追加一条失败的己方临时消息，然后点击其重试按钮。
+    // 输入数据：client_message_id=client-failed-1、正文“需要重试”、错误码 network_error。
+    // 预期行为：界面显示发送失败和重试按钮，点击后回调只收到 client-failed-1。
+    const user = userEvent.setup();
+    const onRetryMessage = vi.fn();
+    const data = structuredClone(chatMockData);
+    data.conversations[10002].messages.push({
+      localKey: "local:client-failed-1",
+      messageId: null,
+      conversationId: 10002,
+      conversationSeq: null,
+      senderUserId: 20001,
+      clientMessageId: "client-failed-1",
+      messageType: "text",
+      content: { text: "需要重试" },
+      createdAt: null,
+      clientSentAt: "2026-08-30T12:00:00+08:00",
+      localStatus: "failed",
+      errorCode: "network_error",
+      displayTime: "12:00",
+      showTime: false,
+      showAvatar: true,
+    });
+
+    render(
+      <AuthenticatedShell
+        data={data}
+        connectionLabel="聊天连接在线：connection-uuid"
+        canSendMessages
+        isLoggingOut={false}
+        onLogout={() => undefined}
+        onSendText={() => true}
+        onRetryMessage={onRetryMessage}
+      />,
+    );
+
+    expect(screen.getByText("需要重试")).toBeInTheDocument();
+    expect(screen.getByLabelText("发送失败")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重试" }));
+    expect(onRetryMessage).toHaveBeenCalledWith("client-failed-1");
   });
 
   it("stores drafts independently for each conversation", async () => {
@@ -82,7 +195,7 @@ describe("AuthenticatedShell", () => {
     // 输入数据：林晓草稿为三个空格，周然草稿为“同步草稿”。
     // 预期行为：两个会话各自恢复原文，林晓空白草稿恢复后发送仍禁用。
     const user = userEvent.setup();
-    renderShell();
+    renderShell({ canSendMessages: true });
     const input = screen.getByLabelText("输入消息");
     const send = screen.getByRole("button", { name: "发送消息" });
 

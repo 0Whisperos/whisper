@@ -18,8 +18,11 @@ import { SessionPanel } from "./SessionPanel";
 interface AuthenticatedShellProps {
   data: ChatData;
   connectionLabel: string;
+  canSendMessages?: boolean;
   isLoggingOut: boolean;
   onLogout: () => void;
+  onSendText?: (conversationId: number, text: string) => boolean | void;
+  onRetryMessage?: (clientMessageId: string) => void;
   loadConversationHistory?: (conversationId: number) => Promise<void>;
   retryConversationHistory?: (conversationId: number) => void;
   loadingConversationId?: number | null;
@@ -29,8 +32,11 @@ interface AuthenticatedShellProps {
 export function AuthenticatedShell({
   data,
   connectionLabel,
+  canSendMessages = false,
   isLoggingOut,
   onLogout,
+  onSendText = () => false,
+  onRetryMessage = () => undefined,
   loadConversationHistory,
   retryConversationHistory,
   loadingConversationId = null,
@@ -138,6 +144,13 @@ export function AuthenticatedShell({
     }
   };
 
+  const handleSendText = (text: string) => {
+    const accepted = onSendText(workspace.activeConversationId, text);
+    if (accepted !== false) {
+      drafts.setDraft("");
+    }
+  };
+
   return (
     <main
       className="auth-shell"
@@ -171,7 +184,7 @@ export function AuthenticatedShell({
         self={data.self}
         connectionLabel={connectionLabel}
         draft={drafts.draft}
-        canSend={drafts.canSend}
+        canSend={drafts.canSend && canSendMessages}
         statusMessage={workspace.statusMessages.chat}
         isHistoryLoading={loadingConversationId === workspace.activeConversationId}
         historyError={getConversationHistoryError(workspace.activeConversationId)}
@@ -181,6 +194,8 @@ export function AuthenticatedShell({
         onOpenDetail={openDetailPanel}
         onToolPreview={(name) => showToolPreview(name, "chat")}
         onChangeDraft={drafts.setDraft}
+        onSendText={handleSendText}
+        onRetryMessage={onRetryMessage}
       />
       <div className="auth-layout-resizer auth-composer-resizer" aria-label="调整消息输入区高度" {...layout.resizerProps("composer")} />
       <ContactsPanel

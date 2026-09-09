@@ -6,9 +6,10 @@ interface ComposerProps {
   statusMessage: string;
   onChangeDraft: (value: string) => void;
   onToolPreview: (name: string) => void;
+  onSendText: (text: string) => void;
 }
 
-export function Composer({ draft, canSend, statusMessage, onChangeDraft, onToolPreview }: ComposerProps) {
+export function Composer({ draft, canSend, statusMessage, onChangeDraft, onToolPreview, onSendText }: ComposerProps) {
   return (
     <footer className="auth-composer">
       <div className="auth-composer-actions">
@@ -33,7 +34,7 @@ export function Composer({ draft, canSend, statusMessage, onChangeDraft, onToolP
         aria-label="发送消息"
         title="发送消息"
         disabled={!canSend}
-        onClick={() => onToolPreview("发送")}
+        onClick={() => onSendText(draft.trim())}
       >
         发送
       </button>

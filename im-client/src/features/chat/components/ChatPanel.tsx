@@ -20,6 +20,8 @@ interface ChatPanelProps {
   onOpenDetail: (trigger: HTMLButtonElement) => void;
   onToolPreview: (name: string) => void;
   onChangeDraft: (value: string) => void;
+  onSendText: (text: string) => void;
+  onRetryMessage: (clientMessageId: string) => void;
 }
 
 export function ChatPanel({
@@ -37,6 +39,8 @@ export function ChatPanel({
   onOpenDetail,
   onToolPreview,
   onChangeDraft,
+  onSendText,
+  onRetryMessage,
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
 
@@ -82,7 +86,7 @@ export function ChatPanel({
           const previous = conversation.messages[index - 1];
           const compact = Boolean(previous && previous.senderUserId === message.senderUserId && !message.showTime);
           return (
-            <div key={message.messageId} className="auth-message-group">
+            <div key={message.localKey} className="auth-message-group">
               {message.showTime ? <time className="auth-message-time">{message.displayTime}</time> : null}
               <article className={`auth-message-row ${isSelf ? "self" : ""} ${compact ? "compact" : ""}`}>
                 <Avatar avatar={profile?.avatar ?? "?"} tone={profile?.tone ?? "gray"} className="auth-message-avatar" />
@@ -94,6 +98,17 @@ export function ChatPanel({
                       <span className={`auth-message-receipt ${message.receipt === "已读" ? "is-read" : "is-pending"}`} aria-label={message.receipt}>
                         {message.receipt === "已读" ? <Icon name="check" /> : null}
                       </span>
+                    </footer>
+                  ) : null}
+                  {isSelf && message.localStatus === "sending" ? (
+                    <footer className="auth-message-footer">
+                      <span className="auth-message-status" aria-label="发送中">发送中</span>
+                    </footer>
+                  ) : null}
+                  {isSelf && message.localStatus === "failed" ? (
+                    <footer className="auth-message-footer">
+                      <span className="auth-message-status" aria-label="发送失败">发送失败</span>
+                      <button type="button" className="auth-message-retry" onClick={() => onRetryMessage(message.clientMessageId)}>重试</button>
                     </footer>
                   ) : null}
                 </div>
@@ -115,6 +130,7 @@ export function ChatPanel({
         statusMessage={statusMessage}
         onChangeDraft={onChangeDraft}
         onToolPreview={onToolPreview}
+        onSendText={onSendText}
       />
     </section>
   );
