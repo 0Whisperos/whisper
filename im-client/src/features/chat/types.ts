@@ -39,14 +39,19 @@ export interface TextMessageContent {
 }
 
 export interface ChatMessage {
-  messageId: string;
+  /** Stable client-side key. Pending messages keep this value after acknowledgement. */
+  localKey: string;
+  messageId: string | null;
   conversationId: number;
-  conversationSeq: number;
+  conversationSeq: number | null;
   senderUserId: number;
   clientMessageId: string;
   messageType: "text";
   content: TextMessageContent;
-  createdAt: string;
+  createdAt: string | null;
+  clientSentAt: string;
+  localStatus: "sending" | "accepted" | "failed";
+  errorCode?: string;
   displayTime: string;
   showTime: boolean;
   showAvatar: boolean;

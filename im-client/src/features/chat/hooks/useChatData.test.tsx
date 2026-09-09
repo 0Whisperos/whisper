@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatApiError } from "../api";
 import type { ChatFriendDto } from "../types";
 import type { AuthSession } from "../../login/types";
+import { insertPendingTextMessage } from "./messageTimeline";
 import { useChatData } from "./useChatData";
 
 const { loadCurrentUserMock, loadFriendsMock, loadConversationMessagesMock } = vi.hoisted(() => ({
@@ -125,6 +126,66 @@ describe("useChatData", () => {
       ["message-2", 2],
     ]);
     expect(result.current.data?.sessions[0]).toMatchObject({ preview: "第二条更新" });
+  });
+
+  it("merges a pending self message when a concurrent history response arrives first", async () => {
+    // 测试目标：验证历史拉取与发送确认交错时，历史中的正式消息会折叠已有本地临时气泡。
+    // 构造方法：延迟会话历史响应，开始加载后插入 sending 消息，再先返回相同 client_message_id 的正式历史记录。
+    // 输入数据：会话 42、client_message_id=client-pending-1，以及服务端 message_id=message-9、sequence=9。
+    // 预期行为：历史完成后仅保留一条 stable localKey 的 accepted 正式消息，不遗留 sending 重复气泡。
+    mockBootstrap();
+    let resolveHistory: (value: {
+      messages: Array<{
+        messageId: string;
+        conversationId: number;
+        conversationSeq: number;
+        senderUserId: number;
+        clientMessageId: string;
+        messageType: "text";
+        content: { text: string };
+        createdAt: string;
+      }>;
+      hasMore: boolean;
+    }) => void = () => undefined;
+    loadConversationMessagesMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveHistory = resolve;
+    }));
+
+    const { result } = renderHook(() => useChatData("http://api.test", session));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    let history: Promise<void> = Promise.resolve();
+    act(() => {
+      history = result.current.loadHistory(42);
+    });
+    act(() => {
+      result.current.updateData((current) => current ? insertPendingTextMessage(current, {
+        conversationId: 42,
+        senderUserId: 20001,
+        clientMessageId: "client-pending-1",
+        text: "竞态消息",
+        clientSentAt: "2026-08-30T08:00:00.000+08:00",
+      }) : current);
+    });
+    await act(async () => {
+      resolveHistory({
+        messages: [{
+          messageId: "message-9",
+          conversationId: 42,
+          conversationSeq: 9,
+          senderUserId: 20001,
+          clientMessageId: "client-pending-1",
+          messageType: "text",
+          content: { text: "竞态消息" },
+          createdAt: "2026-08-30T08:00:01.000+08:00",
+        }],
+        hasMore: false,
+      });
+      await history;
+    });
+
+    expect(result.current.data?.conversations[42].messages).toEqual([
+      expect.objectContaining({ localKey: "local:client-pending-1", messageId: "message-9", localStatus: "accepted" }),
+    ]);
   });
 
   it("keeps history errors retryable without discarding the bootstrap data", async () => {

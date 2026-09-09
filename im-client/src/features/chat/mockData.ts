@@ -13,6 +13,7 @@ function textMessage(
   receipt?: "已读" | "已送达",
 ): ChatMessage {
   return {
+    localKey: `message-${conversationId}-${sequence}`,
     messageId: `00000000-0000-4000-8000-${String(conversationId).padStart(6, "0")}${String(sequence).padStart(6, "0")}`,
     conversationId,
     conversationSeq: sequence,
@@ -21,6 +22,8 @@ function textMessage(
     messageType: "text",
     content: { text },
     createdAt: `2026-08-16T10:${String(sequence).padStart(2, "0")}:00+08:00`,
+    clientSentAt: `2026-08-16T10:${String(sequence).padStart(2, "0")}:00+08:00`,
+    localStatus: "accepted",
     displayTime,
     showTime,
     showAvatar,

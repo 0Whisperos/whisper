@@ -12,6 +12,7 @@ import type {
   ChatSessionItem,
 } from "../types";
 import type { AuthSession } from "../../login/types";
+import { mergeOfficialMessage, toAcceptedTimelineMessage } from "./messageTimeline";
 
 const AVATAR_TONES: AvatarTone[] = ["blue", "teal", "gold", "orange", "purple", "rose", "green", "gray"];
 
@@ -100,6 +101,10 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     return loadHistory(conversationId);
   }, [loadHistory]);
 
+  const updateData = useCallback((updater: (current: ChatData | null) => ChatData | null) => {
+    setData(updater);
+  }, []);
+
   return {
     data,
     isLoading,
@@ -107,6 +112,7 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     retry: loadInitialData,
     loadHistory,
     retryHistory,
+    updateData,
     loadingConversationId,
     historyError: (conversationId: number) => historyErrors[conversationId] ?? null,
   };
@@ -199,38 +205,34 @@ function toContact(friend: ChatFriendDto, index: number) {
 }
 
 function toChatMessage(message: ChatMessageDto): ChatMessage {
-  return {
-    ...message,
-    displayTime: formatMessageTime(message.createdAt),
-    showTime: true,
-    showAvatar: true,
-  };
+  return toAcceptedTimelineMessage(message);
 }
 
 function mergeConversationMessages(data: ChatData, conversationId: number, incoming: ChatMessage[]): ChatData {
-  const conversation = data.conversations[conversationId];
-  if (!conversation) {
+  if (!data.conversations[conversationId]) {
     return data;
   }
-  const byId = new Map(conversation.messages.map((message) => [message.messageId, message]));
-  incoming.forEach((message) => byId.set(message.messageId, message));
-  const messages = Array.from(byId.values()).sort((left, right) => left.conversationSeq - right.conversationSeq);
-  const lastMessage = messages[messages.length - 1];
-  const sessions = data.sessions.map((session) => session.conversationId === conversationId
-    ? {
-      ...session,
-      preview: lastMessage?.content.text ?? "暂无消息",
-      time: lastMessage ? formatShortTime(lastMessage.createdAt) : "",
+  const messagesByID = new Map<string, ChatMessage>();
+  incoming.forEach((message) => {
+    if (message.messageId !== null) {
+      messagesByID.set(message.messageId, message);
     }
-    : session);
-  return {
-    ...data,
-    sessions,
-    conversations: {
-      ...data.conversations,
-      [conversationId]: { ...conversation, messages },
-    },
-  };
+  });
+  return [...messagesByID.values()].reduce((current, message) => {
+    if (message.messageId === null || message.conversationSeq === null || message.createdAt === null) {
+      return current;
+    }
+    return mergeOfficialMessage(current, {
+      message_id: message.messageId,
+      conversation_id: message.conversationId,
+      conversation_seq: message.conversationSeq,
+      sender_user_id: message.senderUserId,
+      client_message_id: message.clientMessageId,
+      message_type: message.messageType,
+      content: message.content,
+      created_at: message.createdAt,
+    });
+  }, data);
 }
 
 function displayName(nickname: string, account: string): string {
