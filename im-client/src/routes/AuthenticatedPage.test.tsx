@@ -33,6 +33,11 @@ describe("AuthenticatedPage", () => {
   beforeEach(() => {
     useChatConnectionMock.mockReset();
     useChatDataMock.mockReset();
+    useChatConnectionMock.mockReturnValue({
+      state: { status: "closed" } satisfies ChatConnectionState,
+      close: vi.fn(),
+      sendTextMessage: vi.fn(),
+    });
     useChatDataMock.mockReturnValue({
       data: chatMockData,
       isLoading: false,
@@ -42,6 +47,7 @@ describe("AuthenticatedPage", () => {
       retryHistory: vi.fn(),
       loadingConversationId: null,
       historyError: () => null,
+      updateData: vi.fn(),
     });
   });
 
@@ -85,6 +91,7 @@ describe("AuthenticatedPage", () => {
         accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
       } satisfies ChatConnectionState,
       close: vi.fn(),
+      sendTextMessage: vi.fn(),
     });
 
     render(<AuthenticatedPage apiBaseUrl="http://127.0.0.1:8080" session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
@@ -94,6 +101,49 @@ describe("AuthenticatedPage", () => {
     expect(screen.getAllByRole("button", { name: "好友" })[0]).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "林晓" })).toBeInTheDocument();
     expect(screen.getByText(/聊天连接在线：connection-uuid/)).toBeInTheDocument();
+  });
+
+  it("coordinates authenticated send requests through chat data and the WebSocket transport", async () => {
+    // 测试目标：验证页面只在连接认证完成后，将当前会话的发送操作委托给消息状态层与连接层传输函数。
+    // 构造方法：分别 mock 认证状态、聊天数据更新函数和连接层发送函数，随后从可见输入框提交文本。
+    // 输入数据：会话 10002 的文本“页面接线”。
+    // 预期行为：连接层 transport 收到会话、裁剪文本与本地消息标识，输入框随后清空。
+    const sendTransport = vi.fn();
+    const updateData = vi.fn();
+    useChatConnectionMock.mockReturnValueOnce({
+      state: {
+        status: "authenticated",
+        userId: 20001,
+        connectionId: "connection-uuid",
+        accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
+      } satisfies ChatConnectionState,
+      close: vi.fn(),
+      sendTextMessage: sendTransport,
+    });
+    useChatDataMock.mockReturnValueOnce({
+      data: chatMockData,
+      isLoading: false,
+      error: null,
+      retry: vi.fn(),
+      loadHistory: vi.fn(),
+      retryHistory: vi.fn(),
+      loadingConversationId: null,
+      historyError: () => null,
+      updateData,
+    });
+    const user = userEvent.setup();
+
+    render(<AuthenticatedPage apiBaseUrl="http://127.0.0.1:8080" session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
+    const input = screen.getByLabelText("输入消息");
+    await user.type(input, "  页面接线  ");
+    await user.click(screen.getByRole("button", { name: "发送消息" }));
+
+    expect(updateData).toHaveBeenCalledTimes(1);
+    expect(sendTransport).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: 10002,
+      text: "页面接线",
+    }));
+    expect(input).toHaveValue("");
   });
 
   it("shows auth_failed using the stable error code", () => {

@@ -1,7 +1,10 @@
+import { useRef } from "react";
+
 import { useChatConnection } from "../features/chat-connection/hooks/useChatConnection";
-import type { ChatConnectionState } from "../features/chat-connection/types";
+import type { ChatBusinessServerFrame, ChatConnectionState } from "../features/chat-connection/types";
 import { AuthenticatedShell } from "../features/chat/components/AuthenticatedShell";
 import { useChatData } from "../features/chat/hooks/useChatData";
+import { useChatMessaging } from "../features/chat/hooks/useChatMessaging";
 import type { AuthSession } from "../features/login/types";
 
 interface AuthenticatedPageProps {
@@ -13,8 +16,29 @@ interface AuthenticatedPageProps {
 }
 
 export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggingOut, onLogout }: AuthenticatedPageProps) {
-  const chatConnection = useChatConnection({ session, refreshSession });
   const chatData = useChatData(apiBaseUrl, session);
+  const serverFrameHandlerRef = useRef<(frame: ChatBusinessServerFrame) => void>(() => undefined);
+  const chatConnection = useChatConnection({
+    session,
+    refreshSession,
+    onServerFrame: (frame) => serverFrameHandlerRef.current(frame),
+  });
+  const messaging = useChatMessaging({
+    data: chatData.data,
+    updateData: chatData.updateData,
+    sendTextMessage: chatConnection.sendTextMessage,
+  });
+  serverFrameHandlerRef.current = messaging.handleServerFrame;
+
+  const canSendMessages = chatConnection.state.status === "authenticated";
+
+  function handleSendText(conversationId: number, text: string): boolean {
+    return messaging.send(conversationId, text);
+  }
+
+  function handleRetryMessage(clientMessageId: string) {
+    messaging.retry(clientMessageId);
+  }
 
   function handleLogout() {
     chatConnection.close();
@@ -38,8 +62,11 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     <AuthenticatedShell
       data={chatData.data}
       connectionLabel={describeChatConnection(chatConnection.state)}
+      canSendMessages={canSendMessages}
       isLoggingOut={isLoggingOut}
       onLogout={handleLogout}
+      onSendText={handleSendText}
+      onRetryMessage={handleRetryMessage}
       loadConversationHistory={chatData.loadHistory}
       retryConversationHistory={chatData.retryHistory}
       loadingConversationId={chatData.loadingConversationId}
