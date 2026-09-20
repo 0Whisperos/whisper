@@ -993,6 +993,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-tungstenite",
  "toml",
  "tracing",
  "tracing-subscriber",
