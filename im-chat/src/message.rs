@@ -1,5 +1,8 @@
 mod content;
+mod event;
 mod store;
+
+pub(crate) use event::{EventValidationError, MessageCreatedEvent};
 
 use crate::frame::{self, Frame};
 use axum::extract::ws::Message;
@@ -28,7 +31,7 @@ pub(crate) struct SendMessagePayload {
     pub(crate) client_sent_at: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct AcceptedMessage {
     pub(crate) message_id: String,
     pub(crate) conversation_id: u64,
