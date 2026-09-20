@@ -120,7 +120,7 @@ services:
       - |
         mysql -h mysql -uroot -p"$${MYSQL_ROOT_PASSWORD}" <<SQL
         GRANT ALL PRIVILEGES ON \`$${MYSQL_DATABASE}\`.* TO '$${MYSQL_USERNAME}'@'%';
-        GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '$${MYSQL_USERNAME}'@'%';
+        GRANT REPLICATION SLAVE, REPLICATION CLIENT, RELOAD, SHOW DATABASES ON *.* TO '$${MYSQL_USERNAME}'@'%';
         FLUSH PRIVILEGES;
         SQL
     restart: "no"
@@ -151,6 +151,13 @@ services:
           --topic whisper.chat.message-events.v1 \
           --partitions ${KAFKA_CHAT_TOPIC_PARTITIONS:-3} \
           --replication-factor 1
+        /opt/kafka/bin/kafka-configs.sh \
+          --bootstrap-server kafka:9092 \
+          --command-config /tmp/kafka-client.properties \
+          --entity-type topics \
+          --entity-name whisper.chat.message-events.v1 \
+          --alter \
+          --add-config retention.ms=604800000
         /opt/kafka/bin/kafka-topics.sh \
           --bootstrap-server kafka:9092 \
           --command-config /tmp/kafka-client.properties \
@@ -162,7 +169,7 @@ services:
     restart: "no"
 
   kafka-connect:
-    image: quay.io/debezium/connect:${DEBEZIUM_VERSION:-2.7}
+    image: quay.io/debezium/connect:${DEBEZIUM_VERSION:-3.0.8.Final}
     container_name: whisper-kafka-connect
     depends_on:
       kafka:
@@ -191,6 +198,7 @@ services:
       CONNECT_PRODUCER_SECURITY_PROTOCOL: SASL_PLAINTEXT
       CONNECT_PRODUCER_SASL_MECHANISM: PLAIN
       CONNECT_PRODUCER_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME:-whisper}" password="${KAFKA_PASSWORD:-root}";
+      CONNECT_PRODUCER_COMPRESSION_TYPE: none
       CONNECT_CONSUMER_SECURITY_PROTOCOL: SASL_PLAINTEXT
       CONNECT_CONSUMER_SASL_MECHANISM: PLAIN
       CONNECT_CONSUMER_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME:-whisper}" password="${KAFKA_PASSWORD:-root}";
@@ -207,24 +215,22 @@ services:
       start_period: 30s
 
   debezium-init:
-    image: curlimages/curl:${CURL_VERSION:-8.10.1}
-    container_name: whisper-debezium-init
+    # Run once after database migration: compose --profile init run --rm --no-deps debezium-init.
+    # Reuse the Connect image's Python runtime for structured REST status checks.
+    image: quay.io/debezium/connect:${DEBEZIUM_VERSION:-3.0.8.Final}
     profiles:
       - init
-    depends_on:
-      kafka-connect:
-        condition: service_healthy
-    command:
-      - sh
-      - -ec
-      - |
-        curl -fsS -X PUT http://kafka-connect:8083/connectors/whisper-mysql-outbox/config \
-          -H 'Content-Type: application/json' \
-          -d '{
+    environment:
+      CONNECT_URL: http://kafka-connect:8083
+      CDC_INIT_TIMEOUT_SECONDS: ${CDC_INIT_TIMEOUT_SECONDS:-120}
+      CONNECTOR_CONFIG: |
+          {
             "connector.class": "io.debezium.connector.mysql.MySqlConnector",
             "topic.prefix": "whisper",
             "database.hostname": "mysql",
             "database.port": "3306",
+            "database.server.id": "223345",
+            "snapshot.mode": "initial",
             "database.user": "${MYSQL_USERNAME:-whisper}",
             "database.password": "${MYSQL_PASSWORD:-root}",
             "database.include.list": "${MYSQL_DATABASE:-whisper}",
@@ -249,10 +255,86 @@ services:
             "transforms.outbox.table.field.event.id": "id",
             "transforms.outbox.table.field.event.key": "aggregateid",
             "transforms.outbox.table.field.event.payload": "payload",
-            "transforms.outbox.table.field.event.timestamp": "created_at",
             "transforms.outbox.table.expand.json.payload": "true",
-            "transforms.outbox.table.fields.additional.placement": "type:header:event_type,aggregatetype:header:aggregate_type"
-          }'
+            "transforms.outbox.table.fields.additional.placement": "id:header:event_id,type:header:event_type,aggregatetype:header:aggregate_type"
+          }
+    entrypoint: ["python3", "-u", "-c"]
+    command:
+      - |
+        import json
+        import os
+        import sys
+        import time
+        import urllib.error
+        import urllib.request
+
+        def initialize():
+            timeout = float(os.environ["CDC_INIT_TIMEOUT_SECONDS"])
+            if not 0 < timeout <= 3600:
+                raise ValueError("CDC_INIT_TIMEOUT_SECONDS must be between 0 and 3600")
+            deadline = time.monotonic() + timeout
+            base_url = os.environ["CONNECT_URL"].rstrip("/")
+            config = json.loads(os.environ["CONNECTOR_CONFIG"])
+            connector_path = "/connectors/whisper-mysql-outbox"
+            last_status = "waiting for Kafka Connect REST API"
+
+            def request(method, path, body=None):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("CDC initialization timed out: " + last_status)
+                data = None if body is None else json.dumps(body).encode("utf-8")
+                req = urllib.request.Request(
+                    base_url + path, data=data, method=method,
+                    headers={"Content-Type": "application/json"},
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=min(5, remaining)) as response:
+                        return json.load(response)
+                except urllib.error.HTTPError as error:
+                    if error.code in (404, 409, 500, 502, 503, 504):
+                        return None
+                    raise RuntimeError("Kafka Connect returned HTTP " + str(error.code)) from None
+                except (urllib.error.URLError, TimeoutError, ConnectionError):
+                    return None
+
+            def wait():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("CDC initialization timed out: " + last_status)
+                time.sleep(min(2, remaining))
+
+            print(last_status)
+            while request("GET", "/connectors") is None:
+                wait()
+
+            last_status = "registering whisper-mysql-outbox"
+            print(last_status)
+            while request("PUT", connector_path + "/config", config) is None:
+                wait()
+
+            last_status = "waiting for connector and tasks to be RUNNING"
+            print(last_status)
+            while True:
+                status = request("GET", connector_path + "/status")
+                if status is not None:
+                    connector_state = status.get("connector", {}).get("state", "UNKNOWN")
+                    task_states = [task.get("state", "UNKNOWN") for task in status.get("tasks", [])]
+                    last_status = "connector=" + connector_state + ", tasks=" + str(task_states)
+                    if "FAILED" in [connector_state] + task_states:
+                        raise RuntimeError("CDC initialization failed: " + last_status)
+                    if connector_state == "RUNNING" and task_states and all(
+                        state == "RUNNING" for state in task_states
+                    ):
+                        print("CDC connector is ready: " + last_status)
+                        return
+                wait()
+
+        try:
+            initialize()
+        except (ValueError, RuntimeError, TimeoutError) as error:
+            print(str(error), file=sys.stderr)
+            print("Check configuration and run: docker compose logs --tail 100 kafka-connect", file=sys.stderr)
+            sys.exit(1)
     restart: "no"
 
 volumes:
