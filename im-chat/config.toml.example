@@ -27,3 +27,10 @@ ip = "127.0.0.1"
 port = 3307
 db = "whisper"
 max_connections = 20
+
+[kafka]
+bootstrap_servers = "127.0.0.1:9092"
+topic = "whisper.chat.message-events.v1"
+group_id = "whisper-im-chat-message-delivery-v1"
+username = "whisper"
+password = "root"

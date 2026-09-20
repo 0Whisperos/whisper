@@ -4,6 +4,18 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("invalid configuration {field}: {reason}")]
+    InvalidConfig {
+        field: &'static str,
+        reason: &'static str,
+    },
+
+    #[error("initialize kafka consumer; see application log for details")]
+    KafkaInitialization,
+
+    #[error("background task {task} stopped unexpectedly; see application log for details")]
+    BackgroundTask { task: &'static str },
+
     #[error("read config file {path}: {source}")]
     ReadConfig {
         path: String,

@@ -1,10 +1,12 @@
 pub mod app;
-pub mod error;
-mod handle;
-mod config;
 mod auth;
+mod config;
 mod connection;
+mod delivery;
+pub mod error;
 mod frame;
-mod presence;
+mod handle;
 mod heartbeat;
+mod kafka;
 mod message;
+mod presence;

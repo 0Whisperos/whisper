@@ -1,71 +1,34 @@
+mod bootstrap;
+mod lifecycle;
+mod server;
+
 use std::sync::Arc;
-use axum::extract::{State, ws::WebSocketUpgrade};
-use axum::response::Response;
-use axum::Router;
-use axum::routing::get;
-use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+
 use sqlx::MySqlPool;
-use tokio::net::TcpListener;
-use crate::{config, handle, heartbeat};
+
+use crate::config;
 use crate::connection::ConnectionRegistry;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::presence::PresenceManager;
 
 #[derive(Clone)]
-pub(crate) struct AppState {
-    pub config: Arc<config::Config>,
-    pub presence: Arc<PresenceManager>,
-    pub connections: ConnectionRegistry,
-    pub mysql_pool: MySqlPool,
+struct AppState {
+    config: Arc<config::Config>,
+    presence: Arc<PresenceManager>,
+    connections: ConnectionRegistry,
+    mysql_pool: MySqlPool,
 }
 
 pub async fn run() -> Result<()> {
     let config = Arc::new(config::load_config()?);
-    let mysql_options = MySqlConnectOptions::new()
-        .username(&config.mysql_config.username)
-        .password(&config.mysql_config.password)
-        .host(&config.mysql_config.ip)
-        .port(config.mysql_config.port)
-        .database(&config.mysql_config.db);
-    let mysql_pool = MySqlPoolOptions::new()
-        .max_connections(config.mysql_config.max_connections)
-        .connect_with(mysql_options)
-        .await
-        .map_err(|source| Error::MySql { source })?;
-    let presence = Arc::new(PresenceManager::new(&config.redis_config).map_err(|source| Error::Redis { source })?);
-    let connections = ConnectionRegistry::new();
+    init_logging(&config);
+
+    let prepared = bootstrap::prepare(config).await?;
+    lifecycle::run(prepared).await
+}
+
+fn init_logging(config: &config::Config) {
     tracing_subscriber::fmt()
         .with_env_filter(config.logging_config.level.as_str())
         .init();
-    let state = AppState{
-        config: config.clone(),
-        presence: presence.clone(),
-        connections: connections.clone(),
-        mysql_pool,
-    };
-    let listen_addr = format!("{}:{}", state.config.server_config.ip, state.config.server_config.port);
-    let app = Router::new().route("/ws", get(ws_handler)).with_state(state);
-    let listener =
-        TcpListener::bind(&listen_addr).await.map_err(|source| Error::BindListener {
-            addr: listen_addr,
-            source,
-        })?;
-    presence.register_node(
-        &config.node_config.node_id,
-        &config.node_config.public_ws_url,
-        &config.node_config.rpc_addr,
-    )
-    .await
-    .map_err(|source| Error::Redis { source })?;
-    let _heartbeat_handle = heartbeat::node::spawn(presence.clone(), config.node_config.node_id.clone()).await;
-    axum::serve(listener, app).await.map_err(|source| Error::Serve { source })?;
-    Ok(())
-}
-
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    let config = state.config.clone();
-    let presence = state.presence.clone();
-    let connections = state.connections.clone();
-    let mysql_pool = state.mysql_pool.clone();
-    ws.on_upgrade(|socket| handle::handle_socket(socket, config, presence, connections, mysql_pool))
 }

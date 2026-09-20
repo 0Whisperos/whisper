@@ -1,6 +1,6 @@
-use std::fs;
-use serde::Deserialize;
 use crate::error::{Error, Result};
+use serde::Deserialize;
+use std::fs;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct Config {
@@ -16,6 +16,8 @@ pub(crate) struct Config {
     pub(crate) node_config: NodeConfig,
     #[serde(rename = "mysql")]
     pub(crate) mysql_config: MysqlConfig,
+    #[serde(rename = "kafka")]
+    pub(crate) kafka_config: KafkaConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,13 +62,22 @@ pub(crate) struct MysqlConfig {
     pub(crate) max_connections: u32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct KafkaConfig {
+    pub(crate) bootstrap_servers: String,
+    pub(crate) topic: String,
+    pub(crate) group_id: String,
+    pub(crate) username: String,
+    pub(crate) password: String,
+}
+
 pub(crate) fn load_config() -> Result<Config> {
     let path = "config.toml";
     let content = fs::read_to_string(path).map_err(|source| Error::ReadConfig {
         path: path.to_string(),
         source,
     })?;
-    let config = toml::from_str(content.as_str()).map_err(|source| Error::ParseConfig {
+    let config: Config = toml::from_str(content.as_str()).map_err(|source| Error::ParseConfig {
         path: path.to_string(),
         source,
     })?;

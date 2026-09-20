@@ -1,4 +1,8 @@
-use crate::config::RedisConfig;
+mod route;
+
+#[cfg(test)]
+pub(crate) use route::PresenceRoute;
+pub(crate) use route::RouteState;
 use time::{OffsetDateTime, UtcOffset};
 
 #[derive(Clone)]
@@ -7,17 +11,8 @@ pub(crate) struct PresenceManager {
 }
 
 impl PresenceManager {
-    pub(crate) fn new(redis_config: &RedisConfig) -> Result<Self, redis::RedisError> {
-        let url = format!(
-            "redis://{}:{}@{}:{}/{}",
-            redis_config.username,
-            redis_config.password,
-            redis_config.ip,
-            redis_config.port,
-            redis_config.db
-        );
-        let client = redis::Client::open(url)?;
-        Ok(PresenceManager { client })
+    pub(crate) fn new(client: redis::Client) -> Self {
+        Self { client }
     }
 
     pub(crate) async fn register_node(
