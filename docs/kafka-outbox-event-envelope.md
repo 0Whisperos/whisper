@@ -173,6 +173,28 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 
 ## 可靠性语义
 
+### 当前消费者实现
+
+- 每个 im-chat 启动一个顺序消费者，所有节点共享 `whisper-im-chat-message-delivery-v1`
+  消费组，由 Kafka 自动分配分区；`client.id` 包含节点 ID。分区不永久绑定节点。
+- 关闭自动提交和自动 offset 存储。没有已提交位置时从 earliest 开始，处理结束后只提交
+  当前分区的 offset + 1，不跨过未完成记录。业务重试预算 60 秒，poll 间隔上限 300 秒。
+- Redis `chat:delivery:done:{group_id}:{event_id}` 仅保存已完成标记，TTL 为 604800 秒。
+  没有领取、释放、租约或 token。先查询标记，完成投递决策后写标记，再提交 offset。
+- 本地入队、离线跳过、stale/畸形路由、队列满/关闭和远端 RPC TODO 日志均属于已完成的
+  本轮投递决策，不推进 delivered_seq/read_seq。
+- Redis 查询或 MySQL/Redis 路由读取失败不提交 offset。已经投递后完成标记写入失败，
+  当前流程只重试写标记；offset 提交失败保留标记并重建消费者，不再次执行已完成投递。
+- 坏 JSON、未知事件类型/版本、缺失必需字段/headers 或 key/header/value 冲突，记录
+  topic、partition、offset、可解析的 event_id 与原因，跳过并提交；不记录完整聊天正文。
+- 事件写入 Kafka 后可能重复。并发 rebalance、进程崩溃和 Redis 数据丢失不提供严格
+  exactly-once；去重期限外重放也会再次处理，客户端必须按 message_id 合并。
+- 聊天 topic retention 为 7 天。schema history topic 保持既有设置。
+  Kafka record timestamp 使用 CDC 默认时间，业务时间取 envelope，不依赖 SQL DATETIME
+  到 Kafka timestamp 的转换。
+
+### 协议语义
+
 | 语义 | 说明 |
 | --- | --- |
 | `server_accepted` | 只表示 MySQL 事务提交成功，不表示 Kafka 已发布，也不表示客户端已收到。 |

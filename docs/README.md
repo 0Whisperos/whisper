@@ -853,7 +853,9 @@ Kafka 写入成功不等于客户端已送达。
 
 本阶段负责把 Kafka 中的 `message_created` 事件投递给当前在线的会话成员。Kafka 只负责实时事件分发，离线消息仍以 MySQL `messages` 表为准。
 
-当前阶段按单 `im-chat` 节点、单用户单连接语义实现，但保留 Redis presence 查询步骤，让流程和后续多节点演进方向一致。
+当前阶段以单 `im-chat` 节点、单用户单连接完成在线投递验收。每个节点运行一个 Kafka
+消费者，所有节点共享消费组，由 Kafka 分配分区。消费节点通过 Redis presence 判断实际
+连接归属；需要跨节点投递时只记录日志并保留 RPC TODO，因此多节点尚不保证实时送达。
 
 ### 5.1 投递前提
 
@@ -897,6 +899,16 @@ ActiveConnection
 9. 如果本机连接不存在，或 connection_id 不一致，说明 presence 可能已经过期或连接刚发生重连。本次实时投递可视为未送达；若实现主动删除 stale presence，也必须先校验 Redis 中的 `connection_id` 仍等于待删除的旧连接 ID，否则等待 TTL 自动过期。
 10. 如果 `presence.node_id != current_node_id`，当前阶段不做跨节点转发，先保留 `TODO: 后续通过 RPC 转发到目标 im-chat 节点`。
 11. 当前事件的投递决策完成后，再提交 Kafka offset。
+
+实现中第 1 步只查询 Redis 已完成事件标记，不领取任务或建立租约。
+完成所有成员/路由读取后再进行非阻塞入队；满/关闭队列、stale/畸形路由和远端日志
+均记录为本轮决策结束。此后写入 `chat:delivery:done:{group_id}:{event_id}`（7 天 TTL），
+成功后才提交 offset。MySQL/Redis 故障重试且不越过当前记录；已投递但标记写入失败时
+当前流程只重试标记。坏事件则记录原因并跳过。详细消费与恢复边界见
+`kafka-outbox-event-envelope.md`。
+
+客户端接纳所有发送者的正式事件；仅己方事件清理己方发送确认计时器，临时消息判重
+使用 `(sender_user_id, client_message_id)`，避免不同用户生成相同 client ID 时互相干扰。
 
 这里不要因为 `member_user_id == sender_user_id` 就跳过发送者。发送方已经通过 `server_accepted` 得知“消息已落库”，但 `message_created` 代表“服务端正式时间线出现了这条消息”。发送方客户端收到后不会新增重复气泡，而是合并或确认已有本地消息。
 

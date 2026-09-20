@@ -1,6 +1,6 @@
 # Redis 路由与在线状态规范
 
-本文档定义 Redis 中的聊天节点路由、WebSocket 在线状态和认证续期状态边界。Redis 只保存临时路由和在线软状态；聊天历史、送达游标和已读游标仍以 MySQL 为事实来源。
+本文档定义 Redis 中的聊天节点路由、WebSocket 在线状态、认证续期和事件消费完成标记。聊天历史、送达游标和已读游标仍以 MySQL 为事实来源。
 
 设计依据：
 
@@ -30,6 +30,7 @@
 | --- | --- | --- | --- | --- |
 | `chat_nodes:{node_id}` | Hash | `im-chat` | 30s | 保存 `im-chat` 节点注册信息，供 `im-api` 选择 WebSocket 连接地址。 |
 | `presence:user:{user_id}` | Hash | `im-chat` | 30s | 保存用户当前 WebSocket 在线路由，供 Kafka Consumer 投递在线消息。 |
+| `chat:delivery:done:{group_id}:{event_id}` | String | `im-chat` | 7 天 | 保存事件已完成本轮投递决策的标记，供同一消费组去重。 |
 | `refresh_token:{token_hash}` | String | `im-api` | 由认证策略决定 | 保存 refresh token 的服务端有效性状态，用于已保存账号登录和 access token 续期；不属于在线状态。 |
 | `refresh_token_by_user:{user_id}` | String | `im-api` | 与对应 refresh token 对齐 | 保存当前用户最新 refresh token hash，用于登录替换和 logout 清理；不属于在线状态。 |
 
@@ -217,6 +218,14 @@ Delete: 同一用户重新登录替换时删除旧索引；主动退出登录或
 - refresh token 无效或过期时，客户端清理本地凭证并回到登录页。
 
 ## Consumer 在线投递规则
+
+事件完成标记通过单条 `SET key 1 EX 604800` 写入。只有全部成员的投递决策结束后才写入，
+然后提交 Kafka offset。它不是正在处理的锁，不使用领取、释放、租约或 token。
+标记存在时跳过投递；读取失败需要重试，不能把 Redis 不可用当作未处理或已处理。
+标记写入失败时，当前流程只重试写入；进程重启后可能重复推送，由客户端按 message_id 合并。
+
+与 presence 不同，完成标记不表示在线，也不表示送达。离线、stale、满/关闭队列和远端
+日志也可完成本轮决策；Redis 数据丢失、7 天后过期或 rebalance 并发均可能再次处理事件。
 
 Kafka Consumer 处理 `message_created` 事件时：
 
