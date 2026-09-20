@@ -94,7 +94,11 @@ export function useChatMessaging({
     const current = dataRef.current;
     const message = current && Object.values(current.conversations)
       .flatMap((conversation) => conversation.messages)
-      .find((candidate) => candidate.clientMessageId === clientMessageId && candidate.localStatus === "failed");
+      .find((candidate) => (
+        candidate.senderUserId === current.self.userId
+        && candidate.clientMessageId === clientMessageId
+        && candidate.localStatus === "failed"
+      ));
     if (!message) {
       return false;
     }
@@ -140,11 +144,9 @@ export function useChatMessaging({
   }, [clearAcknowledgementTimer, updateData]);
 
   const handleMessageCreated = useCallback((frame: ChatMessageCreatedFrame) => {
-    if (dataRef.current?.self.userId !== frame.payload.message.sender_user_id) {
-      return;
+    if (dataRef.current?.self.userId === frame.payload.message.sender_user_id) {
+      clearAcknowledgementTimer(frame.payload.message.client_message_id);
     }
-    const clientMessageId = frame.payload.message.client_message_id;
-    clearAcknowledgementTimer(clientMessageId);
     updateData((current) => current ? mergeOfficialMessage(current, frame.payload.message) : current);
   }, [clearAcknowledgementTimer, updateData]);
 

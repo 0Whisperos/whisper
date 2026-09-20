@@ -40,7 +40,7 @@ function acceptedFrame(clientMessageId: string, sequence = 7): ChatServerAccepte
     payload: {
       client_message_id: clientMessageId,
       message: {
-        message_id: "message-7",
+        message_id: `message-${sequence}`,
         conversation_id: 42,
         conversation_seq: sequence,
         sender_user_id: 20001,
@@ -57,7 +57,7 @@ function createdFrame(clientMessageId: string, sequence = 7, senderUserId = 2000
   return {
     type: "message_created",
     payload: {
-      event_id: "event-7",
+      event_id: `event-${sequence}`,
       message: { ...acceptedFrame(clientMessageId, sequence).payload.message, sender_user_id: senderUserId },
     },
   };
@@ -71,9 +71,12 @@ function rejectedFrame(clientMessageId: string): ChatSendMessageRejectedFrame {
   };
 }
 
-function renderMessaging(options: { send?: (input: { clientMessageId: string; conversationId: number; text: string; clientSentAt: string }) => void } = {}) {
+function renderMessaging(options: {
+  send?: (input: { clientMessageId: string; conversationId: number; text: string; clientSentAt: string }) => void;
+  initialData?: ChatData;
+} = {}) {
   return renderHook(() => {
-    const [data, setData] = useState(createData);
+    const [data, setData] = useState(() => options.initialData ?? createData());
     const messaging = useChatMessaging({
       data,
       updateData: (updater) => setData((current) => updater(current) ?? current),
@@ -204,17 +207,108 @@ describe("useChatMessaging", () => {
     ]);
   });
 
-  it("ignores another sender's message_created even when its client id collides", () => {
-    // 测试目标：验证本阶段不会把他人实时事件合并进或覆盖当前用户的临时发送气泡。
+  it("displays another sender's message without acknowledging a colliding local id", () => {
+    // 测试目标：验证他人实时事件正常展示，且不会覆盖或确认当前用户使用相同 ID 的临时气泡。
     // 构造方法：先创建 client-7 的本地 sending 消息，再注入发送者为 20002、但使用同一客户端 ID 的正式事件。
     // 输入数据：conversationId=42、client_message_id=client-7、sender_user_id=20002。
-    // 预期行为：本地气泡保持 sending 且没有 message_id，不插入对方的实时消息。
+    // 预期行为：显示对方 accepted 消息，本地气泡保持 sending，15 秒后仍会确认超时。
     const { result } = renderMessaging();
     act(() => { result.current.messaging.send(42, "你好"); });
     act(() => { result.current.messaging.handleMessageCreated(createdFrame("client-7", 7, 20002)); });
 
     expect(result.current.data.conversations[42].messages).toEqual([
-      expect.objectContaining({ clientMessageId: "client-7", messageId: null, localStatus: "sending" }),
+      expect.objectContaining({ senderUserId: 20002, clientMessageId: "client-7", messageId: "message-7", localStatus: "accepted" }),
+      expect.objectContaining({ senderUserId: 20001, clientMessageId: "client-7", messageId: null, localStatus: "sending" }),
+    ]);
+    act(() => { vi.advanceTimersByTime(15_000); });
+    expect(result.current.data.conversations[42].messages[1]).toMatchObject({ localStatus: "failed", errorCode: "acknowledgement_timeout" });
+    expect(result.current.data.conversations[42].messages[0].localStatus).toBe("accepted");
+  });
+
+  it("inserts a local bubble after an incoming message with the same client id", () => {
+    // 测试目标：验证先收到他人消息后，同一 client_message_id 不会阻止本地临时消息创建。
+    // 构造方法：注入对方正式事件，再发送己方消息，最后处理己方正式事件。
+    // 输入数据：双方均使用 client-7，对方 message-7 与己方 message-8。
+    // 预期行为：临时气泡独立存在并被己方正式事件合并，最终保留两个不同发送者的正式消息。
+    const { result } = renderMessaging();
+    act(() => { result.current.messaging.handleMessageCreated(createdFrame("client-7", 7, 20002)); });
+    act(() => { result.current.messaging.send(42, "我的消息"); });
+    expect(result.current.data.conversations[42].messages).toEqual([
+      expect.objectContaining({ senderUserId: 20002, messageId: "message-7", localStatus: "accepted" }),
+      expect.objectContaining({ senderUserId: 20001, messageId: null, localStatus: "sending", content: { text: "我的消息" } }),
+    ]);
+    act(() => { result.current.messaging.handleMessageCreated(createdFrame("client-7", 8)); });
+    act(() => { vi.advanceTimersByTime(15_000); });
+    expect(result.current.data.conversations[42].messages).toEqual([
+      expect.objectContaining({ senderUserId: 20002, messageId: "message-7", localStatus: "accepted" }),
+      expect.objectContaining({ senderUserId: 20001, messageId: "message-8", localStatus: "accepted" }),
+    ]);
+  });
+
+  it("deduplicates incoming messages and orders them by conversation sequence", () => {
+    // 测试目标：验证对方消息重复投递和乱序到达时，时间线及会话预览正确。
+    // 构造方法：先投递序号 9，再投递序号 7，最后重复序号 9 的正式事件。
+    // 输入数据：对方 message-9 的文本为“最新消息”，message-7 为“你好”。
+    // 预期行为：只有两条气泡且按 7、9 排序，会话预览仍是最新序号的文本。
+    const { result } = renderMessaging();
+    const newest = createdFrame("other-9", 9, 20002);
+    newest.payload.message.content.text = "最新消息";
+    act(() => { result.current.messaging.handleServerFrame(newest); });
+    act(() => { result.current.messaging.handleServerFrame(createdFrame("other-7", 7, 20002)); });
+    act(() => { result.current.messaging.handleServerFrame(newest); });
+    expect(result.current.data.conversations[42].messages.map((message) => message.conversationSeq)).toEqual([7, 9]);
+    expect(result.current.data.sessions[0].preview).toBe("最新消息");
+  });
+
+  it("clears the acknowledgement timer only for the sender's official event", () => {
+    // 测试目标：验证己方正式事件清除确认计时器，即使后续收到他人同 ID 事件也不影响己方状态。
+    // 构造方法：发送己方消息并处理正式事件，再投递对方同 client_message_id 消息并推进时间。
+    // 输入数据：己方 message-7、对方 message-8，双方 client-7，推进 15000ms。
+    // 预期行为：己方计时器已清除，双方消息均保持 accepted 且没有重复气泡。
+    const { result } = renderMessaging();
+    act(() => { result.current.messaging.send(42, "你好"); });
+    act(() => { result.current.messaging.handleMessageCreated(createdFrame("client-7")); });
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => { result.current.messaging.handleMessageCreated(createdFrame("client-7", 8, 20002)); });
+    act(() => { vi.advanceTimersByTime(15_000); });
+    expect(result.current.data.conversations[42].messages).toHaveLength(2);
+    expect(result.current.data.conversations[42].messages.every((message) => message.localStatus === "accepted")).toBe(true);
+  });
+
+  it("never retries another sender's failed message", () => {
+    // 测试目标：验证重试入口即使遇到他人的 failed 数据也不会以当前身份重发。
+    // 构造方法：初始化带对方失败气泡的数据，再调用该 client_message_id 的 retry。
+    // 输入数据：senderUserId=20002、clientMessageId=client-7、localStatus=failed。
+    // 预期行为：retry 返回 false，不调用 transport，不更改消息且不启动确认计时器。
+    const initialData = createData();
+    initialData.conversations[42].messages.push({
+      localKey: "other-failed", messageId: null, conversationId: 42, conversationSeq: null,
+      senderUserId: 20002, clientMessageId: "client-7", messageType: "text", content: { text: "他人消息" },
+      createdAt: null, clientSentAt: "2026-08-30T08:00:00.000Z", localStatus: "failed",
+      errorCode: "send_failed", displayTime: "16:00", showTime: true, showAvatar: true,
+    });
+    const { result } = renderMessaging({ initialData });
+    act(() => { expect(result.current.messaging.retry("client-7")).toBe(false); });
+    expect(sentMessages).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(result.current.data.conversations[42].messages[0]).toMatchObject({ senderUserId: 20002, localStatus: "failed" });
+  });
+
+  it("retries only the local failed message when the other sender uses the same id", () => {
+    // 测试目标：验证对方同 ID 正式消息不会遮蔽己方失败消息的重试，也不会被改为 sending。
+    // 构造方法：先接收对方事件，发送己方消息并拒绝，再使用同一 ID 重试。
+    // 输入数据：双方 client-7，对方文本“你好”、己方文本“我的消息”。
+    // 预期行为：第二次 transport 只重发己方文本，对方消息仍 accepted，己方消息变为 sending。
+    const { result } = renderMessaging();
+    act(() => { result.current.messaging.handleMessageCreated(createdFrame("client-7", 7, 20002)); });
+    act(() => { result.current.messaging.send(42, "我的消息"); });
+    act(() => { result.current.messaging.handleSendMessageRejected(rejectedFrame("client-7")); });
+    act(() => { expect(result.current.messaging.retry("client-7")).toBe(true); });
+    expect(sentMessages).toHaveLength(2);
+    expect(sentMessages[1].text).toBe("我的消息");
+    expect(result.current.data.conversations[42].messages).toEqual([
+      expect.objectContaining({ senderUserId: 20002, localStatus: "accepted" }),
+      expect.objectContaining({ senderUserId: 20001, localStatus: "sending" }),
     ]);
   });
 });

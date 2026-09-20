@@ -21,7 +21,10 @@ export interface ServerTextMessage {
 
 export function insertPendingTextMessage(data: ChatData, input: PendingTextMessageInput): ChatData {
   const conversation = data.conversations[input.conversationId];
-  if (!conversation || conversation.messages.some((message) => message.clientMessageId === input.clientMessageId)) {
+  if (!conversation || conversation.messages.some((message) => (
+    message.senderUserId === input.senderUserId
+    && message.clientMessageId === input.clientMessageId
+  ))) {
     return data;
   }
   const message: ChatMessage = {
