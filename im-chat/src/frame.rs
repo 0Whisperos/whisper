@@ -20,6 +20,23 @@ impl<T> Frame<T> {
     }
 }
 
+/// Server-initiated messages have no corresponding client request identifier.
+#[derive(Debug, Serialize)]
+pub(crate) struct PushFrame<T> {
+    #[serde(rename = "type")]
+    frame_type: String,
+    payload: T,
+}
+
+impl<T> PushFrame<T> {
+    pub(crate) fn new(frame_type: impl Into<String>, payload: T) -> Self {
+        Self {
+            frame_type: frame_type.into(),
+            payload,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct FailedPayload {
     pub(crate) error_code: &'static str,
@@ -59,6 +76,20 @@ pub(crate) async fn close(socket: &mut WebSocket, code: u16, reason: impl Into<U
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn push_frame_omits_request_id_without_weakening_request_validation() {
+        // 测试目标：验证主动推送省略 request_id，同时客户端请求仍必须携带它。
+        // 构造方法：序列化 PushFrame，再尝试将相同 JSON 反序列化为请求 Frame。
+        // 输入数据：type=message_created，payload 中包含 event_id。
+        // 预期行为：只有 type/payload 两个字段，Frame 反序列化失败。
+        let frame = PushFrame::new("message_created", json!({ "event_id": "event-1" }));
+        let value = serde_json::to_value(frame).expect("push should serialize");
+        assert_eq!(value["type"], "message_created");
+        assert_eq!(value["payload"]["event_id"], "event-1");
+        assert_eq!(value.as_object().expect("object").len(), 2);
+        assert!(serde_json::from_value::<Frame<serde_json::Value>>(value).is_err());
+    }
 
     #[test]
     fn to_text_serializes_frame_with_wire_type_field() {
