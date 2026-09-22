@@ -121,4 +121,5 @@ impl ConnectionRegistry {
 }
 
 #[cfg(test)]
+#[path = "connection_tests.rs"]
 mod tests;

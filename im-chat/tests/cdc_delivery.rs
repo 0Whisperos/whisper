@@ -2,13 +2,13 @@
 //! Set IM_CHAT_CDC_CONFIG to a repository-local config for an already migrated,
 //! isolated database, Redis DB, and running Kafka/Connect. See README.md.
 
-#[path = "cdc_delivery/environment.rs"]
+#[path = "cdc_delivery_environment.rs"]
 mod environment;
-#[path = "cdc_delivery/fixture.rs"]
+#[path = "cdc_delivery_fixture.rs"]
 mod fixture;
-#[path = "cdc_delivery/kafka.rs"]
+#[path = "cdc_delivery_kafka.rs"]
 mod kafka;
-#[path = "cdc_delivery/socket.rs"]
+#[path = "cdc_delivery_socket.rs"]
 mod socket;
 
 use anyhow::{Context, Result, ensure};

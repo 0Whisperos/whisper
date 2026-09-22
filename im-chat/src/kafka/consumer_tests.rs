@@ -1,5 +1,8 @@
+#[path = "consumer_tests_broker.rs"]
 mod broker;
+#[path = "consumer_tests_protocol.rs"]
 mod protocol;
+#[path = "consumer_tests_support.rs"]
 mod support;
 
 use std::sync::Mutex;

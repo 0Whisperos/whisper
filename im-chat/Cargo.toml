@@ -2,6 +2,11 @@
 name = "im-chat"
 version = "0.1.0"
 edition = "2024"
+autotests = false
+
+[[test]]
+name = "cdc_delivery"
+path = "tests/cdc_delivery.rs"
 
 [dependencies]
 anyhow = "1"

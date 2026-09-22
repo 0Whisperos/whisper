@@ -1,0 +1,37 @@
+use super::*;
+use serde_json::json;
+
+#[test]
+fn push_frame_omits_request_id_without_weakening_request_validation() {
+    // 测试目标：验证主动推送省略 request_id，同时客户端请求仍必须携带它。
+    // 构造方法：序列化 PushFrame，再尝试将相同 JSON 反序列化为请求 Frame。
+    // 输入数据：type=message_created，payload 中包含 event_id。
+    // 预期行为：只有 type/payload 两个字段，Frame 反序列化失败。
+    let frame = PushFrame::new("message_created", json!({ "event_id": "event-1" }));
+    let value = serde_json::to_value(frame).expect("push should serialize");
+    assert_eq!(value["type"], "message_created");
+    assert_eq!(value["payload"]["event_id"], "event-1");
+    assert_eq!(value.as_object().expect("object").len(), 2);
+    assert!(serde_json::from_value::<Frame<serde_json::Value>>(value).is_err());
+}
+
+#[test]
+fn to_text_serializes_frame_with_wire_type_field() {
+    // 测试目标：验证 Frame 序列化时使用 WebSocket 线协议约定的 type 字段。
+    // 构造方法：构造一个带 request_id 和简单 payload 的 Frame，然后调用 to_text。
+    // 输入数据：type="heartbeat_ok"，request_id="req-1"，payload={ "sent_at": "now" }。
+    // 预期行为：序列化 JSON 包含 type、request_id 和 payload 三个协议字段。
+    let frame = Frame::new(
+        "heartbeat_ok".to_string(),
+        "req-1".to_string(),
+        json!({ "sent_at": "now" }),
+    );
+
+    let text = to_text(&frame).expect("frame should serialize");
+    let value: serde_json::Value =
+        serde_json::from_str(&text).expect("serialized frame should be json");
+
+    assert_eq!(value["type"], "heartbeat_ok");
+    assert_eq!(value["request_id"], "req-1");
+    assert_eq!(value["payload"]["sent_at"], "now");
+}

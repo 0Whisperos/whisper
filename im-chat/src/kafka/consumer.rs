@@ -164,4 +164,5 @@ fn commit_offsets(position: &RecordPosition) -> Result<TopicPartitionList, Kafka
 }
 
 #[cfg(test)]
+#[path = "consumer_tests.rs"]
 mod tests;

@@ -335,4 +335,5 @@ fn is_duplicate_key_error(error: &sqlx::Error) -> bool {
 }
 
 #[cfg(test)]
+#[path = "store_tests.rs"]
 mod tests;
