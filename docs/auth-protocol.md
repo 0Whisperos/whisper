@@ -70,6 +70,49 @@ Redis refresh token value 第一阶段不包含 `token_id` 和 `rotated_from`。
 
 `refresh_token_by_user:{user_id}` 的 value 是当前用户最新 refresh token hash。该索引用于同一用户重新账号密码登录时定位并删除旧 refresh token，也用于主动退出登录时确认是否需要清理用户索引。索引 TTL 应与对应的 `refresh_token:{token_hash}` 对齐。
 
+## `POST /v1/auth/register`
+
+### 用途
+
+客户端使用昵称和密码创建用户。服务端生成一个新的 8 到 12 位数字账号，允许账号以零开头。注册成功只创建用户，不签发或保存任何 access token、refresh token，也不会自动登录。
+
+### 请求
+
+```json
+{
+  "nickname": "昵称",
+  "password": "password"
+}
+```
+
+| 字段名 | 类型 | 是否必填 | 字段含义 |
+| --- | --- | --- | --- |
+| `nickname` | `string` | 是 | 服务端去除首尾空白后，必须包含 1 到 15 个 Unicode 字符；昵称不要求唯一。 |
+| `password` | `string` | 是 | 非空密码；服务端按原始内容进行 bcrypt 哈希，不去除首尾空白。 |
+
+### 成功响应
+
+HTTP 状态为 `201 Created`：
+
+```json
+{
+  "account": "0012345678"
+}
+```
+
+| 字段名 | 类型 | 是否必填 | 字段含义 |
+| --- | --- | --- | --- |
+| `account` | `string` | 是 | 服务端生成的 8 到 12 位数字账号，客户端应展示并用于后续登录。 |
+
+### 处理语义
+
+1. 服务端去除昵称首尾空白并校验昵称长度和密码非空。
+2. 使用 `crypto/rand` 生成 8 到 12 位数字账号，允许前导零。
+3. 使用 bcrypt `DefaultCost` 生成密码哈希。
+4. 依赖 `users.account` 唯一索引；发生唯一键冲突时重新生成账号并重试，重试次数达到上限后返回 `internal_error`。
+5. 创建用户并返回生成的账号。
+6. 注册流程不创建 access token、refresh token 或 Redis 状态。
+
 ## `POST /v1/auth/login`
 
 ### 用途
@@ -347,6 +390,7 @@ HTTP 边界不返回内部错误细节。客户端业务分支依赖稳定错误
 - `docs/auth-protocol.md` 不定义 Redis `presence` 或 `chat_nodes` 结构。
 - `docs/auth-protocol.md` 不定义消息发送、实时推送、送达回执或已读回执协议。
 - `/v1/auth/login` 返回 `user_id`、`access_token`、`refresh_token`、`access_token_expires_at`、`im_chat_ws_url`。
+- `/v1/auth/register` 返回服务端生成的 `account`，状态为 `201 Created`，不签发任何 token。
 - `/v1/auth/refresh` 返回 `user_id`、`access_token`、`access_token_expires_at`、`im_chat_ws_url`，不返回 `refresh_token`。
 - `/v1/auth/refresh` 不轮换 refresh token，不删除旧 refresh token。
 - `/v1/auth/logout` 删除 Redis `refresh_token:{token_hash}`，并在索引匹配时删除 `refresh_token_by_user:{user_id}`。
