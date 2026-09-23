@@ -5,6 +5,11 @@ type Login struct {
 	Password string `json:"password"`
 }
 
+type Register struct {
+	Nickname string `json:"nickname"`
+	Password string `json:"password"`
+}
+
 type Refresh struct {
 	RefreshToken string `json:"refresh_token"`
 }

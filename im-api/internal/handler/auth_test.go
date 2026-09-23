@@ -97,3 +97,84 @@ func TestLoginReturnsInvalidRequestForMalformedJSON(t *testing.T) {
 		t.Fatalf("body = %s, want invalid_request", got)
 	}
 }
+
+func TestRegisterReturnsCreatedAccount(t *testing.T) {
+	// 测试目标：验证注册 handler 将合法请求转发给注册服务，并返回 201 和生成的账号。
+	// 构造方法：注入注册服务替身，创建 gin 路由后发送 JSON 注册请求。
+	// 输入数据：nickname=张三、password=secret，注册服务返回账号 00123456。
+	// 预期行为：响应状态为 201，正文只包含 account 字段，不包含密码或 token。
+	oldRegisterAuth := registerAuth
+	registerAuth = func(nickname string, password string) (string, error) {
+		if nickname != "张三" || password != "secret" {
+			t.Fatalf("register input = %q/%q, want 张三/secret", nickname, password)
+		}
+		return "00123456", nil
+	}
+	t.Cleanup(func() { registerAuth = oldRegisterAuth })
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/v1/auth/register", Register)
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"nickname":"张三","password":"secret"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusCreated)
+	}
+	if got := recorder.Body.String(); got != `{"account":"00123456"}` {
+		t.Fatalf("body = %s, want account-only response", got)
+	}
+}
+
+func TestRegisterReturnsInvalidRequestForMalformedJSON(t *testing.T) {
+	// 测试目标：验证注册 handler 对无法解析的 JSON 返回稳定的 invalid_request 错误。
+	// 构造方法：创建注册路由并发送 Content-Type 为 application/json 的语法错误请求体。
+	// 输入数据：请求正文 {invalid-json。
+	// 预期行为：响应状态为 400，正文使用 auth 协议规定的 invalid_request 错误码。
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/v1/auth/register", Register)
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader("{invalid-json"))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if got := recorder.Body.String(); got != `{"error_code":"invalid_request","message":"invalid request"}` {
+		t.Fatalf("body = %s, want invalid_request", got)
+	}
+}
+
+func TestRegisterHidesUnexpectedServiceError(t *testing.T) {
+	// 测试目标：验证注册服务发生未知错误时，handler 返回安全的 internal_error 而不泄漏内部文本。
+	// 构造方法：注入返回数据库连接细节的注册服务替身，再发送合法 JSON 请求。
+	// 输入数据：nickname=张三、password=secret，服务错误为 database password leaked。
+	// 预期行为：响应状态为 500，正文只包含稳定 internal_error，且不出现内部错误文本。
+	oldRegisterAuth := registerAuth
+	registerAuth = func(string, string) (string, error) {
+		return "", errors.New("database password leaked")
+	}
+	t.Cleanup(func() { registerAuth = oldRegisterAuth })
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/v1/auth/register", Register)
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"nickname":"张三","password":"secret"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if strings.Contains(recorder.Body.String(), "database password leaked") || recorder.Body.String() != `{"error_code":"internal_error","message":"internal error"}` {
+		t.Fatalf("body = %s, want safe internal_error", recorder.Body.String())
+	}
+}

@@ -2,11 +2,24 @@ package auth
 
 import (
 	"fmt"
+	"unicode/utf8"
 )
 
 func ValidateCredentials(account string, password string) error {
 	if err := validateAccount(account); err != nil {
 		return err
+	}
+	if password == "" {
+		return fmt.Errorf("password is empty")
+	}
+
+	return nil
+}
+
+func ValidateRegistration(nickname string, password string) error {
+	nicknameLength := utf8.RuneCountInString(nickname)
+	if nicknameLength < 1 || nicknameLength > 15 {
+		return fmt.Errorf("nickname length must be between 1 and 15")
 	}
 	if password == "" {
 		return fmt.Errorf("password is empty")

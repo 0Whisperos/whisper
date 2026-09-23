@@ -42,3 +42,41 @@ func TestValidateCredentialsRejectsInvalidAccountsAndEmptyPassword(t *testing.T)
 		})
 	}
 }
+
+func TestValidateRegistrationAcceptsUnicodeNicknameAndNonEmptyPassword(t *testing.T) {
+	// 测试目标：验证注册校验按 Unicode 字符数接受合法昵称，并接受包含首尾空白的原始昵称在规范化后注册。
+	// 构造方法：直接调用注册校验函数，传入一个包含中文字符的昵称和非空密码。
+	// 输入数据：nickname=张三，password=secret。
+	// 预期行为：校验不返回错误。
+	if err := ValidateRegistration("张三", "secret"); err != nil {
+		t.Fatalf("ValidateRegistration returned an error: %v", err)
+	}
+}
+
+func TestValidateRegistrationRejectsNicknameAndPasswordBoundaries(t *testing.T) {
+	// 测试目标：验证空昵称、超过 15 个 Unicode 字符的昵称和空密码都会被注册校验拒绝。
+	// 构造方法：使用独立子测试分别传入非法昵称或密码，避免不同边界场景互相影响。
+	// 输入数据：nickname 为空、16 个中文字符，或 nickname=张三 且 password 为空。
+	// 预期行为：每个场景都返回非空错误。
+	testCases := []struct {
+		name     string
+		nickname string
+		password string
+	}{
+		{name: "empty nickname", nickname: "", password: "secret"},
+		{name: "sixteen unicode characters", nickname: "一二三四五六七八九十一二三四五六", password: "secret"},
+		{name: "empty password", nickname: "张三", password: ""},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// 测试目标：验证当前具体非法注册输入会被拒绝。
+			// 构造方法：使用子测试中的 nickname/password 调用 ValidateRegistration。
+			// 输入数据：当前子测试定义的昵称和密码。
+			// 预期行为：函数返回非空错误。
+			if err := ValidateRegistration(testCase.nickname, testCase.password); err == nil {
+				t.Fatal("ValidateRegistration returned nil error")
+			}
+		})
+	}
+}

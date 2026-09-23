@@ -9,4 +9,5 @@ var (
 	ErrInvalidAccessToken  = errors.New("invalid access token")
 	ErrAccessTokenExpired  = errors.New("access token expired")
 	ErrNoAvailableChatNode = errors.New("no available chat node")
+	ErrRegistrationFailed  = errors.New("registration account generation exhausted")
 )

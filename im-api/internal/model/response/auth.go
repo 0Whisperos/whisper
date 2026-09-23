@@ -17,6 +17,10 @@ type Refresh struct {
 	IMChatWSURL          string `json:"im_chat_ws_url"`
 }
 
+type Register struct {
+	Account string `json:"account"`
+}
+
 func NewLogin(userID uint64, accessToken string, refreshToken string, accessTokenExpiresAt time.Time, imChatWSURL string) Login {
 	return Login{
 		UserID:               userID,

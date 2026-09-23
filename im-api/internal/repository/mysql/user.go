@@ -7,8 +7,11 @@ import (
 
 	"github.com/0Whisperos/whisper/im-server/internal/global"
 	"github.com/0Whisperos/whisper/im-server/internal/model/entity"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
+
+var ErrDuplicateAccount = errors.New("account already exists")
 
 func FindUserByAccount(account string) (entity.User, bool, error) {
 	if global.MysqlDB == nil {
@@ -49,8 +52,16 @@ func CreateUser(user *entity.User) error {
 		return ErrNotInitialized
 	}
 	if err := global.MysqlDB.Create(user).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return ErrDuplicateAccount
+		}
 		return fmt.Errorf("create user: %w", err)
 	}
 
 	return nil
+}
+
+func isDuplicateKeyError(err error) bool {
+	var mysqlError *mysqldriver.MySQLError
+	return errors.As(err, &mysqlError) && mysqlError.Number == 1062
 }

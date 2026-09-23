@@ -1,8 +1,11 @@
 package auth
 
 import (
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
+	"strings"
 	"time"
 
 	authmodel "github.com/0Whisperos/whisper/im-server/internal/model/auth"
@@ -15,6 +18,10 @@ import (
 
 var refreshTokenTTL time.Duration
 var findUserByAccount = mysql.FindUserByAccount
+var createRegisterUser = mysql.CreateUser
+var generateRegisterAccount = generateAccount
+
+const maxRegistrationAttempts = 10
 
 func SetTokenConfig(secret []byte, accessTTL time.Duration, refreshTTL time.Duration) {
 	authjwt.Configure(secret, accessTTL)
@@ -30,6 +37,59 @@ func Login(account string, password string) (authmodel.AuthResult, error) {
 		return authmodel.AuthResult{}, err
 	}
 	return issueLoginResult(user.ID)
+}
+
+func Register(nickname string, password string) (string, error) {
+	nickname = strings.TrimSpace(nickname)
+	if err := ValidateRegistration(nickname, password); err != nil {
+		return "", ErrInvalidRequest
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("hash registration password: %w", err)
+	}
+
+	for attempt := 0; attempt < maxRegistrationAttempts; attempt++ {
+		account, err := generateRegisterAccount()
+		if err != nil {
+			return "", fmt.Errorf("generate registration account: %w", err)
+		}
+		user := entity.User{
+			Account:      account,
+			PasswordHash: string(hash),
+			Nickname:     nickname,
+		}
+		if err := createRegisterUser(&user); err != nil {
+			if errors.Is(err, mysql.ErrDuplicateAccount) {
+				continue
+			}
+			return "", err
+		}
+		return account, nil
+	}
+
+	return "", ErrRegistrationFailed
+}
+
+func generateAccount() (string, error) {
+	lengthValue, err := cryptorand.Int(cryptorand.Reader, big.NewInt(5))
+	if err != nil {
+		return "", fmt.Errorf("generate account length: %w", err)
+	}
+
+	accountLength := 8 + int(lengthValue.Int64())
+	var account strings.Builder
+	account.Grow(accountLength)
+	for index := 0; index < accountLength; index++ {
+		digit, err := cryptorand.Int(cryptorand.Reader, big.NewInt(10))
+		if err != nil {
+			return "", fmt.Errorf("generate account digit: %w", err)
+		}
+		account.WriteByte(byte('0' + digit.Int64()))
+	}
+
+	return account.String(), nil
 }
 
 func authenticateUser(account string, password string) (entity.User, error) {

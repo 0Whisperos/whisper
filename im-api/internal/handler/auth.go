@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var registerAuth = auth.Register
+
 func Login(context *gin.Context) {
 	var payload request.Login
 	if err := context.ShouldBindJSON(&payload); err != nil {
@@ -26,6 +28,19 @@ func Login(context *gin.Context) {
 		result.AccessTokenExpiresAt,
 		result.IMChatWSURL,
 	))
+}
+
+func Register(context *gin.Context) {
+	var payload request.Register
+	if err := context.ShouldBindJSON(&payload); err != nil {
+		writeError(context, auth.ErrInvalidRequest, authErrorMappings...)
+		return
+	}
+	account, err := registerAuth(payload.Nickname, payload.Password)
+	if writeError(context, err, authErrorMappings...) {
+		return
+	}
+	context.JSON(http.StatusCreated, response.Register{Account: account})
 }
 
 func Refresh(context *gin.Context) {
