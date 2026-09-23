@@ -2,8 +2,11 @@ import { useState } from "react";
 
 import { AuthApiError } from "../api";
 
-export function useLoginForm(onPasswordLogin: (account: string, password: string, autoLogin: boolean) => void | Promise<void>) {
-  const [account, setAccount] = useState("");
+export function useLoginForm(
+  onPasswordLogin: (account: string, password: string, autoLogin: boolean) => void | Promise<void>,
+  initialAccount = "",
+) {
+  const [account, setAccount] = useState(initialAccount);
   const [password, setPassword] = useState("");
   const [autoLogin, setAutoLogin] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

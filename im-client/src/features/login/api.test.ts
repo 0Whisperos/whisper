@@ -1,8 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { login, logout, refresh } from "./api";
+import { login, logout, refresh, register } from "./api";
 
 describe("authentication API", () => {
+  it("registers a nickname and maps the generated account", async () => {
+    // 测试目标：验证注册请求发送 nickname/password，并解析服务端生成的 account。
+    // 构造方法：替换全局 fetch 为 201 响应后调用 register。
+    // 输入数据：昵称 Alice、密码 secret，响应 account=00123456。
+    // 预期行为：请求 POST /v1/auth/register，返回生成账号 00123456。
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ account: "00123456" }), { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(register("http://127.0.0.1:8080/", { nickname: "Alice", password: "secret" })).resolves.toBe("00123456");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8080/v1/auth/register",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname: "Alice", password: "secret" }),
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
   it("maps documented login response into the client auth session", async () => {
     // 测试目标：验证登录请求使用文档协议字段，并把 snake_case 响应映射成客户端 session。
     // 构造方法：替换全局 fetch 为成功响应，调用 login 并检查请求参数和返回值。

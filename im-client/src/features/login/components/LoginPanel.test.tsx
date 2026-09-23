@@ -20,7 +20,7 @@ describe("LoginPanel", () => {
     expect(screen.getByLabelText("账号")).toBeInTheDocument();
     expect(screen.getByLabelText("密码")).toBeInTheDocument();
     expect(screen.getByLabelText("自动登录")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "忘记密码" })).toBeInTheDocument();
+    expect(screen.queryByText("忘记密码")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.getByLabelText("已保存用户")).toBeInTheDocument();
   });
@@ -121,23 +121,6 @@ describe("LoginPanel", () => {
     expect(await screen.findByText("保存的登录已失效，请重新输入账号密码。")).toBeInTheDocument();
   });
 
-  it("prevents navigation when the forgot password link is clicked", async () => {
-    // Test goal: verify the forgot-password link remains a local placeholder interaction.
-    // Construction: render LoginPanel and click the forgot-password link.
-    // Input data: link text 忘记密码.
-    // Expected behavior: onPauseGame is called and the link still points to #.
-    const user = userEvent.setup();
-    const onPauseGame = vi.fn();
-
-    renderLoginPanel({ onPauseGame });
-
-    const forgotLink = screen.getByRole("link", { name: "忘记密码" });
-    onPauseGame.mockClear();
-    await user.click(forgotLink);
-
-    expect(forgotLink).toHaveAttribute("href", "#");
-    expect(onPauseGame).toHaveBeenCalled();
-  });
 });
 
 function renderLoginPanel(overrides: Partial<Parameters<typeof LoginPanel>[0]> = {}) {
@@ -148,6 +131,7 @@ function renderLoginPanel(overrides: Partial<Parameters<typeof LoginPanel>[0]> =
       isLoadingSavedUsers={false}
       onPasswordLogin={() => undefined}
       onSavedUserLogin={() => undefined}
+      onOpenRegister={() => undefined}
       onPauseGame={() => undefined}
       {...overrides}
     />,

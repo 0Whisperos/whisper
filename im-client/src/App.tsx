@@ -16,6 +16,7 @@ export function App() {
     savedUsers,
     credentialWarning,
     authenticateWithPassword,
+    registerAccount,
     loginSavedUser,
     refreshSession,
     isLoadingSavedUsers,
@@ -110,6 +111,7 @@ export function App() {
       isLoadingSavedUsers={isLoadingSavedUsers}
       onPasswordLogin={authenticateWithPassword}
       onSavedUserLogin={loginSavedUser}
+      onRegister={registerAccount}
     />
   );
 }

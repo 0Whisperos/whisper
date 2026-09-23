@@ -1,4 +1,4 @@
-import type { FormEvent, MouseEvent } from "react";
+import type { FormEvent } from "react";
 import { useState } from "react";
 
 import { AuthApiError } from "../api";
@@ -11,6 +11,8 @@ interface LoginPanelProps {
   isLoadingSavedUsers: boolean;
   onPasswordLogin: (account: string, password: string, autoLogin: boolean) => void | Promise<void>;
   onSavedUserLogin: (userId: number) => void | Promise<void>;
+  onOpenRegister: () => void;
+  initialAccount?: string;
   onPauseGame: () => void;
 }
 
@@ -20,6 +22,8 @@ export function LoginPanel({
   isLoadingSavedUsers,
   onPasswordLogin,
   onSavedUserLogin,
+  onOpenRegister,
+  initialAccount,
   onPauseGame,
 }: LoginPanelProps) {
   const {
@@ -32,7 +36,7 @@ export function LoginPanel({
     setPassword,
     setAutoLogin,
     submit,
-  } = useLoginForm(onPasswordLogin);
+  } = useLoginForm(onPasswordLogin, initialAccount);
   const [savedUserError, setSavedUserError] = useState<string | null>(null);
   const [activeSavedUserId, setActiveSavedUserId] = useState<number | null>(null);
 
@@ -40,11 +44,6 @@ export function LoginPanel({
     event.preventDefault();
     onPauseGame();
     await submit();
-  };
-
-  const handleForgotPassword = (event: MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    onPauseGame();
   };
 
   const handleSavedUserLogin = async (user: SavedUser) => {
@@ -115,9 +114,16 @@ export function LoginPanel({
           </label>
 
           <div className="form-actions">
-            <a className="forgot-link" href="#" data-forgot-link onClick={handleForgotPassword}>
-              忘记密码
-            </a>
+            <button
+              className="register-link"
+              type="button"
+              onClick={() => {
+                onPauseGame();
+                onOpenRegister();
+              }}
+            >
+              注册
+            </button>
             <button className="login-button" type="submit" disabled={isSubmitting}>
               {isSubmitting ? "登录中..." : "登录"}
             </button>

@@ -358,16 +358,20 @@ canvas {
   accent-color: var(--accent);
 }
 
-.forgot-link {
+.register-link {
+  border: 0;
+  padding: 0;
   color: var(--accent);
+  background: transparent;
+  font: inherit;
   font-size: 13px;
   font-weight: 650;
-  text-decoration: none;
+  cursor: pointer;
   transition: color 220ms ease;
 }
 
-.forgot-link:hover,
-.forgot-link:focus-visible {
+.register-link:hover,
+.register-link:focus-visible {
   color: var(--accent-hover);
   text-decoration: underline;
 }
@@ -418,6 +422,49 @@ canvas {
   margin: 0;
   color: #85620e;
   font-size: 13px;
+}
+
+.register-success-dialog-backdrop {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(19 35 43 / 28%);
+}
+
+.register-success-dialog {
+  display: grid;
+  width: min(360px, 100%);
+  gap: 12px;
+  padding: 28px;
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+  color: var(--text);
+  background: var(--field-bg);
+  box-shadow: 0 20px 60px rgb(19 35 43 / 22%);
+  text-align: center;
+}
+
+.register-success-dialog h2,
+.register-success-dialog p {
+  margin: 0;
+}
+
+.register-success-dialog p {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.register-success-dialog strong {
+  font-size: 24px;
+  letter-spacing: 0.08em;
+}
+
+.register-success-dialog .login-button {
+  justify-self: center;
+  margin-top: 8px;
 }
 
 .saved-users {

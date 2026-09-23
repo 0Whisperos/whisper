@@ -3,6 +3,8 @@ import type {
   AuthSession,
   LoginCredentials,
   LoginResponseDto,
+  RegisterCredentials,
+  RegisterResponseDto,
   RefreshResponseDto,
 } from "./types";
 
@@ -23,6 +25,18 @@ export async function login(apiBaseUrl: string, credentials: LoginCredentials): 
     throw new AuthApiError(await readErrorCode(response));
   }
   return mapLoginResponse(await readJson(response));
+}
+
+export async function register(apiBaseUrl: string, credentials: RegisterCredentials): Promise<string> {
+  const response = await request(`${joinApiPath(apiBaseUrl)}/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(credentials),
+  });
+  if (!response.ok) {
+    throw new AuthApiError(await readErrorCode(response));
+  }
+  return mapRegisterResponse(await readJson(response));
 }
 
 export async function refresh(apiBaseUrl: string, refreshToken: string): Promise<AuthSession> {
@@ -95,6 +109,13 @@ function mapLoginResponse(value: unknown): AuthSession {
   };
 }
 
+function mapRegisterResponse(value: unknown): string {
+  if (!isRegisterResponseDto(value)) {
+    throw new AuthApiError("internal_error");
+  }
+  return value.account;
+}
+
 function mapRefreshResponse(value: unknown, refreshToken: string): AuthSession {
   if (!isRefreshResponseDto(value)) {
     throw new AuthApiError("internal_error");
@@ -116,6 +137,16 @@ function isAuthErrorCode(value: unknown): value is AuthErrorCode {
     || value === "refresh_token_expired"
     || value === "no_available_chat_node"
     || value === "internal_error";
+}
+
+function isRegisterResponseDto(value: unknown): value is RegisterResponseDto {
+  return (
+    typeof value === "object"
+    && value !== null
+    && "account" in value
+    && typeof value.account === "string"
+    && /^\d{8,12}$/.test(value.account)
+  );
 }
 
 function isLoginResponseDto(value: unknown): value is LoginResponseDto {

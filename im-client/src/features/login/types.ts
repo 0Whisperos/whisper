@@ -3,6 +3,15 @@ export interface LoginCredentials {
   password: string;
 }
 
+export interface RegisterCredentials {
+  nickname: string;
+  password: string;
+}
+
+export interface RegisterResponseDto {
+  account: string;
+}
+
 export interface LoginResponseDto {
   user_id: number;
   access_token: string;

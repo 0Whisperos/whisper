@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { AuthApiError, login, logout as requestLogout, refresh } from "../api";
+import { AuthApiError, login, logout as requestLogout, refresh, register as requestRegister } from "../api";
 import { deleteRefreshToken, listSavedUsers, loadSavedRefreshToken, saveRefreshToken } from "../credentials";
 import type { AuthSession, RefreshTokenPersistence, SavedUser } from "../types";
 
@@ -99,6 +99,11 @@ export function useAuthSession(apiBaseUrl: string) {
     [apiBaseUrl, applyAutoLoginPreference],
   );
 
+  const registerAccount = useCallback(
+    (nickname: string, password: string) => requestRegister(apiBaseUrl, { nickname, password }),
+    [apiBaseUrl],
+  );
+
   const loginSavedUser = useCallback(
     async (userId: number) => {
       setCredentialWarning(null);
@@ -173,6 +178,7 @@ export function useAuthSession(apiBaseUrl: string) {
     savedUsers,
     credentialWarning,
     authenticateWithPassword,
+    registerAccount,
     loginSavedUser,
     refreshSession,
     isLoadingSavedUsers,
