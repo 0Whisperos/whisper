@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::MySqlPool;
@@ -7,6 +8,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::error::{Error, Result};
+use crate::presence::PresenceManager;
 use crate::heartbeat;
 use crate::kafka::KafkaServiceError;
 
@@ -26,9 +28,11 @@ struct RunningTasks {
 
 pub(super) async fn run(prepared: PreparedApp) -> Result<()> {
     let mysql_pool = prepared.state.mysql_pool.clone();
+    let presence = prepared.state.presence.clone();
+    let node_id = prepared.state.config.node_config.node_id.clone();
     let mut tasks = RunningTasks::start(prepared).await;
     let outcome = tasks.wait_for_exit(tokio::signal::ctrl_c()).await;
-    tasks.shutdown(outcome, &mysql_pool).await
+    tasks.shutdown(outcome, &mysql_pool, presence.clone(), node_id).await
 }
 
 impl RunningTasks {
@@ -87,11 +91,11 @@ impl RunningTasks {
         }
     }
 
-    async fn shutdown(mut self, outcome: Result<()>, mysql_pool: &MySqlPool) -> Result<()> {
+    async fn shutdown(mut self, outcome: Result<()>, mysql_pool: &MySqlPool, presence: Arc<PresenceManager>, node_id: String) -> Result<()> {
         let _ = self.shutdown_tx.send(true);
         self.heartbeat_task.abort();
         let _ = self.heartbeat_task.await;
-
+        let _ = presence.remove_node(&node_id).await;
         // 同步 offset 提交开始后必须等待结束，不能丢弃仍持有消费者的阻塞任务。
         let mut cleanup_error = None;
         if !self.consumer_finished {

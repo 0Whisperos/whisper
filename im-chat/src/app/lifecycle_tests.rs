@@ -1,5 +1,6 @@
 use std::future::{pending, ready};
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::MySqlPool;
@@ -10,6 +11,7 @@ use tokio::task::JoinHandle;
 use super::RunningTasks;
 use crate::error::Error;
 use crate::kafka::KafkaServiceError;
+use crate::presence::PresenceManager;
 
 #[derive(Clone, Copy)]
 enum Completion {
@@ -37,6 +39,16 @@ impl Behavior {
 
 fn lazy_pool() -> MySqlPool {
     MySqlPoolOptions::new().connect_lazy_with(MySqlConnectOptions::new())
+}
+
+fn lifecycle_presence() -> Arc<PresenceManager> {
+    Arc::new(PresenceManager::new(
+        redis::Client::open("redis://127.0.0.1:0").expect("valid Redis URL"),
+    ))
+}
+
+fn lifecycle_node_id() -> String {
+    "lifecycle-test-node".to_owned()
 }
 
 fn tasks(server: Behavior, consumer: Behavior) -> RunningTasks {
@@ -114,7 +126,13 @@ async fn server_exit_is_reported_once_and_remaining_tasks_are_reclaimed() {
             )),
         }
         let failed = outcome.is_err();
-        assert_eq!(tasks.shutdown(outcome, &pool).await.is_err(), failed);
+        assert_eq!(
+            tasks
+                .shutdown(outcome, &pool, lifecycle_presence(), lifecycle_node_id())
+                .await
+                .is_err(),
+            failed
+        );
         assert!(pool.is_closed());
     }
 }
@@ -139,7 +157,9 @@ async fn every_unexpected_consumer_exit_is_reported_once() {
             })
         ));
         assert!(matches!(
-            tasks.shutdown(outcome, &pool).await,
+            tasks
+                .shutdown(outcome, &pool, lifecycle_presence(), lifecycle_node_id())
+                .await,
             Err(Error::BackgroundTask {
                 task: "kafka consumer"
             })
@@ -165,7 +185,9 @@ async fn shutdown_signal_success_and_failure_both_reclaim_running_tasks() {
             Behavior::OnShutdown(Completion::Success),
         );
         let outcome = tasks.wait_for_exit(ready(signal)).await;
-        let result = tasks.shutdown(outcome, &pool).await;
+        let result = tasks
+            .shutdown(outcome, &pool, lifecycle_presence(), lifecycle_node_id())
+            .await;
         if failed {
             assert!(
                 matches!(result, Err(Error::Serve { source }) if source.kind() == io::ErrorKind::PermissionDenied)
@@ -217,7 +239,16 @@ async fn shutdown_reclaims_heartbeat_then_waits_for_consumer_completion_before_c
         consumer_finished: false,
     };
     let shutdown_pool = pool.clone();
-    let shutdown = tokio::spawn(async move { tasks.shutdown(Ok(()), &shutdown_pool).await });
+    let shutdown = tokio::spawn(async move {
+        tasks
+            .shutdown(
+                Ok(()),
+                &shutdown_pool,
+                lifecycle_presence(),
+                lifecycle_node_id(),
+            )
+            .await
+    });
     stopping_rx.await.unwrap();
     assert!(heartbeat_reclaimed.await.unwrap());
     tokio::time::advance(Duration::from_secs(30)).await;
@@ -257,7 +288,16 @@ async fn stalled_server_is_aborted_and_reclaimed_only_after_five_seconds() {
         consumer_finished: false,
     };
     let shutdown_pool = pool.clone();
-    let shutdown = tokio::spawn(async move { tasks.shutdown(Ok(()), &shutdown_pool).await });
+    let shutdown = tokio::spawn(async move {
+        tasks
+            .shutdown(
+                Ok(()),
+                &shutdown_pool,
+                lifecycle_presence(),
+                lifecycle_node_id(),
+            )
+            .await
+    });
     assert!(heartbeat_reclaimed.await.unwrap());
     consumer_done_rx.await.unwrap();
     tokio::task::yield_now().await;
@@ -294,7 +334,9 @@ async fn running_error_takes_precedence_over_consumer_cleanup_error() {
             Behavior::OnShutdown(Completion::Success),
             Behavior::OnShutdown(Completion::Error),
         );
-        let result = tasks.shutdown(outcome, &pool).await;
+        let result = tasks
+            .shutdown(outcome, &pool, lifecycle_presence(), lifecycle_node_id())
+            .await;
         if originally_failed {
             assert!(
                 matches!(result, Err(Error::Serve { source }) if source.kind() == io::ErrorKind::NotConnected)
@@ -324,7 +366,12 @@ async fn server_cleanup_failures_preserve_existing_successful_shutdown_behavior(
             Behavior::OnShutdown(Completion::Success),
         );
         let outcome = tasks.wait_for_exit(ready(Ok(()))).await;
-        assert!(tasks.shutdown(outcome, &pool).await.is_ok());
+        assert!(
+            tasks
+                .shutdown(outcome, &pool, lifecycle_presence(), lifecycle_node_id())
+                .await
+                .is_ok()
+        );
         assert!(pool.is_closed());
     }
 }

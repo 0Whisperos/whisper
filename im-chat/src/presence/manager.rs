@@ -67,6 +67,14 @@ impl PresenceManager {
         Ok(refreshed == 1)
     }
 
+    pub(crate) async fn remove_node(&self, node_id: &str) -> Result<(), redis::RedisError> {
+        let key = format!("chat_nodes:{node_id}");
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let _: i64 = redis::cmd("DEL").arg(&key).query_async(&mut conn).await?;
+        tracing::debug!(node_id, "node unregistered");
+        Ok(())
+    }
+
     pub(crate) async fn register_presence(
         &self,
         user_id: u64,
