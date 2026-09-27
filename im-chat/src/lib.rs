@@ -1,3 +1,4 @@
+mod ack;
 pub mod app;
 mod auth;
 mod config;

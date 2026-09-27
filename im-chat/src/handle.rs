@@ -1,14 +1,14 @@
-use crate::{auth, message};
 use crate::config::Config;
 use crate::connection::{ActiveConnection, ConnectionRegistry};
 use crate::frame;
 use crate::heartbeat::client::{self, ClientFrameHandleResult, ClientHeartbeat};
 use crate::presence::PresenceManager;
+use crate::{ack, auth, message};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use std::sync::Arc;
 use sqlx::MySqlPool;
+use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
@@ -77,6 +77,7 @@ pub(crate) async fn handle_socket(
         access_token_expires_at,
         write_tx,
         presence.clone(),
+        connections.clone(),
         mysql_pool,
     )
     .await;
@@ -152,6 +153,7 @@ async fn run_connection_loop(
     access_token_expires_at: OffsetDateTime,
     write_tx: mpsc::Sender<Message>,
     presence: Arc<PresenceManager>,
+    connections: ConnectionRegistry,
     mysql_pool: MySqlPool,
 ) {
     // TODO: 当前循环先搭建连接生命周期骨架，后续补充 token 刷新通知、客户端消息分发和关闭原因。
@@ -185,6 +187,7 @@ async fn run_connection_loop(
                             user_id,
                             connection_id,
                             write_tx.clone(),
+                            &connections,
                             &mysql_pool,
                         ).await {
                             break;
@@ -215,6 +218,7 @@ async fn handle_client_frame(
     user_id: u64,
     connection_id: &str,
     write_tx: mpsc::Sender<Message>,
+    connections: &ConnectionRegistry,
     mysql_pool: &MySqlPool,
 ) -> bool {
     let raw_frame: frame::Frame<serde_json::Value> = match serde_json::from_slice(bytes) {
@@ -240,6 +244,17 @@ async fn handle_client_frame(
         }
         message::SEND_MESSAGE => {
             message::handle_frame(raw_frame, mysql_pool, write_tx, user_id, connection_id).await
+        }
+        ack::DELIVERED_ACK | ack::READ_ACK => {
+            ack::handle_frame(
+                raw_frame,
+                mysql_pool,
+                connections,
+                write_tx,
+                user_id,
+                connection_id,
+            )
+            .await
         }
         frame_type => {
             tracing::debug!(
