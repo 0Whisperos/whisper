@@ -72,10 +72,15 @@ func ConversationMessages(context *gin.Context) {
 		return
 	}
 	result := response.MessagePage{
-		Messages:      make([]response.Message, 0, len(page.Messages)),
-		HasMore:       page.HasMore,
-		NextBeforeSeq: page.NextBeforeSeq,
-		NextFromSeq:   page.NextFromSeq,
+		Messages:         make([]response.Message, 0, len(page.Messages)),
+		HasMore:          page.HasMore,
+		NextBeforeSeq:    page.NextBeforeSeq,
+		NextFromSeq:      page.NextFromSeq,
+		LastSeq:          page.LastSeq,
+		DeliveredSeq:     page.DeliveredSeq,
+		ReadSeq:          page.ReadSeq,
+		PeerDeliveredSeq: page.PeerDeliveredSeq,
+		PeerReadSeq:      page.PeerReadSeq,
 	}
 	for _, message := range page.Messages {
 		result.Messages = append(result.Messages, messageResponse(message))

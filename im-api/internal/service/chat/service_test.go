@@ -78,20 +78,22 @@ func TestListConversationMessagesRejectsInvalidCursorCombination(t *testing.T) {
 }
 
 func TestListConversationMessagesReturnsPageAndNextForwardCursor(t *testing.T) {
-	// Test goal: verify an authorized forward history request returns ordered messages and advances the cursor.
-	// Construction: stub conversation lookup, membership lookup, and message listing with two messages and hasMore=true.
-	// Input: user_id=20001, conversation_id=30001, from_seq=10, limit=2.
-	// Expected behavior: the page preserves the messages and returns next_from_seq=12 with has_more=true.
+	// Test goal: verify an authorized forward history page returns the current and peer receipt cursors with the messages.
+	// Construction: stub direct conversation lookup, active membership, message listing, and both existing member cursor rows.
+	// Input: user_id=20001, conversation_id=30001, last_seq=12, from_seq=10, limit=2, self cursors 9/8, and peer cursors 11/10.
+	// Expected behavior: the page returns last_seq=12, next_from_seq=12, has_more=true, and all four member cursor values unchanged.
 	oldFindConversation := findConversationByID
 	oldMember := isActiveConversationMember
 	oldListMessages := listMessages
+	oldFindCursors := findConversationCursors
 	t.Cleanup(func() {
 		findConversationByID = oldFindConversation
 		isActiveConversationMember = oldMember
 		listMessages = oldListMessages
+		findConversationCursors = oldFindCursors
 	})
 	findConversationByID = func(uint64) (entity.Conversation, bool, error) {
-		return entity.Conversation{ID: 30001, ConversationType: "direct"}, true, nil
+		return entity.Conversation{ID: 30001, ConversationType: "direct", LastSeq: 12}, true, nil
 	}
 	isActiveConversationMember = func(conversationID, userID uint64) (bool, error) {
 		return conversationID == 30001 && userID == 20001, nil
@@ -102,6 +104,12 @@ func TestListConversationMessagesReturnsPageAndNextForwardCursor(t *testing.T) {
 		}
 		return []entity.Message{{ConversationSeq: 10}, {ConversationSeq: 11}}, true, nil
 	}
+	findConversationCursors = func(conversationID, userID uint64) (entity.ConversationMemberCursor, entity.ConversationMemberCursor, error) {
+		if conversationID != 30001 || userID != 20001 {
+			t.Fatalf("cursor lookup = conversation %d, user %d; want 30001, 20001", conversationID, userID)
+		}
+		return entity.ConversationMemberCursor{UserID: 20001, DeliveredSeq: 9, ReadSeq: 8}, entity.ConversationMemberCursor{UserID: 20002, DeliveredSeq: 11, ReadSeq: 10}, nil
+	}
 	fromSeq := uint64(10)
 
 	page, err := ListConversationMessages(20001, 30001, nil, &fromSeq, 2)
@@ -110,6 +118,9 @@ func TestListConversationMessagesReturnsPageAndNextForwardCursor(t *testing.T) {
 	}
 	if !page.HasMore || page.NextFromSeq == nil || *page.NextFromSeq != 12 || len(page.Messages) != 2 {
 		t.Fatalf("page = %#v, want has_more and next_from_seq=12", page)
+	}
+	if page.LastSeq != 12 || page.DeliveredSeq != 9 || page.ReadSeq != 8 || page.PeerDeliveredSeq != 11 || page.PeerReadSeq != 10 {
+		t.Fatalf("page cursors = last %d, delivered/read %d/%d, peer delivered/read %d/%d; want 12 and 9/8 and 11/10", page.LastSeq, page.DeliveredSeq, page.ReadSeq, page.PeerDeliveredSeq, page.PeerReadSeq)
 	}
 }
 

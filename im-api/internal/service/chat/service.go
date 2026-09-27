@@ -19,10 +19,15 @@ type Friend struct {
 }
 
 type MessagePage struct {
-	Messages      []entity.Message
-	HasMore       bool
-	NextBeforeSeq *uint64
-	NextFromSeq   *uint64
+	Messages         []entity.Message
+	HasMore          bool
+	NextBeforeSeq    *uint64
+	NextFromSeq      *uint64
+	LastSeq          uint64
+	DeliveredSeq     uint64
+	ReadSeq          uint64
+	PeerDeliveredSeq uint64
+	PeerReadSeq      uint64
 }
 
 var (
@@ -32,6 +37,7 @@ var (
 	findConversationByID       = mysql.FindConversationByID
 	isActiveConversationMember = mysql.IsActiveConversationMember
 	listMessages               = mysql.ListMessages
+	findConversationCursors    = mysql.FindConversationMemberCursors
 )
 
 func GetUser(userID uint64) (entity.User, error) {
@@ -109,8 +115,20 @@ func ListConversationMessages(userID, conversationID uint64, beforeSeq, fromSeq 
 	if err != nil {
 		return MessagePage{}, fmt.Errorf("load conversation messages: %w", err)
 	}
+	selfCursor, peerCursor, err := findConversationCursors(conversationID, userID)
+	if err != nil {
+		return MessagePage{}, fmt.Errorf("load conversation member cursors: %w", err)
+	}
 
-	page := MessagePage{Messages: messages, HasMore: hasMore}
+	page := MessagePage{
+		Messages:         messages,
+		HasMore:          hasMore,
+		LastSeq:          conversation.LastSeq,
+		DeliveredSeq:     selfCursor.DeliveredSeq,
+		ReadSeq:          selfCursor.ReadSeq,
+		PeerDeliveredSeq: peerCursor.DeliveredSeq,
+		PeerReadSeq:      peerCursor.ReadSeq,
+	}
 	if hasMore && len(messages) > 0 {
 		if fromSeq != nil {
 			nextFromSeq := messages[len(messages)-1].ConversationSeq + 1

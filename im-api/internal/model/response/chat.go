@@ -35,10 +35,15 @@ type Message struct {
 }
 
 type MessagePage struct {
-	Messages      []Message `json:"messages"`
-	HasMore       bool      `json:"has_more"`
-	NextBeforeSeq *uint64   `json:"next_before_seq,omitempty"`
-	NextFromSeq   *uint64   `json:"next_from_seq,omitempty"`
+	Messages         []Message `json:"messages"`
+	HasMore          bool      `json:"has_more"`
+	NextBeforeSeq    *uint64   `json:"next_before_seq,omitempty"`
+	NextFromSeq      *uint64   `json:"next_from_seq,omitempty"`
+	LastSeq          uint64    `json:"last_seq"`
+	DeliveredSeq     uint64    `json:"delivered_seq"`
+	ReadSeq          uint64    `json:"read_seq"`
+	PeerDeliveredSeq uint64    `json:"peer_delivered_seq"`
+	PeerReadSeq      uint64    `json:"peer_read_seq"`
 }
 
 func NewUserProfile(userID uint64, account, nickname, signature string, avatarObjectKey *string) UserProfile {

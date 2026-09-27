@@ -102,6 +102,33 @@ func IsActiveConversationMember(conversationID, userID uint64) (bool, error) {
 	return count > 0, nil
 }
 
+func FindConversationMemberCursors(conversationID, userID uint64) (entity.ConversationMemberCursor, entity.ConversationMemberCursor, error) {
+	if global.MysqlDB == nil {
+		return entity.ConversationMemberCursor{}, entity.ConversationMemberCursor{}, ErrNotInitialized
+	}
+
+	var cursors []entity.ConversationMemberCursor
+	err := global.MysqlDB.WithContext(context.Background()).
+		Model(&entity.ConversationMemberCursor{}).
+		Joins("JOIN conversation_members ON conversation_members.conversation_id = conversation_member_cursors.conversation_id AND conversation_members.user_id = conversation_member_cursors.user_id").
+		Where("conversation_member_cursors.conversation_id = ? AND conversation_members.member_state = ?", conversationID, "active").
+		Find(&cursors).Error
+	if err != nil {
+		return entity.ConversationMemberCursor{}, entity.ConversationMemberCursor{}, fmt.Errorf("find conversation member cursors: %w", err)
+	}
+
+	var selfCursor, peerCursor entity.ConversationMemberCursor
+	for _, cursor := range cursors {
+		if cursor.UserID == userID {
+			selfCursor = cursor
+		} else {
+			peerCursor = cursor
+		}
+	}
+
+	return selfCursor, peerCursor, nil
+}
+
 func ListMessages(conversationID uint64, beforeSeq, fromSeq *uint64, limit int) ([]entity.Message, bool, error) {
 	if global.MysqlDB == nil {
 		return nil, false, ErrNotInitialized
