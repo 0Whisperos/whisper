@@ -247,6 +247,30 @@
 
 发送方也会收到自己发送消息对应的 `message_created`。客户端应按 `message_id` 去重；如果本地尚无 `message_id`，则按 `client_message_id` 合并本地临时消息。
 
+## 历史消息分页中的会话游标
+
+`GET /v1/conversations/{conversation_id}/messages` 的每页响应除 `messages`、分页字段外，还返回当前会话和成员的已有游标：
+
+```json
+{
+  "last_seq": 42,
+  "delivered_seq": 38,
+  "read_seq": 35,
+  "peer_delivered_seq": 40,
+  "peer_read_seq": 37
+}
+```
+
+| 字段名 | 含义 |
+| --- | --- |
+| `last_seq` | 会话当前最后一个消息序号。 |
+| `delivered_seq` | 当前用户连续收到的最后一个消息序号。 |
+| `read_seq` | 当前用户读到的最后一个消息序号。 |
+| `peer_delivered_seq` | direct 会话对端连续收到的最后一个消息序号。 |
+| `peer_read_seq` | direct 会话对端读到的最后一个消息序号。 |
+
+这些字段读取 `conversations.last_seq` 和现有成员游标，不引入新的游标。客户端先展示最近历史，再从当前用户的 `delivered_seq + 1` 用现有 `from_seq` 分页补齐到连续位置；确认没有序号缺口后才发送 `delivered_ack`。接收实时消息时，客户端也只推进连续送达位置。发送方用 `peer_delivered_seq` 与 `peer_read_seq` 按 `conversation_seq` 渲染送达和已读状态。
+
 ## `delivered_ack` 请求与响应
 
 `delivered_ack` 表示客户端已经连续收到某个会话的消息到哪里。它确认的是消息到达客户端，不表示用户已经阅读。
@@ -378,6 +402,24 @@
 | `conversation_id` | `number` | 请求中存在时必填 | 被拒绝的会话 ID。 |
 | `error_code` | `string` | 是 | 稳定错误码。 |
 | `message` | `string` | 是 | 面向调试的错误描述。 |
+
+## `conversation_receipt_updated` 主动推送
+
+会话成员的送达或已读游标推进后，服务端向本节点上该会话的其他在线成员推送 `conversation_receipt_updated`。它不是请求响应，不携带 `request_id`；发送方按 `user_id` 和游标更新对端状态。
+
+```json
+{
+  "type": "conversation_receipt_updated",
+  "payload": {
+    "conversation_id": 10001,
+    "user_id": 20002,
+    "delivered_seq": 42,
+    "read_seq": 40
+  }
+}
+```
+
+`user_id` 是推进游标的成员。接收端对 `delivered_seq` 和 `read_seq` 采用单调推进；当一条己方消息的 `conversation_seq <= peer_read_seq` 时显示已读，因此最新消息已读时，此前消息也自动显示已读。当前实时推送只发送到同一 `im-chat` 节点的在线连接。
 
 ## 幂等、排序、缺口和本地合并规则
 
