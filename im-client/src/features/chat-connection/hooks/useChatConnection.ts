@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { connectChatWebSocket, type ChatConnectionController } from "../api";
 import type { ChatBusinessServerFrame, ChatConnectionState, ChatSendTextMessageInput, WebSocketFactory } from "../types";
@@ -76,6 +76,19 @@ export function useChatConnection({
     };
   }, [session, webSocketFactory, requestIdFactory]);
 
+  const sendDeliveredAck = useCallback((conversationId: number, deliveredSeq: number) => {
+    if (!controllerRef.current) {
+      throw new Error("chat connection is not available");
+    }
+    controllerRef.current.sendDeliveredAck(conversationId, deliveredSeq);
+  }, []);
+  const sendReadAck = useCallback((conversationId: number, readSeq: number) => {
+    if (!controllerRef.current) {
+      throw new Error("chat connection is not available");
+    }
+    controllerRef.current.sendReadAck(conversationId, readSeq);
+  }, []);
+
   return {
     state,
     close: () => controllerRef.current?.close(),
@@ -85,5 +98,7 @@ export function useChatConnection({
       }
       controllerRef.current.sendTextMessage(input);
     },
+    sendDeliveredAck,
+    sendReadAck,
   };
 }

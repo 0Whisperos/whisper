@@ -37,6 +37,8 @@ describe("AuthenticatedPage", () => {
       state: { status: "closed" } satisfies ChatConnectionState,
       close: vi.fn(),
       sendTextMessage: vi.fn(),
+      sendDeliveredAck: vi.fn(),
+      sendReadAck: vi.fn(),
     });
     useChatDataMock.mockReturnValue({
       data: chatMockData,
@@ -92,6 +94,8 @@ describe("AuthenticatedPage", () => {
       } satisfies ChatConnectionState,
       close: vi.fn(),
       sendTextMessage: vi.fn(),
+      sendDeliveredAck: vi.fn(),
+      sendReadAck: vi.fn(),
     });
 
     render(<AuthenticatedPage apiBaseUrl="http://127.0.0.1:8080" session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
@@ -119,6 +123,8 @@ describe("AuthenticatedPage", () => {
       } satisfies ChatConnectionState,
       close: vi.fn(),
       sendTextMessage: sendTransport,
+      sendDeliveredAck: vi.fn(),
+      sendReadAck: vi.fn(),
     });
     useChatDataMock.mockReturnValueOnce({
       data: chatMockData,

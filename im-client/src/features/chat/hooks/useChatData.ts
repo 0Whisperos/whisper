@@ -23,7 +23,7 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
   const [loadingConversationId, setLoadingConversationId] = useState<number | null>(null);
   const [historyErrors, setHistoryErrors] = useState<Record<number, ChatApiError>>({});
   const loadedConversationIdsRef = useRef(new Set<number>());
-  const loadingPromisesRef = useRef(new Map<number, Promise<void>>());
+  const loadingPromisesRef = useRef(new Map<number, Promise<number | null>>());
   const generationRef = useRef(0);
 
   const loadInitialData = useCallback(async () => {
@@ -61,9 +61,9 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     void loadInitialData();
   }, [loadInitialData]);
 
-  const loadHistory = useCallback(async (conversationId: number) => {
+  const loadHistory = useCallback(async (conversationId: number): Promise<number | null> => {
     if (!data || loadedConversationIdsRef.current.has(conversationId)) {
-      return;
+      return null;
     }
     const existingRequest = loadingPromisesRef.current.get(conversationId);
     if (existingRequest) {
@@ -79,14 +79,69 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
       });
       try {
         const page = await loadConversationMessages(apiBaseUrl, session.accessToken, conversationId, { limit: 50 });
-        const incomingMessages = page.messages.map(toChatMessage);
-        setData((current) => current ? mergeConversationMessages(current, conversationId, incomingMessages) : current);
+        const pages = [page];
+        const savedDeliveredSeq = Math.max(page.deliveredSeq, data.conversations[conversationId]?.deliveredSeq ?? 0);
+        let deliveredSeq = savedDeliveredSeq;
+        let expectedSeq = deliveredSeq + 1;
+        while (expectedSeq <= page.lastSeq) {
+          const missingPage = await loadConversationMessages(apiBaseUrl, session.accessToken, conversationId, {
+            fromSeq: expectedSeq,
+            limit: 50,
+          });
+          if (missingPage.messages.length === 0) {
+            break;
+          }
+          const orderedMessages = [...missingPage.messages].sort((left, right) => left.conversationSeq - right.conversationSeq);
+          pages.push(missingPage);
+          const firstExpectedSeq = expectedSeq;
+          for (const message of orderedMessages) {
+            if (message.conversationSeq !== expectedSeq) {
+              break;
+            }
+            deliveredSeq = message.conversationSeq;
+            expectedSeq += 1;
+          }
+          if (expectedSeq === firstExpectedSeq) {
+            break;
+          }
+        }
+        const incomingMessages = pages.flatMap((currentPage) => currentPage.messages.map(toChatMessage));
+        setData((current) => {
+          if (!current?.conversations[conversationId]) {
+            return current;
+          }
+          const merged = mergeConversationMessages(current, conversationId, incomingMessages);
+          return {
+            ...merged,
+            conversations: {
+              ...merged.conversations,
+              [conversationId]: {
+                ...merged.conversations[conversationId],
+                lastSeq: Math.max(merged.conversations[conversationId].lastSeq ?? 0, page.lastSeq),
+                deliveredSeq: Math.max(merged.conversations[conversationId].deliveredSeq ?? 0, page.deliveredSeq),
+                readSeq: Math.max(merged.conversations[conversationId].readSeq ?? 0, page.readSeq),
+                peerDeliveredSeq: Math.max(merged.conversations[conversationId].peerDeliveredSeq ?? 0, page.peerDeliveredSeq),
+                peerReadSeq: Math.max(merged.conversations[conversationId].peerReadSeq ?? 0, page.peerReadSeq),
+                messages: merged.conversations[conversationId].messages.map((message) => ({
+                  ...message,
+                  receipt: message.senderUserId === merged.self.userId && message.conversationSeq !== null
+                    ? message.conversationSeq <= Math.max(merged.conversations[conversationId].peerReadSeq ?? 0, page.peerReadSeq)
+                      ? "已读"
+                      : message.conversationSeq <= Math.max(merged.conversations[conversationId].peerDeliveredSeq ?? 0, page.peerDeliveredSeq) ? "已送达" : undefined
+                    : undefined,
+                })),
+              },
+            },
+          };
+        });
         loadedConversationIdsRef.current.add(conversationId);
+        return deliveredSeq > savedDeliveredSeq ? deliveredSeq : null;
       } catch (caught) {
         setHistoryErrors((current) => ({
           ...current,
           [conversationId]: caught instanceof ChatApiError ? caught : new ChatApiError("internal_error"),
         }));
+        return null;
       } finally {
         loadingPromisesRef.current.delete(conversationId);
         setLoadingConversationId((current) => current === conversationId ? null : current);
@@ -161,6 +216,11 @@ function buildChatData(me: {
       status: "状态未知",
       participants: { [profile.userId]: profile },
       messages: [],
+      lastSeq: 0,
+      deliveredSeq: 0,
+      readSeq: 0,
+      peerDeliveredSeq: 0,
+      peerReadSeq: 0,
     };
   }
 

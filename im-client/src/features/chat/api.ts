@@ -167,6 +167,13 @@ function parseMessagePage(value: unknown): ChatMessagePageDto | null {
     return null;
   }
   const payload = value as Record<string, unknown>;
+  if (typeof payload.last_seq !== "number"
+    || typeof payload.delivered_seq !== "number"
+    || typeof payload.read_seq !== "number"
+    || typeof payload.peer_delivered_seq !== "number"
+    || typeof payload.peer_read_seq !== "number") {
+    return null;
+  }
   if ("next_before_seq" in payload && payload.next_before_seq !== undefined && typeof payload.next_before_seq !== "number") {
     return null;
   }
@@ -194,6 +201,11 @@ function parseMessagePage(value: unknown): ChatMessagePageDto | null {
     hasMore: value.has_more,
     nextBeforeSeq: payload.next_before_seq as number | undefined,
     nextFromSeq: payload.next_from_seq as number | undefined,
+    lastSeq: payload.last_seq,
+    deliveredSeq: payload.delivered_seq,
+    readSeq: payload.read_seq,
+    peerDeliveredSeq: payload.peer_delivered_seq,
+    peerReadSeq: payload.peer_read_seq,
   };
 }
 

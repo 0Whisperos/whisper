@@ -67,6 +67,11 @@ export interface ChatConversation {
   status: string;
   participants: Record<number, ChatProfile>;
   messages: ChatMessage[];
+  lastSeq?: number;
+  deliveredSeq?: number;
+  readSeq?: number;
+  peerDeliveredSeq?: number;
+  peerReadSeq?: number;
 }
 
 export interface ChatContact {
@@ -128,4 +133,9 @@ export interface ChatMessagePageDto {
   hasMore: boolean;
   nextBeforeSeq?: number;
   nextFromSeq?: number;
+  lastSeq: number;
+  deliveredSeq: number;
+  readSeq: number;
+  peerDeliveredSeq: number;
+  peerReadSeq: number;
 }

@@ -268,6 +268,37 @@ describe("chat connection API", () => {
     });
   });
 
+  it("sends delivered and read cursor acknowledgements with their own request ids", () => {
+    // 测试目标：验证送达和已读游标都通过认证后的 WebSocket 请求帧发送，且字段名各自正确。
+    // 构造方法：使用固定 request_id 序列认证 socket，再依次调用两个 ACK controller 方法。
+    // 输入数据：conversation_id=42，delivered_seq=8，read_seq=7。
+    // 预期行为：发送队列包含两种 ACK 帧，游标值不混用且 request_id 各不相同。
+    vi.useFakeTimers();
+    const socket = new MockWebSocket();
+    const requestIds = ["req-auth", "req-heartbeat", "req-delivered", "req-read"];
+    const controller = connectChatWebSocket({
+      session: testSession,
+      onStateChange: vi.fn(),
+      webSocketFactory: () => socket,
+      requestIdFactory: () => requestIds.shift() ?? "req-extra",
+    });
+    authenticateSocket(socket);
+
+    controller.sendDeliveredAck(42, 8);
+    controller.sendReadAck(42, 7);
+
+    expect(JSON.parse(socket.sent[2])).toEqual({
+      type: "delivered_ack",
+      request_id: "req-delivered",
+      payload: { conversation_id: 42, delivered_seq: 8 },
+    });
+    expect(JSON.parse(socket.sent[3])).toEqual({
+      type: "read_ack",
+      request_id: "req-read",
+      payload: { conversation_id: 42, read_seq: 7 },
+    });
+  });
+
   it("rejects sending messages until the socket is authenticated and open", () => {
     // 测试目标：验证业务消息不会在认证前或 socket 已关闭时被写入 WebSocket。
     // 构造方法：分别对刚创建的 controller 和认证后主动关闭的 controller 调用发送方法。
@@ -304,11 +335,11 @@ describe("chat connection API", () => {
     expect(closedSocket.sent).not.toContainEqual(expect.stringContaining("send_message"));
   });
 
-  it("forwards every valid authenticated business frame to the typed callback", () => {
-    // 测试目标：验证 accepted、rejected 和 message_created 三类业务帧都会交给聊天数据层。
-    // 构造方法：认证 socket 后依次注入三种符合协议的服务端 JSON 帧，并观察 onServerFrame。
-    // 输入数据：client_message_id=client-message-1，正式消息 message_id=message-1，事件 event_id=event-1。
-    // 预期行为：回调按接收顺序获得三个原始且类型正确的业务帧，连接保持打开。
+  it("forwards valid message and receipt business frames to the typed callback", () => {
+    // 测试目标：验证发送消息响应、消息推送、ACK 响应与对端游标推送都会到达聊天数据层。
+    // 构造方法：认证 socket 后依次注入各类合法 JSON 帧，并观察 onServerFrame。
+    // 输入数据：message-1、req-delivered ACK、req-read ACK 和 conversation 42 的 peer cursor。
+    // 预期行为：回调按接收顺序获得六个合法帧，连接保持打开。
     vi.useFakeTimers();
     const socket = new MockWebSocket();
     const onServerFrame = vi.fn();
@@ -345,11 +376,28 @@ describe("chat connection API", () => {
       type: "message_created",
       payload: { event_id: "event-1", message },
     }));
+    socket.receive(JSON.stringify({
+      type: "delivered_ack_accepted",
+      request_id: "req-delivered",
+      payload: { conversation_id: 10001, delivered_seq: 42, delivered_at: "2026-08-16T12:00:02.000+08:00" },
+    }));
+    socket.receive(JSON.stringify({
+      type: "read_ack_accepted",
+      request_id: "req-read",
+      payload: { conversation_id: 10001, read_seq: 42, read_at: "2026-08-16T12:00:03.000+08:00" },
+    }));
+    socket.receive(JSON.stringify({
+      type: "conversation_receipt_updated",
+      payload: { conversation_id: 10001, user_id: 20002, delivered_seq: 42, read_seq: 40 },
+    }));
 
-    expect(onServerFrame).toHaveBeenCalledTimes(3);
+    expect(onServerFrame).toHaveBeenCalledTimes(6);
     expect(onServerFrame).toHaveBeenNthCalledWith(1, expect.objectContaining({ type: "server_accepted" }));
     expect(onServerFrame).toHaveBeenNthCalledWith(2, expect.objectContaining({ type: "send_message_rejected" }));
     expect(onServerFrame).toHaveBeenNthCalledWith(3, expect.objectContaining({ type: "message_created" }));
+    expect(onServerFrame).toHaveBeenNthCalledWith(4, expect.objectContaining({ type: "delivered_ack_accepted" }));
+    expect(onServerFrame).toHaveBeenNthCalledWith(5, expect.objectContaining({ type: "read_ack_accepted" }));
+    expect(onServerFrame).toHaveBeenNthCalledWith(6, expect.objectContaining({ type: "conversation_receipt_updated" }));
     expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 

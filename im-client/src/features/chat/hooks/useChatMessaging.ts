@@ -28,6 +28,9 @@ interface UseChatMessagingOptions {
   clientMessageIdFactory?: () => string;
   now?: () => Date;
   acknowledgementTimeoutMs?: number;
+  sendDeliveredAck?: (conversationId: number, deliveredSeq: number) => void;
+  sendReadAck?: (conversationId: number, readSeq: number) => void;
+  reloadHistory?: (conversationId: number) => Promise<number | null>;
 }
 
 const DEFAULT_ACKNOWLEDGEMENT_TIMEOUT_MS = 15_000;
@@ -39,9 +42,13 @@ export function useChatMessaging({
   clientMessageIdFactory = createClientMessageId,
   now = () => new Date(),
   acknowledgementTimeoutMs = DEFAULT_ACKNOWLEDGEMENT_TIMEOUT_MS,
+  sendDeliveredAck,
+  sendReadAck,
+  reloadHistory,
 }: UseChatMessagingOptions) {
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const dataRef = useRef(data);
+  const pendingReadAcksRef = useRef(new Map<number, { readSeq: number; retryAfterDelivery: boolean }>());
   dataRef.current = data;
 
   const clearAcknowledgementTimer = useCallback((clientMessageId: string) => {
@@ -148,7 +155,70 @@ export function useChatMessaging({
       clearAcknowledgementTimer(frame.payload.message.client_message_id);
     }
     updateData((current) => current ? mergeOfficialMessage(current, frame.payload.message) : current);
-  }, [clearAcknowledgementTimer, updateData]);
+    const message = frame.payload.message;
+    const conversation = dataRef.current?.conversations[message.conversation_id];
+    if (!conversation) {
+      return;
+    }
+    const deliveredSeq = conversation.deliveredSeq ?? 0;
+    if (message.conversation_seq > (conversation.lastSeq ?? 0)) {
+      updateData((current) => current ? {
+        ...current,
+        conversations: {
+          ...current.conversations,
+          [message.conversation_id]: {
+            ...current.conversations[message.conversation_id],
+            lastSeq: message.conversation_seq,
+          },
+        },
+      } : current);
+    }
+    const sequences = new Set(conversation.messages
+      .map((item) => item.conversationSeq)
+      .filter((sequence): sequence is number => sequence !== null));
+    sequences.add(message.conversation_seq);
+    let nextDeliveredSeq = deliveredSeq;
+    while (sequences.has(nextDeliveredSeq + 1)) {
+      nextDeliveredSeq += 1;
+    }
+    if (nextDeliveredSeq > deliveredSeq) {
+      sendDeliveredAck?.(message.conversation_id, nextDeliveredSeq);
+    } else if (message.conversation_seq > deliveredSeq + 1 && reloadHistory) {
+      void reloadHistory(message.conversation_id).then((caughtUpSeq) => {
+        if (caughtUpSeq !== null) {
+          sendDeliveredAck?.(message.conversation_id, caughtUpSeq);
+        }
+      });
+    }
+  }, [clearAcknowledgementTimer, reloadHistory, sendDeliveredAck, updateData]);
+
+  const markReadThrough = useCallback((conversationId: number, readSeq: number) => {
+    const conversation = dataRef.current?.conversations[conversationId];
+    if (!conversation || readSeq <= (conversation.readSeq ?? 0) || readSeq > (conversation.deliveredSeq ?? 0)) {
+      return;
+    }
+    const pending = pendingReadAcksRef.current.get(conversationId);
+    if (!pending || readSeq > pending.readSeq) {
+      pendingReadAcksRef.current.set(conversationId, { readSeq, retryAfterDelivery: false });
+    }
+    try {
+      sendReadAck?.(conversationId, readSeq);
+    } catch {
+      return;
+    }
+  }, [sendReadAck]);
+
+  const handleReceiptUpdated = useCallback((frame: Extract<ChatBusinessServerFrame, { type: "conversation_receipt_updated" }>) => {
+    updateData((current) => {
+      const conversation = current?.conversations[frame.payload.conversation_id];
+      if (!current || !conversation || frame.payload.user_id === current.self.userId) {
+        return current;
+      }
+      const peerDeliveredSeq = Math.max(conversation.peerDeliveredSeq ?? 0, frame.payload.delivered_seq);
+      const peerReadSeq = Math.max(conversation.peerReadSeq ?? 0, frame.payload.read_seq);
+      return updateConversationCursors(current, frame.payload.conversation_id, { peerDeliveredSeq, peerReadSeq });
+    });
+  }, [updateData]);
 
   const handleServerFrame = useCallback((frame: ChatBusinessServerFrame) => {
     switch (frame.type) {
@@ -160,8 +230,64 @@ export function useChatMessaging({
         return;
       case "message_created":
         handleMessageCreated(frame);
+        return;
+      case "delivered_ack_accepted":
+        updateData((current) => current ? updateConversationCursors(current, frame.payload.conversation_id, {
+          deliveredSeq: frame.payload.delivered_seq,
+        }) : current);
+        {
+          const pending = pendingReadAcksRef.current.get(frame.payload.conversation_id);
+          if (pending?.retryAfterDelivery && pending.readSeq <= frame.payload.delivered_seq && sendReadAck) {
+            try {
+              sendReadAck(frame.payload.conversation_id, pending.readSeq);
+              pending.retryAfterDelivery = false;
+            } catch {
+              // Keep the pending cursor marked for retry after a later accepted delivery cursor.
+            }
+          }
+        }
+        return;
+      case "read_ack_accepted":
+        {
+          const pending = pendingReadAcksRef.current.get(frame.payload.conversation_id);
+          if (pending && pending.readSeq <= frame.payload.read_seq) {
+            pendingReadAcksRef.current.delete(frame.payload.conversation_id);
+          }
+        }
+        updateData((current) => current ? updateConversationCursors(current, frame.payload.conversation_id, {
+          readSeq: frame.payload.read_seq,
+        }) : current);
+        return;
+      case "delivered_ack_rejected":
+        if (frame.payload.conversation_id !== undefined && reloadHistory) {
+          const conversationId = frame.payload.conversation_id;
+          void reloadHistory(conversationId).then((caughtUpSeq) => {
+            if (caughtUpSeq !== null) {
+              sendDeliveredAck?.(conversationId, caughtUpSeq);
+            }
+          });
+        }
+        return;
+      case "read_ack_rejected":
+        if (frame.payload.conversation_id !== undefined) {
+          const conversationId = frame.payload.conversation_id;
+          const pending = pendingReadAcksRef.current.get(conversationId);
+          if (pending) {
+            pending.retryAfterDelivery = true;
+          }
+          if (reloadHistory) {
+            void reloadHistory(conversationId).then((caughtUpSeq) => {
+              if (caughtUpSeq !== null) {
+                sendDeliveredAck?.(conversationId, caughtUpSeq);
+              }
+            });
+          }
+        }
+        return;
+      case "conversation_receipt_updated":
+        handleReceiptUpdated(frame);
     }
-  }, [handleMessageCreated, handleSendMessageRejected, handleServerAccepted]);
+  }, [handleMessageCreated, handleReceiptUpdated, handleSendMessageRejected, handleServerAccepted, reloadHistory, sendDeliveredAck, updateData]);
 
   return {
     send,
@@ -169,8 +295,37 @@ export function useChatMessaging({
     handleServerAccepted,
     handleSendMessageRejected,
     handleMessageCreated,
+    markReadThrough,
     handleServerFrame,
   };
+}
+
+function updateConversationCursors(
+  data: ChatData,
+  conversationId: number,
+  cursors: Partial<Pick<NonNullable<ChatData["conversations"][number]>, "deliveredSeq" | "readSeq" | "peerDeliveredSeq" | "peerReadSeq">>,
+): ChatData {
+  const conversation = data.conversations[conversationId];
+  if (!conversation) {
+    return data;
+  }
+  const next = {
+    ...conversation,
+    ...cursors,
+    deliveredSeq: Math.max(conversation.deliveredSeq ?? 0, cursors.deliveredSeq ?? 0),
+    readSeq: Math.max(conversation.readSeq ?? 0, cursors.readSeq ?? 0),
+    peerDeliveredSeq: Math.max(conversation.peerDeliveredSeq ?? 0, cursors.peerDeliveredSeq ?? 0),
+    peerReadSeq: Math.max(conversation.peerReadSeq ?? 0, cursors.peerReadSeq ?? 0),
+  };
+  next.messages = next.messages.map((message) => ({
+    ...message,
+    receipt: message.senderUserId === data.self.userId && message.conversationSeq !== null
+      ? message.conversationSeq <= (next.peerReadSeq ?? 0)
+        ? "已读"
+        : message.conversationSeq <= (next.peerDeliveredSeq ?? 0) ? "已送达" : undefined
+      : undefined,
+  }));
+  return { ...data, conversations: { ...data.conversations, [conversationId]: next } };
 }
 
 function createClientMessageId(): string {

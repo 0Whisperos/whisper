@@ -74,6 +74,8 @@ function rejectedFrame(clientMessageId: string): ChatSendMessageRejectedFrame {
 function renderMessaging(options: {
   send?: (input: { clientMessageId: string; conversationId: number; text: string; clientSentAt: string }) => void;
   initialData?: ChatData;
+  sendDeliveredAck?: (conversationId: number, deliveredSeq: number) => void;
+  sendReadAck?: (conversationId: number, readSeq: number) => void;
 } = {}) {
   return renderHook(() => {
     const [data, setData] = useState(() => options.initialData ?? createData());
@@ -83,6 +85,8 @@ function renderMessaging(options: {
       sendTextMessage: options.send ?? ((input) => { sentMessages.push(input); }),
       clientMessageIdFactory: () => "client-7",
       now: () => new Date("2026-08-30T08:00:00.000Z"),
+      sendDeliveredAck: options.sendDeliveredAck,
+      sendReadAck: options.sendReadAck,
     });
     return { data, messaging };
   });
@@ -258,6 +262,72 @@ describe("useChatMessaging", () => {
     act(() => { result.current.messaging.handleServerFrame(newest); });
     expect(result.current.data.conversations[42].messages.map((message) => message.conversationSeq)).toEqual([7, 9]);
     expect(result.current.data.sessions[0].preview).toBe("最新消息");
+  });
+
+  it("marks every sent message through the peer read cursor as read", () => {
+    // 测试目标：验证对端最新已读序号会让此前己方消息全部显示为已读。
+    // 构造方法：初始时间线放入序号 1、2、3 的己方消息，再注入对端 read_seq=3 的主动回执帧。
+    // 输入数据：peer_delivered_seq=3、peer_read_seq=3，消息序号分别为 1、2、3。
+    // 预期行为：三条消息 receipt 都为“已读”，无需逐条回执字段。
+    const data = createData();
+    data.conversations[42].messages = [1, 2, 3].map((sequence) => ({
+      localKey: `message-${sequence}`,
+      messageId: `message-${sequence}`,
+      conversationId: 42,
+      conversationSeq: sequence,
+      senderUserId: 20001,
+      clientMessageId: `client-${sequence}`,
+      messageType: "text" as const,
+      content: { text: `消息${sequence}` },
+      createdAt: "2026-08-30T08:00:00.000Z",
+      clientSentAt: "2026-08-30T08:00:00.000Z",
+      localStatus: "accepted" as const,
+      displayTime: "08:00",
+      showTime: false,
+      showAvatar: true,
+    }));
+    data.conversations[42].deliveredSeq = 3;
+    data.conversations[42].lastSeq = 3;
+    const { result } = renderMessaging({ initialData: data });
+
+    act(() => {
+      result.current.messaging.handleServerFrame({
+        type: "conversation_receipt_updated",
+        payload: { conversation_id: 42, user_id: 20002, delivered_seq: 3, read_seq: 3 },
+      });
+    });
+
+    expect(result.current.data.conversations[42].messages.map((message) => message.receipt)).toEqual(["已读", "已读", "已读"]);
+  });
+
+  it("sends read_ack only up to the locally delivered cursor", () => {
+    // 测试目标：验证最新可见消息会发送单调 read_ack，且不会越过本机 delivered_seq。
+    // 构造方法：设置 delivered_seq=5、read_seq=2，调用两次不同位置的 markReadThrough。
+    // 输入数据：read_seq=5 为有效最新位置，read_seq=6 超过送达范围。
+    // 预期行为：仅发送 conversation_id=42/read_seq=5，本地 read_seq 等服务端 accepted 后再推进。
+    const data = createData();
+    data.conversations[42].deliveredSeq = 5;
+    data.conversations[42].readSeq = 2;
+    const sendReadAck = vi.fn();
+    const { result } = renderMessaging({ initialData: data, sendReadAck });
+
+    act(() => {
+      result.current.messaging.markReadThrough(42, 5);
+      result.current.messaging.markReadThrough(42, 6);
+    });
+
+    expect(sendReadAck).toHaveBeenCalledTimes(1);
+    expect(sendReadAck).toHaveBeenCalledWith(42, 5);
+    expect(result.current.data.conversations[42].readSeq).toBe(2);
+
+    act(() => {
+      result.current.messaging.handleServerFrame({
+        type: "read_ack_accepted",
+        request_id: "req-read",
+        payload: { conversation_id: 42, read_seq: 5, read_at: "2026-08-30T08:00:01.000Z" },
+      });
+    });
+    expect(result.current.data.conversations[42].readSeq).toBe(5);
   });
 
   it("clears the acknowledgement timer only for the sender's official event", () => {

@@ -111,6 +111,11 @@ describe("useChatData", () => {
         { messageId: "message-2", conversationId: 42, conversationSeq: 2, senderUserId: 20002, clientMessageId: "c2-new", messageType: "text", content: { text: "第二条更新" }, createdAt: "2026-08-28T10:02:00+08:00" },
       ],
       hasMore: false,
+      lastSeq: 2,
+      deliveredSeq: 2,
+      readSeq: 0,
+      peerDeliveredSeq: 0,
+      peerReadSeq: 0,
     });
 
     const { result } = renderHook(() => useChatData("http://api.test", session));
@@ -126,6 +131,48 @@ describe("useChatData", () => {
       ["message-2", 2],
     ]);
     expect(result.current.data?.sessions[0]).toMatchObject({ preview: "第二条更新" });
+  });
+
+  it("fills every sequence after the local delivered cursor before advancing it", async () => {
+    // 测试目标：验证冷启动只返回最近消息时，客户端仍从自己的 delivered_seq 后补齐连续消息。
+    // 构造方法：首屏返回最近序号 3 和 delivered_seq=1，再让 from_seq 请求返回序号 2、3。
+    // 输入数据：last_seq=3、delivered_seq=1、from_seq=2，消息序号 2 和 3。
+    // 预期行为：历史补齐到连续序号 3，loadHistory 返回待确认游标 3，但本地游标仍反映服务端已存值 1。
+    mockBootstrap();
+    loadConversationMessagesMock
+      .mockResolvedValueOnce({
+        messages: [{ messageId: "message-3", conversationId: 42, conversationSeq: 3, senderUserId: 20002, clientMessageId: "c3", messageType: "text", content: { text: "第三条" }, createdAt: "2026-08-28T10:03:00+08:00" }],
+        hasMore: true,
+        lastSeq: 3,
+        deliveredSeq: 1,
+        readSeq: 0,
+        peerDeliveredSeq: 0,
+        peerReadSeq: 0,
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          { messageId: "message-2", conversationId: 42, conversationSeq: 2, senderUserId: 20001, clientMessageId: "c2", messageType: "text", content: { text: "第二条" }, createdAt: "2026-08-28T10:02:00+08:00" },
+          { messageId: "message-3", conversationId: 42, conversationSeq: 3, senderUserId: 20002, clientMessageId: "c3", messageType: "text", content: { text: "第三条" }, createdAt: "2026-08-28T10:03:00+08:00" },
+        ],
+        hasMore: false,
+        lastSeq: 3,
+        deliveredSeq: 1,
+        readSeq: 0,
+        peerDeliveredSeq: 0,
+        peerReadSeq: 0,
+      });
+
+    const { result } = renderHook(() => useChatData("http://api.test", session));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    let deliveredSeq: number | null = null;
+    await act(async () => {
+      deliveredSeq = await result.current.loadHistory(42);
+    });
+
+    expect(loadConversationMessagesMock).toHaveBeenNthCalledWith(2, "http://api.test", "jwt-token", 42, { fromSeq: 2, limit: 50 });
+    expect(deliveredSeq).toBe(3);
+    expect(result.current.data?.conversations[42].deliveredSeq).toBe(1);
+    expect(result.current.data?.conversations[42].messages.map((message) => message.conversationSeq)).toEqual([2, 3]);
   });
 
   it("merges a pending self message when a concurrent history response arrives first", async () => {
@@ -146,6 +193,11 @@ describe("useChatData", () => {
         createdAt: string;
       }>;
       hasMore: boolean;
+      lastSeq: number;
+      deliveredSeq: number;
+      readSeq: number;
+      peerDeliveredSeq: number;
+      peerReadSeq: number;
     }) => void = () => undefined;
     loadConversationMessagesMock.mockImplementationOnce(() => new Promise((resolve) => {
       resolveHistory = resolve;
@@ -153,7 +205,7 @@ describe("useChatData", () => {
 
     const { result } = renderHook(() => useChatData("http://api.test", session));
     await waitFor(() => expect(result.current.data).not.toBeNull());
-    let history: Promise<void> = Promise.resolve();
+    let history: Promise<number | null> = Promise.resolve(null);
     act(() => {
       history = result.current.loadHistory(42);
     });
@@ -179,6 +231,11 @@ describe("useChatData", () => {
           createdAt: "2026-08-30T08:00:01.000+08:00",
         }],
         hasMore: false,
+        lastSeq: 9,
+        deliveredSeq: 9,
+        readSeq: 0,
+        peerDeliveredSeq: 0,
+        peerReadSeq: 0,
       });
       await history;
     });
@@ -196,7 +253,7 @@ describe("useChatData", () => {
     mockBootstrap();
     loadConversationMessagesMock
       .mockRejectedValueOnce(new ChatApiError("not_conversation_member"))
-      .mockResolvedValueOnce({ messages: [], hasMore: false });
+      .mockResolvedValueOnce({ messages: [], hasMore: false, lastSeq: 0, deliveredSeq: 0, readSeq: 0, peerDeliveredSeq: 0, peerReadSeq: 0 });
 
     const { result } = renderHook(() => useChatData("http://api.test", session));
     await waitFor(() => expect(result.current.data).not.toBeNull());

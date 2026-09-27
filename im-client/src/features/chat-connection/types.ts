@@ -32,6 +32,18 @@ export interface ChatHeartbeatFrame {
   };
 }
 
+export interface ChatDeliveredAckFrame {
+  type: "delivered_ack";
+  request_id: string;
+  payload: { conversation_id: number; delivered_seq: number };
+}
+
+export interface ChatReadAckFrame {
+  type: "read_ack";
+  request_id: string;
+  payload: { conversation_id: number; read_seq: number };
+}
+
 export interface ChatAuthOkFrame {
   type: "auth_ok";
   request_id: string;
@@ -114,10 +126,49 @@ export interface ChatMessageCreatedFrame {
   };
 }
 
+export interface ChatDeliveredAckAcceptedFrame {
+  type: "delivered_ack_accepted";
+  request_id: string;
+  payload: { conversation_id: number; delivered_seq: number; delivered_at: string };
+}
+
+export interface ChatReadAckAcceptedFrame {
+  type: "read_ack_accepted";
+  request_id: string;
+  payload: { conversation_id: number; read_seq: number; read_at: string };
+}
+
+export interface ChatDeliveredAckRejectedFrame {
+  type: "delivered_ack_rejected";
+  request_id: string;
+  payload: { conversation_id?: number; error_code: string; message: string };
+}
+
+export interface ChatReadAckRejectedFrame {
+  type: "read_ack_rejected";
+  request_id: string;
+  payload: { conversation_id?: number; error_code: string; message: string };
+}
+
+export interface ChatConversationReceiptUpdatedFrame {
+  type: "conversation_receipt_updated";
+  payload: {
+    conversation_id: number;
+    user_id: number;
+    delivered_seq: number;
+    read_seq: number;
+  };
+}
+
 export type ChatBusinessServerFrame =
   | ChatServerAcceptedFrame
   | ChatSendMessageRejectedFrame
-  | ChatMessageCreatedFrame;
+  | ChatMessageCreatedFrame
+  | ChatDeliveredAckAcceptedFrame
+  | ChatReadAckAcceptedFrame
+  | ChatDeliveredAckRejectedFrame
+  | ChatReadAckRejectedFrame
+  | ChatConversationReceiptUpdatedFrame;
 
 export type ChatServerFrame =
   | ChatAuthOkFrame

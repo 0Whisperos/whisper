@@ -3,6 +3,13 @@ import type {
   ChatBusinessServerFrame,
   ChatConnectionOptions,
   ChatHeartbeatFrame,
+  ChatDeliveredAckFrame,
+  ChatReadAckFrame,
+  ChatDeliveredAckAcceptedFrame,
+  ChatReadAckAcceptedFrame,
+  ChatDeliveredAckRejectedFrame,
+  ChatReadAckRejectedFrame,
+  ChatConversationReceiptUpdatedFrame,
   ChatMessageCreatedFrame,
   ChatSendMessageFrame,
   ChatSendMessageRejectedFrame,
@@ -18,6 +25,8 @@ const HEARTBEAT_INTERVAL_MS = 10_000;
 export interface ChatConnectionController {
   close: () => void;
   sendTextMessage: (input: ChatSendTextMessageInput) => void;
+  sendDeliveredAck: (conversationId: number, deliveredSeq: number) => void;
+  sendReadAck: (conversationId: number, readSeq: number) => void;
 }
 
 export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnectionController {
@@ -123,7 +132,23 @@ export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnec
       };
       socket.send(JSON.stringify(frame));
     },
+    sendDeliveredAck: (conversationId, deliveredSeq) => {
+      sendCursorAck("delivered_ack", conversationId, deliveredSeq);
+    },
+    sendReadAck: (conversationId, readSeq) => {
+      sendCursorAck("read_ack", conversationId, readSeq);
+    },
   };
+
+  function sendCursorAck(type: "delivered_ack" | "read_ack", conversationId: number, sequence: number) {
+    if (!completedAuth || socket.readyState !== WebSocket.OPEN) {
+      throw new Error("chat connection is not authenticated");
+    }
+    const frame: ChatDeliveredAckFrame | ChatReadAckFrame = type === "delivered_ack"
+      ? { type, request_id: createRequestId(), payload: { conversation_id: conversationId, delivered_seq: sequence } }
+      : { type, request_id: createRequestId(), payload: { conversation_id: conversationId, read_seq: sequence } };
+    socket.send(JSON.stringify(frame));
+  }
 
   function startHeartbeat() {
     stopHeartbeat();
@@ -177,6 +202,11 @@ function parseServerFrame(data: unknown): ChatServerFrame | null {
     || isServerAcceptedFrame(value)
     || isSendMessageRejectedFrame(value)
     || isMessageCreatedFrame(value)
+    || isDeliveredAckAcceptedFrame(value)
+    || isReadAckAcceptedFrame(value)
+    || isDeliveredAckRejectedFrame(value)
+    || isReadAckRejectedFrame(value)
+    || isConversationReceiptUpdatedFrame(value)
   ) {
     return value;
   }
@@ -186,7 +216,49 @@ function parseServerFrame(data: unknown): ChatServerFrame | null {
 function isBusinessServerFrame(frame: ChatServerFrame): frame is ChatBusinessServerFrame {
   return frame.type === "server_accepted"
     || frame.type === "send_message_rejected"
-    || frame.type === "message_created";
+    || frame.type === "message_created"
+    || frame.type === "delivered_ack_accepted"
+    || frame.type === "read_ack_accepted"
+    || frame.type === "delivered_ack_rejected"
+    || frame.type === "read_ack_rejected"
+    || frame.type === "conversation_receipt_updated";
+}
+
+function isDeliveredAckAcceptedFrame(value: unknown): value is ChatDeliveredAckAcceptedFrame {
+  return hasFrameEnvelope(value, "delivered_ack_accepted", true)
+    && hasNumberProperty(value.payload, "conversation_id")
+    && hasNumberProperty(value.payload, "delivered_seq")
+    && hasStringProperty(value.payload, "delivered_at");
+}
+
+function isReadAckAcceptedFrame(value: unknown): value is ChatReadAckAcceptedFrame {
+  return hasFrameEnvelope(value, "read_ack_accepted", true)
+    && hasNumberProperty(value.payload, "conversation_id")
+    && hasNumberProperty(value.payload, "read_seq")
+    && hasStringProperty(value.payload, "read_at");
+}
+
+function isDeliveredAckRejectedFrame(value: unknown): value is ChatDeliveredAckRejectedFrame {
+  return isAckRejectedFrame(value, "delivered_ack_rejected");
+}
+
+function isReadAckRejectedFrame(value: unknown): value is ChatReadAckRejectedFrame {
+  return isAckRejectedFrame(value, "read_ack_rejected");
+}
+
+function isAckRejectedFrame(value: unknown, type: string): value is ChatDeliveredAckRejectedFrame | ChatReadAckRejectedFrame {
+  return hasFrameEnvelope(value, type, true)
+    && hasStringProperty(value.payload, "error_code")
+    && hasStringProperty(value.payload, "message")
+    && (!("conversation_id" in value.payload) || hasNumberProperty(value.payload, "conversation_id"));
+}
+
+function isConversationReceiptUpdatedFrame(value: unknown): value is ChatConversationReceiptUpdatedFrame {
+  return hasFrameEnvelope(value, "conversation_receipt_updated", false)
+    && hasNumberProperty(value.payload, "conversation_id")
+    && hasNumberProperty(value.payload, "user_id")
+    && hasNumberProperty(value.payload, "delivered_seq")
+    && hasNumberProperty(value.payload, "read_seq");
 }
 
 function isAuthOkFrame(value: unknown): value is ChatServerFrame {

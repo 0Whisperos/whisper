@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { useChatConnection } from "../features/chat-connection/hooks/useChatConnection";
 import type { ChatBusinessServerFrame, ChatConnectionState } from "../features/chat-connection/types";
@@ -23,10 +23,52 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     refreshSession,
     onServerFrame: (frame) => serverFrameHandlerRef.current(frame),
   });
+  const pendingDeliveredAcksRef = useRef(new Map<number, number>());
+  const pendingReadAcksRef = useRef(new Map<number, number>());
+  const sendDeliveredAck = useCallback((conversationId: number, deliveredSeq: number) => {
+    if (chatConnection.state.status === "authenticated") {
+      chatConnection.sendDeliveredAck(conversationId, deliveredSeq);
+      return;
+    }
+    const pendingSeq = pendingDeliveredAcksRef.current.get(conversationId) ?? 0;
+    pendingDeliveredAcksRef.current.set(conversationId, Math.max(pendingSeq, deliveredSeq));
+  }, [chatConnection.sendDeliveredAck, chatConnection.state.status]);
+  const sendReadAck = useCallback((conversationId: number, readSeq: number) => {
+    if (chatConnection.state.status === "authenticated") {
+      chatConnection.sendReadAck(conversationId, readSeq);
+      return;
+    }
+    const pendingSeq = pendingReadAcksRef.current.get(conversationId) ?? 0;
+    pendingReadAcksRef.current.set(conversationId, Math.max(pendingSeq, readSeq));
+  }, [chatConnection.sendReadAck, chatConnection.state.status]);
+  useEffect(() => {
+    if (chatConnection.state.status !== "authenticated") {
+      return;
+    }
+    for (const [conversationId, deliveredSeq] of pendingDeliveredAcksRef.current) {
+      try {
+        chatConnection.sendDeliveredAck(conversationId, deliveredSeq);
+        pendingDeliveredAcksRef.current.delete(conversationId);
+      } catch {
+        break;
+      }
+    }
+    for (const [conversationId, readSeq] of pendingReadAcksRef.current) {
+      try {
+        chatConnection.sendReadAck(conversationId, readSeq);
+        pendingReadAcksRef.current.delete(conversationId);
+      } catch {
+        break;
+      }
+    }
+  }, [chatConnection.sendDeliveredAck, chatConnection.sendReadAck, chatConnection.state.status]);
   const messaging = useChatMessaging({
     data: chatData.data,
     updateData: chatData.updateData,
     sendTextMessage: chatConnection.sendTextMessage,
+    sendDeliveredAck,
+    sendReadAck,
+    reloadHistory: chatData.retryHistory,
   });
   serverFrameHandlerRef.current = messaging.handleServerFrame;
 
@@ -68,6 +110,8 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
       onSendText={handleSendText}
       onRetryMessage={handleRetryMessage}
       loadConversationHistory={chatData.loadHistory}
+      onDeliveredAck={sendDeliveredAck}
+      onReadAck={messaging.markReadThrough}
       retryConversationHistory={chatData.retryHistory}
       loadingConversationId={chatData.loadingConversationId}
       getConversationHistoryError={chatData.historyError}

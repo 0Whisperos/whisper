@@ -22,6 +22,7 @@ interface ChatPanelProps {
   onChangeDraft: (value: string) => void;
   onSendText: (text: string) => void;
   onRetryMessage: (clientMessageId: string) => void;
+  onReadThrough?: (conversationId: number, readSeq: number) => void;
 }
 
 export function ChatPanel({
@@ -41,6 +42,7 @@ export function ChatPanel({
   onChangeDraft,
   onSendText,
   onRetryMessage,
+  onReadThrough,
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
 
@@ -50,6 +52,24 @@ export function ChatPanel({
       list.scrollTop = list.scrollHeight;
     }
   }, [conversation.conversationId]);
+
+  useEffect(() => {
+    const list = messageListRef.current;
+    if (!list || typeof IntersectionObserver === "undefined" || !onReadThrough) {
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      const visibleSeqs = entries
+        .filter((entry) => entry.isIntersecting)
+        .map((entry) => Number((entry.target as HTMLElement).dataset.conversationSeq))
+        .filter(Number.isFinite);
+      if (visibleSeqs.length > 0) {
+        onReadThrough(conversation.conversationId, Math.max(...visibleSeqs));
+      }
+    }, { root: list, threshold: 0.5 });
+    list.querySelectorAll<HTMLElement>("[data-conversation-seq]").forEach((message) => observer.observe(message));
+    return () => observer.disconnect();
+  }, [conversation.conversationId, conversation.messages, onReadThrough]);
 
   return (
     <section className="auth-chat-panel" aria-label="聊天详情">
@@ -88,7 +108,10 @@ export function ChatPanel({
           return (
             <div key={message.localKey} className="auth-message-group">
               {message.showTime ? <time className="auth-message-time">{message.displayTime}</time> : null}
-              <article className={`auth-message-row ${isSelf ? "self" : ""} ${compact ? "compact" : ""}`}>
+              <article
+                data-conversation-seq={message.conversationSeq ?? undefined}
+                className={`auth-message-row ${isSelf ? "self" : ""} ${compact ? "compact" : ""}`}
+              >
                 <Avatar avatar={profile?.avatar ?? "?"} tone={profile?.tone ?? "gray"} className="auth-message-avatar" />
                 <div className={`auth-message-body ${message.receipt ? "has-receipt" : ""}`}>
                   {!isSelf && conversation.type === "group" && !compact ? <small className="auth-message-sender">{profile?.name}</small> : null}

@@ -23,7 +23,9 @@ interface AuthenticatedShellProps {
   onLogout: () => void;
   onSendText?: (conversationId: number, text: string) => boolean | void;
   onRetryMessage?: (clientMessageId: string) => void;
-  loadConversationHistory?: (conversationId: number) => Promise<void>;
+  loadConversationHistory?: (conversationId: number) => Promise<number | null>;
+  onDeliveredAck?: (conversationId: number, deliveredSeq: number) => void;
+  onReadAck?: (conversationId: number, readSeq: number) => void;
   retryConversationHistory?: (conversationId: number) => void;
   loadingConversationId?: number | null;
   getConversationHistoryError?: (conversationId: number) => ChatApiError | null;
@@ -38,6 +40,8 @@ export function AuthenticatedShell({
   onSendText = () => false,
   onRetryMessage = () => undefined,
   loadConversationHistory,
+  onDeliveredAck,
+  onReadAck,
   retryConversationHistory,
   loadingConversationId = null,
   getConversationHistoryError = () => null,
@@ -57,9 +61,13 @@ export function AuthenticatedShell({
 
   useEffect(() => {
     if (workspace.activeConversationId > 0 && loadConversationHistory) {
-      void loadConversationHistory(workspace.activeConversationId);
+      void Promise.resolve(loadConversationHistory(workspace.activeConversationId)).then((deliveredSeq) => {
+        if (deliveredSeq !== null) {
+          onDeliveredAck?.(workspace.activeConversationId, deliveredSeq);
+        }
+      });
     }
-  }, [loadConversationHistory, workspace.activeConversationId]);
+  }, [loadConversationHistory, onDeliveredAck, workspace.activeConversationId]);
 
   const showToolPreview = (name: string, scope?: StatusScope) => {
     const resolvedScope = scope ?? (workspace.view === "contacts" ? "contacts" : "session");
@@ -196,6 +204,7 @@ export function AuthenticatedShell({
         onChangeDraft={drafts.setDraft}
         onSendText={handleSendText}
         onRetryMessage={onRetryMessage}
+        onReadThrough={onReadAck}
       />
       <div className="auth-layout-resizer auth-composer-resizer" aria-label="调整消息输入区高度" {...layout.resizerProps("composer")} />
       <ContactsPanel

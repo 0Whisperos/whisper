@@ -98,6 +98,11 @@ describe("chat HTTP API", () => {
       }],
       has_more: true,
       next_before_seq: 8,
+      last_seq: 42,
+      delivered_seq: 7,
+      read_seq: 6,
+      peer_delivered_seq: 10,
+      peer_read_seq: 9,
     }), { status: 200 }));
 
     await expect(loadConversationMessages("http://api.test", "jwt-token", 42, {
@@ -108,6 +113,11 @@ describe("chat HTTP API", () => {
       hasMore: true,
       nextBeforeSeq: 8,
       nextFromSeq: undefined,
+      lastSeq: 42,
+      deliveredSeq: 7,
+      readSeq: 6,
+      peerDeliveredSeq: 10,
+      peerReadSeq: 9,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://api.test/v1/conversations/42/messages?before_seq=9&limit=50",
