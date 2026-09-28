@@ -203,11 +203,11 @@ export function ChatPanel({
           );
         })}
       </section>
-      {isHistoryLoading ? <output className="auth-panel-status" aria-live="polite">姝ｅ湪鍔犺浇娑堟伅...</output> : null}
+      {isHistoryLoading ? <output className="auth-panel-status" aria-live="polite">正在加载消息...</output> : null}
       {historyError ? (
         <div className="auth-panel-error" role="alert">
-          <span>娑堟伅鍔犺浇澶辫触锛?{historyError.code}</span>
-          <button type="button" onClick={onRetryHistory}>閲嶈瘯</button>
+          <span>消息加载失败：{historyError.code}</span>
+          <button type="button" onClick={onRetryHistory}>重试</button>
         </div>
       ) : null}
       <Composer
