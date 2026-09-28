@@ -22,8 +22,12 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
   const [error, setError] = useState<ChatApiError | null>(null);
   const [loadingConversationId, setLoadingConversationId] = useState<number | null>(null);
   const [historyErrors, setHistoryErrors] = useState<Record<number, ChatApiError>>({});
+  const [historyAvailability, setHistoryAvailability] = useState<Record<number, boolean>>({});
   const loadedConversationIdsRef = useRef(new Set<number>());
   const loadingPromisesRef = useRef(new Map<number, Promise<number | null>>());
+  const historyCursorsRef = useRef(new Map<number, number | null>());
+  const historyAvailabilityRef = useRef(new Map<number, boolean>());
+  const historyErrorKindsRef = useRef(new Map<number, "initial" | "older">());
   const generationRef = useRef(0);
 
   const loadInitialData = useCallback(async () => {
@@ -34,6 +38,10 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     setData(null);
     loadedConversationIdsRef.current.clear();
     loadingPromisesRef.current.clear();
+    historyCursorsRef.current.clear();
+    historyAvailabilityRef.current.clear();
+    historyErrorKindsRef.current.clear();
+    setHistoryAvailability({});
     setHistoryErrors({});
 
     try {
@@ -71,6 +79,7 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     }
 
     const request = (async () => {
+      const requestGeneration = generationRef.current;
       setLoadingConversationId(conversationId);
       setHistoryErrors((current) => {
         const next = { ...current };
@@ -79,6 +88,9 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
       });
       try {
         const page = await loadConversationMessages(apiBaseUrl, session.accessToken, conversationId, { limit: 50 });
+        if (requestGeneration !== generationRef.current) {
+          return null;
+        }
         const pages = [page];
         const savedDeliveredSeq = Math.max(page.deliveredSeq, data.conversations[conversationId]?.deliveredSeq ?? 0);
         let deliveredSeq = savedDeliveredSeq;
@@ -88,6 +100,9 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
             fromSeq: expectedSeq,
             limit: 50,
           });
+          if (requestGeneration !== generationRef.current) {
+            return null;
+          }
           if (missingPage.messages.length === 0) {
             break;
           }
@@ -106,6 +121,14 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
           }
         }
         const incomingMessages = pages.flatMap((currentPage) => currentPage.messages.map(toChatMessage));
+        const oldestSequence = page.nextBeforeSeq ?? page.messages[0]?.conversationSeq ?? null;
+        historyCursorsRef.current.set(conversationId, oldestSequence);
+        historyAvailabilityRef.current.set(conversationId, page.hasMore && oldestSequence !== null);
+        historyErrorKindsRef.current.delete(conversationId);
+        setHistoryAvailability((current) => ({
+          ...current,
+          [conversationId]: page.hasMore && oldestSequence !== null,
+        }));
         setData((current) => {
           if (!current?.conversations[conversationId]) {
             return current;
@@ -137,24 +160,122 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
         loadedConversationIdsRef.current.add(conversationId);
         return deliveredSeq > savedDeliveredSeq ? deliveredSeq : null;
       } catch (caught) {
+        if (requestGeneration !== generationRef.current) {
+          return null;
+        }
+        historyErrorKindsRef.current.set(conversationId, "initial");
         setHistoryErrors((current) => ({
           ...current,
           [conversationId]: caught instanceof ChatApiError ? caught : new ChatApiError("internal_error"),
         }));
         return null;
       } finally {
-        loadingPromisesRef.current.delete(conversationId);
-        setLoadingConversationId((current) => current === conversationId ? null : current);
+        if (requestGeneration === generationRef.current) {
+          loadingPromisesRef.current.delete(conversationId);
+          setLoadingConversationId((current) => current === conversationId ? null : current);
+        }
       }
     })();
     loadingPromisesRef.current.set(conversationId, request);
     return request;
   }, [apiBaseUrl, data, session.accessToken]);
 
+  const loadOlderHistory = useCallback(async (conversationId: number): Promise<number | null> => {
+    if (!data || !loadedConversationIdsRef.current.has(conversationId)
+      || !historyAvailabilityRef.current.get(conversationId)) {
+      return null;
+    }
+    const existingRequest = loadingPromisesRef.current.get(conversationId);
+    if (existingRequest) {
+      return existingRequest;
+    }
+    const beforeSeq = historyCursorsRef.current.get(conversationId);
+    if (beforeSeq === null || beforeSeq === undefined) {
+      historyAvailabilityRef.current.set(conversationId, false);
+      setHistoryAvailability((current) => ({ ...current, [conversationId]: false }));
+      return null;
+    }
+
+    const request = (async () => {
+      const requestGeneration = generationRef.current;
+      setLoadingConversationId(conversationId);
+      setHistoryErrors((current) => {
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
+      try {
+        const page = await loadConversationMessages(apiBaseUrl, session.accessToken, conversationId, {
+          beforeSeq,
+          limit: 50,
+        });
+        if (requestGeneration !== generationRef.current) {
+          return null;
+        }
+        const incomingMessages = page.messages.map(toChatMessage);
+        const nextBeforeSeq = page.nextBeforeSeq ?? page.messages[0]?.conversationSeq ?? null;
+        const hasMore = page.hasMore && nextBeforeSeq !== null && nextBeforeSeq < beforeSeq;
+        historyCursorsRef.current.set(conversationId, nextBeforeSeq);
+        historyAvailabilityRef.current.set(conversationId, hasMore);
+        historyErrorKindsRef.current.delete(conversationId);
+        setHistoryAvailability((current) => ({ ...current, [conversationId]: hasMore }));
+        setData((current) => {
+          if (!current?.conversations[conversationId]) {
+            return current;
+          }
+          const merged = mergeConversationMessages(current, conversationId, incomingMessages);
+          const conversation = merged.conversations[conversationId];
+          return {
+            ...merged,
+            conversations: {
+              ...merged.conversations,
+              [conversationId]: {
+                ...conversation,
+                lastSeq: Math.max(conversation.lastSeq ?? 0, page.lastSeq),
+                deliveredSeq: Math.max(conversation.deliveredSeq ?? 0, page.deliveredSeq),
+                readSeq: Math.max(conversation.readSeq ?? 0, page.readSeq),
+                peerDeliveredSeq: Math.max(conversation.peerDeliveredSeq ?? 0, page.peerDeliveredSeq),
+                peerReadSeq: Math.max(conversation.peerReadSeq ?? 0, page.peerReadSeq),
+                messages: conversation.messages.map((message) => ({
+                  ...message,
+                  receipt: message.senderUserId === merged.self.userId && message.conversationSeq !== null
+                    ? message.conversationSeq <= Math.max(conversation.peerReadSeq ?? 0, page.peerReadSeq)
+                      ? "已读"
+                      : message.conversationSeq <= Math.max(conversation.peerDeliveredSeq ?? 0, page.peerDeliveredSeq) ? "已送达" : undefined
+                    : undefined,
+                })),
+              },
+            },
+          };
+        });
+      } catch (caught) {
+        if (requestGeneration !== generationRef.current) {
+          return null;
+        }
+        historyErrorKindsRef.current.set(conversationId, "older");
+        setHistoryErrors((current) => ({
+          ...current,
+          [conversationId]: caught instanceof ChatApiError ? caught : new ChatApiError("internal_error"),
+        }));
+      } finally {
+        if (requestGeneration === generationRef.current) {
+          loadingPromisesRef.current.delete(conversationId);
+          setLoadingConversationId((current) => current === conversationId ? null : current);
+        }
+      }
+      return null;
+    })();
+    loadingPromisesRef.current.set(conversationId, request);
+    return request;
+  }, [apiBaseUrl, data, session.accessToken]);
+
   const retryHistory = useCallback((conversationId: number) => {
+    if (historyErrorKindsRef.current.get(conversationId) === "older") {
+      return loadOlderHistory(conversationId);
+    }
     loadedConversationIdsRef.current.delete(conversationId);
     return loadHistory(conversationId);
-  }, [loadHistory]);
+  }, [loadHistory, loadOlderHistory]);
 
   const updateData = useCallback((updater: (current: ChatData | null) => ChatData | null) => {
     setData(updater);
@@ -166,10 +287,12 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     error,
     retry: loadInitialData,
     loadHistory,
+    loadOlderHistory,
     retryHistory,
     updateData,
     loadingConversationId,
     historyError: (conversationId: number) => historyErrors[conversationId] ?? null,
+    hasMoreHistory: (conversationId: number) => historyAvailability[conversationId] ?? false,
   };
 }
 

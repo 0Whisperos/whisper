@@ -110,6 +110,8 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
       onSendText={handleSendText}
       onRetryMessage={handleRetryMessage}
       loadConversationHistory={chatData.loadHistory}
+      loadOlderConversationHistory={chatData.loadOlderHistory}
+      hasMoreConversationHistory={chatData.hasMoreHistory}
       onDeliveredAck={sendDeliveredAck}
       onReadAck={messaging.markReadThrough}
       retryConversationHistory={chatData.retryHistory}

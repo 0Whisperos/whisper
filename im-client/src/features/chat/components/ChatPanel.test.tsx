@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatConversation, ChatMessage, ChatSelfProfile } from "../types";
@@ -75,6 +75,8 @@ describe("ChatPanel read visibility", () => {
         statusMessage=""
         isHistoryLoading={false}
         historyError={null}
+        hasMoreHistory={false}
+        onLoadOlderHistory={vi.fn()}
         onRetryHistory={vi.fn()}
         isDetailOpen={false}
         onReturnToSessions={vi.fn()}
@@ -94,5 +96,105 @@ describe("ChatPanel read visibility", () => {
     });
 
     expect(onReadThrough).toHaveBeenCalledWith(42, 9);
+  });
+
+  it("loads older messages near the top and keeps the visible message anchored", () => {
+    // 测试目标：验证列表接近顶部时触发旧页加载，前置消息后当前可见消息仍处于相同视口位置。
+    // 构造方法：渲染一条最新消息，模拟可控的列表/消息几何位置，触发 scroll，再重渲染加入更早消息。
+    // 输入数据：scrollTop=10、顶部阈值内；旧消息序号 8 前置到当前序号 9 之前。
+    // 预期行为：加载回调触发一次，序号 9 消息相对列表顶部的偏移保持不变。
+    const recent = createMessage();
+    const older: ChatMessage = {
+      ...recent,
+      localKey: "message-8",
+      messageId: "message-8",
+      conversationSeq: 8,
+      clientMessageId: "client-8",
+      content: { text: "更早消息" },
+    };
+    const conversation: ChatConversation = {
+      conversationId: 42,
+      type: "direct",
+      name: "周然",
+      avatar: "周",
+      tone: "orange",
+      status: "在线",
+      participants: { 20002: { userId: 20002, name: "周然", avatar: "周", tone: "orange" } },
+      messages: [recent],
+    };
+    const self: ChatSelfProfile = { userId: 20001, account: "linxiao", name: "林晓", avatar: "林", tone: "blue" };
+    const onLoadOlderHistory = vi.fn();
+    const { container, rerender } = render(
+      <ChatPanel
+        conversation={conversation}
+        self={self}
+        connectionLabel="在线"
+        draft=""
+        canSend={false}
+        statusMessage=""
+        isHistoryLoading={false}
+        historyError={null}
+        hasMoreHistory
+        onLoadOlderHistory={onLoadOlderHistory}
+        onRetryHistory={vi.fn()}
+        isDetailOpen={false}
+        onReturnToSessions={vi.fn()}
+        onOpenDetail={vi.fn()}
+        onToolPreview={vi.fn()}
+        onChangeDraft={vi.fn()}
+        onSendText={vi.fn()}
+        onRetryMessage={vi.fn()}
+      />,
+    );
+
+    const list = container.querySelector<HTMLElement>(".auth-message-list")!;
+    Object.defineProperty(list, "scrollHeight", {
+      configurable: true,
+      get: () => list.querySelectorAll("[data-message-key]").length * 100,
+    });
+    vi.spyOn(list, "getBoundingClientRect").mockReturnValue({ top: 100, bottom: 300, left: 0, right: 300, width: 300, height: 200, x: 0, y: 100, toJSON: () => ({}) });
+    const messageTop = (message: HTMLElement) => {
+      const index = Array.from(list.querySelectorAll<HTMLElement>("[data-message-key]")).indexOf(message);
+      return 100 + index * 100 + 40 - list.scrollTop;
+    };
+    container.querySelectorAll<HTMLElement>("[data-message-key]").forEach((message) => {
+      vi.spyOn(message, "getBoundingClientRect").mockImplementation(() => {
+        const top = messageTop(message);
+        return { top, bottom: top + 40, left: 0, right: 300, width: 300, height: 40, x: 0, y: top, toJSON: () => ({}) };
+      });
+    });
+
+    list.scrollTop = 10;
+    const recentMessage = container.querySelector<HTMLElement>('[data-message-key="message-9"]')!;
+    const originalOffset = recentMessage.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    fireEvent.scroll(list);
+    expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ChatPanel
+        conversation={{ ...conversation, messages: [older, recent] }}
+        self={self}
+        connectionLabel="在线"
+        draft=""
+        canSend={false}
+        statusMessage=""
+        isHistoryLoading
+        historyError={null}
+        hasMoreHistory
+        onLoadOlderHistory={onLoadOlderHistory}
+        onRetryHistory={vi.fn()}
+        isDetailOpen={false}
+        onReturnToSessions={vi.fn()}
+        onOpenDetail={vi.fn()}
+        onToolPreview={vi.fn()}
+        onChangeDraft={vi.fn()}
+        onSendText={vi.fn()}
+        onRetryMessage={vi.fn()}
+      />,
+    );
+
+    const anchoredMessage = container.querySelector<HTMLElement>('[data-message-key="message-9"]')!;
+    expect(anchoredMessage.getBoundingClientRect().top - list.getBoundingClientRect().top).toBe(originalOffset);
+    expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
   });
 });

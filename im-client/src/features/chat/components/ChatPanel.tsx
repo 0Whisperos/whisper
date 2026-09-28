@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 import type { ChatApiError } from "../api";
 import type { ChatConversation, ChatSelfProfile } from "../types";
@@ -14,6 +14,8 @@ interface ChatPanelProps {
   statusMessage: string;
   isHistoryLoading: boolean;
   historyError: ChatApiError | null;
+  hasMoreHistory: boolean;
+  onLoadOlderHistory: () => void;
   onRetryHistory: () => void;
   isDetailOpen: boolean;
   onReturnToSessions: () => void;
@@ -34,6 +36,8 @@ export function ChatPanel({
   statusMessage,
   isHistoryLoading,
   historyError,
+  hasMoreHistory,
+  onLoadOlderHistory,
   onRetryHistory,
   isDetailOpen,
   onReturnToSessions,
@@ -45,6 +49,42 @@ export function ChatPanel({
   onReadThrough,
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
+  const pendingScrollAnchorRef = useRef<{
+    conversationId: number;
+    messageKey: string | null;
+    offset: number;
+    scrollTop: number;
+    scrollHeight: number;
+    messages: ChatConversation["messages"];
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    const anchor = pendingScrollAnchorRef.current;
+    if (!anchor) {
+      return;
+    }
+    const list = messageListRef.current;
+    if (anchor.conversationId !== conversation.conversationId) {
+      pendingScrollAnchorRef.current = null;
+      return;
+    }
+    if (conversation.messages !== anchor.messages && list) {
+      const listTop = list.getBoundingClientRect().top;
+      const anchoredMessage = anchor.messageKey
+        ? Array.from(list.querySelectorAll<HTMLElement>("[data-message-key]")).find((message) => (
+          message.dataset.messageKey === anchor.messageKey
+        )) ?? null
+        : null;
+      if (anchoredMessage) {
+        list.scrollTop += anchoredMessage.getBoundingClientRect().top - listTop - anchor.offset;
+      } else {
+        list.scrollTop = anchor.scrollTop + list.scrollHeight - anchor.scrollHeight;
+      }
+      pendingScrollAnchorRef.current = null;
+    } else if (!isHistoryLoading) {
+      pendingScrollAnchorRef.current = null;
+    }
+  }, [conversation.conversationId, conversation.messages, isHistoryLoading]);
 
   useEffect(() => {
     const list = messageListRef.current;
@@ -71,6 +111,28 @@ export function ChatPanel({
     return () => observer.disconnect();
   }, [conversation.conversationId, conversation.messages, onReadThrough]);
 
+  const handleMessageListScroll = () => {
+    const list = messageListRef.current;
+    if (!list || list.scrollTop > 32 || !hasMoreHistory || isHistoryLoading || historyError) {
+      return;
+    }
+    if (!pendingScrollAnchorRef.current) {
+      const listTop = list.getBoundingClientRect().top;
+      const visibleMessage = Array.from(list.querySelectorAll<HTMLElement>("[data-message-key]")).find((message) => (
+        message.getBoundingClientRect().bottom > listTop
+      ));
+      pendingScrollAnchorRef.current = {
+        conversationId: conversation.conversationId,
+        messageKey: visibleMessage?.dataset.messageKey ?? null,
+        offset: visibleMessage ? visibleMessage.getBoundingClientRect().top - listTop : 0,
+        scrollTop: list.scrollTop,
+        scrollHeight: list.scrollHeight,
+        messages: conversation.messages,
+      };
+    }
+    onLoadOlderHistory();
+  };
+
   return (
     <section className="auth-chat-panel" aria-label="聊天详情">
       <header className="auth-chat-head">
@@ -96,7 +158,7 @@ export function ChatPanel({
           />
         </div>
       </header>
-      <section ref={messageListRef} className="auth-message-list" aria-label="消息列表" aria-live="polite">
+      <section ref={messageListRef} className="auth-message-list" aria-label="消息列表" aria-live="polite" onScroll={handleMessageListScroll}>
         {conversation.messages.length === 0 && !isHistoryLoading && !historyError ? (
           <p className="auth-empty-state">暂无聊天记录</p>
         ) : null}
@@ -109,6 +171,7 @@ export function ChatPanel({
             <div key={message.localKey} className="auth-message-group">
               {message.showTime ? <time className="auth-message-time">{message.displayTime}</time> : null}
               <article
+                data-message-key={message.localKey}
                 data-conversation-seq={message.conversationSeq ?? undefined}
                 className={`auth-message-row ${isSelf ? "self" : ""} ${compact ? "compact" : ""}`}
               >

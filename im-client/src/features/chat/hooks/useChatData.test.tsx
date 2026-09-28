@@ -133,6 +133,75 @@ describe("useChatData", () => {
     expect(result.current.data?.sessions[0]).toMatchObject({ preview: "第二条更新" });
   });
 
+  it("loads older pages with the server cursor and stops when there are no more messages", async () => {
+    // 测试目标：验证首屏分页游标驱动后续历史请求，且 hasMore=false 后不会继续请求。
+    // 构造方法：首屏返回序号 100 和 nextBeforeSeq=100，再依次返回序号 50 与序号 1 的两页历史。
+    // 输入数据：三页游标分别为 100、50、无；前两页 hasMore=true，最后一页 hasMore=false。
+    // 预期行为：请求依次使用 beforeSeq=100、50，消息按序号合并，结束后不会再调用接口。
+    mockBootstrap();
+    const message = (sequence: number) => ({
+      messageId: `message-${sequence}`,
+      conversationId: 42,
+      conversationSeq: sequence,
+      senderUserId: 20002,
+      clientMessageId: `client-${sequence}`,
+      messageType: "text" as const,
+      content: { text: `消息 ${sequence}` },
+      createdAt: `2026-08-28T10:${String(sequence % 60).padStart(2, "0")}:00+08:00`,
+    });
+    loadConversationMessagesMock
+      .mockResolvedValueOnce({ messages: [message(100)], hasMore: true, nextBeforeSeq: 100, lastSeq: 100, deliveredSeq: 100, readSeq: 0, peerDeliveredSeq: 0, peerReadSeq: 0 })
+      .mockResolvedValueOnce({ messages: [message(50)], hasMore: true, nextBeforeSeq: 50, lastSeq: 100, deliveredSeq: 100, readSeq: 0, peerDeliveredSeq: 0, peerReadSeq: 0 })
+      .mockResolvedValueOnce({ messages: [message(1)], hasMore: false, lastSeq: 100, deliveredSeq: 100, readSeq: 0, peerDeliveredSeq: 0, peerReadSeq: 0 });
+
+    const { result } = renderHook(() => useChatData("http://api.test", session));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    await act(async () => { await result.current.loadHistory(42); });
+    expect(result.current.hasMoreHistory(42)).toBe(true);
+
+    await act(async () => { await result.current.loadOlderHistory(42); });
+    await act(async () => { await result.current.loadOlderHistory(42); });
+    await act(async () => { await result.current.loadOlderHistory(42); });
+
+    expect(loadConversationMessagesMock).toHaveBeenNthCalledWith(2, "http://api.test", "jwt-token", 42, { beforeSeq: 100, limit: 50 });
+    expect(loadConversationMessagesMock).toHaveBeenNthCalledWith(3, "http://api.test", "jwt-token", 42, { beforeSeq: 50, limit: 50 });
+    expect(loadConversationMessagesMock).toHaveBeenCalledTimes(3);
+    expect(result.current.hasMoreHistory(42)).toBe(false);
+    expect(result.current.data?.conversations[42].messages.map((item) => item.conversationSeq)).toEqual([1, 50, 100]);
+  });
+
+  it("deduplicates concurrent older-page requests and retries the same cursor after failure", async () => {
+    // 测试目标：验证快速重复触顶共享同一请求，旧页失败后重试仍使用原游标。
+    // 构造方法：首屏游标设为 12，延迟首个旧页请求后并发触发两次，再令请求失败并执行 retryHistory。
+    // 输入数据：conversationId=42、beforeSeq=12；失败后重试响应序号 1 且 hasMore=false。
+    // 预期行为：并发阶段只发一个请求，失败后重试再次以 beforeSeq=12 请求，最终保留首屏并合并旧消息。
+    mockBootstrap();
+    const olderMessage = {
+      messageId: "message-1", conversationId: 42, conversationSeq: 1, senderUserId: 20002,
+      clientMessageId: "client-1", messageType: "text" as const, content: { text: "更早消息" },
+      createdAt: "2026-08-28T10:01:00+08:00",
+    };
+    loadConversationMessagesMock
+      .mockResolvedValueOnce({ messages: [{ ...olderMessage, messageId: "message-12", conversationSeq: 12 }], hasMore: true, nextBeforeSeq: 12, lastSeq: 12, deliveredSeq: 12, readSeq: 0, peerDeliveredSeq: 0, peerReadSeq: 0 })
+      .mockRejectedValueOnce(new ChatApiError("network_error"))
+      .mockResolvedValueOnce({ messages: [olderMessage], hasMore: false, lastSeq: 12, deliveredSeq: 12, readSeq: 0, peerDeliveredSeq: 0, peerReadSeq: 0 });
+
+    const { result } = renderHook(() => useChatData("http://api.test", session));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    await act(async () => { await result.current.loadHistory(42); });
+    await act(async () => {
+      await Promise.all([result.current.loadOlderHistory(42), result.current.loadOlderHistory(42)]);
+    });
+    expect(loadConversationMessagesMock).toHaveBeenCalledTimes(2);
+    expect(result.current.historyError(42)?.code).toBe("network_error");
+
+    await act(async () => { await result.current.retryHistory(42); });
+
+    expect(loadConversationMessagesMock).toHaveBeenNthCalledWith(3, "http://api.test", "jwt-token", 42, { beforeSeq: 12, limit: 50 });
+    expect(result.current.historyError(42)).toBeNull();
+    expect(result.current.data?.conversations[42].messages.map((item) => item.conversationSeq)).toEqual([1, 12]);
+  });
+
   it("fills every sequence after the local delivered cursor before advancing it", async () => {
     // 测试目标：验证冷启动只返回最近消息时，客户端仍从自己的 delivered_seq 后补齐连续消息。
     // 构造方法：首屏返回最近序号 3 和 delivered_seq=1，再让 from_seq 请求返回序号 2、3。

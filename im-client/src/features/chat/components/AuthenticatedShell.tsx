@@ -24,6 +24,8 @@ interface AuthenticatedShellProps {
   onSendText?: (conversationId: number, text: string) => boolean | void;
   onRetryMessage?: (clientMessageId: string) => void;
   loadConversationHistory?: (conversationId: number) => Promise<number | null>;
+  loadOlderConversationHistory?: (conversationId: number) => Promise<number | null>;
+  hasMoreConversationHistory?: (conversationId: number) => boolean;
   onDeliveredAck?: (conversationId: number, deliveredSeq: number) => void;
   onReadAck?: (conversationId: number, readSeq: number) => void;
   retryConversationHistory?: (conversationId: number) => void;
@@ -40,6 +42,8 @@ export function AuthenticatedShell({
   onSendText = () => false,
   onRetryMessage = () => undefined,
   loadConversationHistory,
+  loadOlderConversationHistory,
+  hasMoreConversationHistory = () => false,
   onDeliveredAck,
   onReadAck,
   retryConversationHistory,
@@ -196,6 +200,8 @@ export function AuthenticatedShell({
         statusMessage={workspace.statusMessages.chat}
         isHistoryLoading={loadingConversationId === workspace.activeConversationId}
         historyError={getConversationHistoryError(workspace.activeConversationId)}
+        hasMoreHistory={hasMoreConversationHistory(workspace.activeConversationId)}
+        onLoadOlderHistory={() => { void loadOlderConversationHistory?.(workspace.activeConversationId); }}
         onRetryHistory={() => retryConversationHistory?.(workspace.activeConversationId)}
         isDetailOpen={isDetailOpen}
         onReturnToSessions={workspace.returnToSessions}
