@@ -132,7 +132,7 @@ function describeChatConnection(state: ChatConnectionState): string {
     case "authenticated":
       return `聊天连接在线：${state.connectionId}`;
     case "refreshing":
-      return "登录凭证已过期，正在刷新聊天连接";
+      return "正在续期登录凭证并恢复聊天连接";
     case "auth_failed":
       return `聊天连接认证失败：${state.errorCode}`;
     case "closed":

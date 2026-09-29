@@ -43,10 +43,7 @@ pub(crate) struct FailedPayload {
     pub(crate) message: &'static str,
 }
 
-pub(crate) fn to_text<T>(frame: &Frame<T>) -> Result<String>
-where
-    T: Serialize,
-{
+pub(crate) fn to_text<T: Serialize>(frame: &T) -> Result<String> {
     serde_json::to_string(frame).map_err(|source| Error::Serialize { source })
 }
 

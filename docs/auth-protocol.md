@@ -312,7 +312,9 @@ HTTP 状态为 `201 Created`：
 
 ### 用途
 
-`auth_failed` 表示 WebSocket 认证失败。发送该响应后，服务端应关闭 WebSocket 连接。
+`auth_failed` 表示 WebSocket 认证失败，或已认证连接使用的 access token 到期。发送该响应后，服务端应关闭 WebSocket 连接。
+
+在 `auth` 握手阶段，响应携带对应的 `request_id`。已认证连接到期时，服务端主动发送该帧，不携带 `request_id`，随后发送 WebSocket close 帧。客户端收到 `token_expired` 后应刷新 token，并新建 WebSocket 连接重新发送 `auth`；已经关闭的连接不能使用新 token 恢复认证。
 
 ### 响应
 
@@ -332,7 +334,7 @@ HTTP 状态为 `201 Created`：
 | `error_code` | `string` | 是 | 稳定错误码。 |
 | `message` | `string` | 是 | 面向调试的错误描述。客户端不应依赖该文本做业务判断。 |
 
-如果错误码是 `token_expired`，客户端应调用 `/v1/auth/refresh` 获取新的 `access_token`，然后重新连接 WebSocket 并再次发送 `auth`。
+如果错误码是 `token_expired`，客户端应调用 `/v1/auth/refresh` 获取新的 `access_token`，然后新建 WebSocket 连接并再次发送 `auth`。客户端还应根据 `auth_ok.access_token_expires_at` 提前刷新；服务端到期通知用于客户端定时器延迟等情况的兜底。
 
 ## 生命周期与失效规则
 
@@ -344,7 +346,7 @@ HTTP 状态为 `201 Created`：
 | 关闭 `session_only` 客户端 | 客户端清理内存中的 access token | 客户端 best-effort 调用 `/v1/auth/logout` 清理服务端 refresh token | WebSocket 离线，presence 清理或 TTL 过期 |
 | 关闭已保存 token 的客户端 | 本地可清理内存中的 access token | 不删除已保存 refresh token | WebSocket 离线，presence 清理或 TTL 过期 |
 | 断网或崩溃 | access token 可能仍未过期，但不可用 | 不删除 | 客户端 heartbeat 超时后清理连接，或依赖 presence TTL 过期 |
-| `access_token` 过期 | 失效 | 不受影响 | 连接侧按认证策略处理，客户端可 refresh 后重连 |
+| `access_token` 过期 | 失效 | 不受影响 | `im-chat` 发送 `auth_failed(token_expired)` 后关闭连接；客户端 refresh 后新建 WebSocket 连接 |
 | Redis TTL 到期 | 不直接影响现有 access token | 失效 | 不影响 presence |
 
 ## 错误码清单
@@ -401,5 +403,6 @@ HTTP 边界不返回内部错误细节。客户端业务分支依赖稳定错误
 - Redis refresh token value 不包含 `token_id` 和 `rotated_from`。
 - WebSocket `auth` 成功返回 `auth_ok`，失败返回 `auth_failed` 并关闭连接。
 - WebSocket `auth_ok` 后客户端应开始发送 `heartbeat`，连接侧 presence 续期依赖该心跳。
+- 客户端根据 `auth_ok.access_token_expires_at` 提前 60 秒续期并新建 WebSocket 连接；服务端在 token 到期时发送不带 `request_id` 的 `auth_failed(token_expired)` 作为兜底，再关闭连接。
 - WebSocket 在线状态和 refresh token 有效性互不等价。
 - 所有时间文本使用 GB/T 7408 扩展格式。

@@ -11,7 +11,7 @@ export type ChatConnectionState =
   | { status: "connecting" }
   | { status: "authenticating"; requestId: string }
   | { status: "authenticated"; userId: number; connectionId: string; accessTokenExpiresAt: string }
-  | { status: "refreshing"; errorCode: "token_expired" }
+  | { status: "refreshing"; reason: "scheduled" | "token_expired" }
   | { status: "auth_failed"; errorCode: ChatAuthErrorCode; message: string }
   | { status: "closed" }
   | { status: "error"; message: string };

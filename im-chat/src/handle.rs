@@ -4,7 +4,7 @@ use crate::frame;
 use crate::heartbeat::client::{self, ClientFrameHandleResult, ClientHeartbeat};
 use crate::presence::PresenceManager;
 use crate::{ack, auth, message};
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use sqlx::MySqlPool;
@@ -157,8 +157,12 @@ async fn run_connection_loop(
     mysql_pool: MySqlPool,
 ) {
     // TODO: 当前循环先搭建连接生命周期骨架，后续补充 token 刷新通知、客户端消息分发和关闭原因。
-    let mut client_heartbeat =
-        ClientHeartbeat::new(Instant::now(), write_tx.clone(), user_id, connection_id.to_string());
+    let mut client_heartbeat = ClientHeartbeat::new(
+        Instant::now(),
+        write_tx.clone(),
+        user_id,
+        connection_id.to_string(),
+    );
     loop {
         tokio::select! {
             should_continue = client_heartbeat.refresh_presence(presence.as_ref()) => {
@@ -168,6 +172,7 @@ async fn run_connection_loop(
             }
             _ = sleep_until(access_token_expires_at) => {
                 tracing::debug!(user_id, %connection_id, "stop websocket connection: access token expired");
+                notify_token_expired(&write_tx, user_id, connection_id).await;
                 break;
             }
             _ = &mut writer_done => {
@@ -209,6 +214,34 @@ async fn run_connection_loop(
                 }
             }
         }
+    }
+}
+
+async fn notify_token_expired(write_tx: &mpsc::Sender<Message>, user_id: u64, connection_id: &str) {
+    let frame = frame::PushFrame::new(
+        "auth_failed",
+        frame::FailedPayload {
+            error_code: "token_expired",
+            message: "access token expired",
+        },
+    );
+    let text = match frame::to_text(&frame) {
+        Ok(text) => text,
+        Err(error) => {
+            tracing::warn!(%error, user_id, %connection_id, "failed to serialize token expiration frame");
+            return;
+        }
+    };
+    if write_tx.send(Message::Text(text.into())).await.is_err() {
+        tracing::debug!(user_id, %connection_id, "failed to enqueue token expiration frame");
+        return;
+    }
+    let close = Message::Close(Some(CloseFrame {
+        code: close_code::POLICY,
+        reason: "access token expired".into(),
+    }));
+    if write_tx.send(close).await.is_err() {
+        tracing::debug!(user_id, %connection_id, "failed to enqueue token expiration close frame");
     }
 }
 
@@ -301,3 +334,7 @@ async fn sleep_until(deadline: OffsetDateTime) {
     };
     tokio::time::sleep(duration).await;
 }
+
+#[cfg(test)]
+#[path = "handle_tests.rs"]
+mod tests;
