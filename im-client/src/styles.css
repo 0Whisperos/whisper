@@ -1141,6 +1141,10 @@ canvas {
   max-width: 78%;
 }
 
+.auth-message-row:not(.compact) {
+  padding-top: 17px;
+}
+
 .auth-message-row.self {
   align-self: flex-end;
   flex-direction: row-reverse;
@@ -1161,6 +1165,60 @@ canvas {
 
 .auth-message-body {
   min-width: 0;
+}
+
+.auth-message-bubble-line {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.auth-message-bubble-wrap {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.auth-message-hover-time {
+  position: absolute;
+  z-index: 1;
+  bottom: calc(100% + 3px);
+  left: 0;
+  color: var(--auth-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.auth-message-side-time {
+  position: absolute;
+  top: 50%;
+  width: 40px;
+  color: var(--auth-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.auth-message-side-time.left {
+  right: 100%;
+  margin-right: 4px;
+  text-align: left;
+}
+
+.auth-message-side-time.right {
+  left: 100%;
+  margin-left: 4px;
+  text-align: right;
+}
+
+.self .auth-message-hover-time {
+  right: 0;
+  left: auto;
+  text-align: right;
 }
 
 .auth-message-sender {
@@ -1200,7 +1258,7 @@ canvas {
   column-gap: 6px;
 }
 
-.self .auth-message-body.has-receipt .auth-message-bubble {
+.self .auth-message-body.has-receipt .auth-message-bubble-line {
   grid-column: 2;
   grid-row: 1;
 }

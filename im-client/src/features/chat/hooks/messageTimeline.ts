@@ -1,5 +1,7 @@
 import type { ChatData, ChatMessage, ChatMessageDto } from "../types";
 
+const MESSAGE_GROUP_GAP_MS = 10 * 60 * 1000;
+
 export interface PendingTextMessageInput {
   conversationId: number;
   senderUserId: number;
@@ -126,8 +128,8 @@ export function toAcceptedTimelineMessage(message: ChatMessageDto): ChatMessage 
   };
 }
 
-export function sortTimelineMessages(messages: ChatMessage[]): ChatMessage[] {
-  return messages
+export function sortTimelineMessages(messages: ChatMessage[], now = new Date()): ChatMessage[] {
+  const sorted = messages
     .map((message, index) => ({ message, index }))
     .sort((left, right) => {
       const leftSequence = left.message.conversationSeq;
@@ -149,6 +151,55 @@ export function sortTimelineMessages(messages: ChatMessage[]): ChatMessage[] {
       return left.index - right.index;
     })
     .map(({ message }) => message);
+
+  return sorted.map((message, index) => {
+    const currentTimestamp = getMessageTimestamp(message);
+    const currentDate = parseMessageDate(currentTimestamp);
+    const previous = sorted[index - 1];
+    const previousTimestamp = previous ? getMessageTimestamp(previous) : null;
+    const previousDate = previousTimestamp ? parseMessageDate(previousTimestamp) : null;
+    const crossesDate = Boolean(currentDate && previousDate && !isSameLocalDate(currentDate, previousDate));
+    const elapsed = currentDate && previousDate ? currentDate.getTime() - previousDate.getTime() : null;
+    const currentIsToday = Boolean(currentDate && isSameLocalDate(currentDate, now));
+    const showTime = currentDate !== null && (
+      !previous
+      || previousDate === null
+      || crossesDate
+      || (currentIsToday && (elapsed === null || elapsed < 0 || elapsed >= MESSAGE_GROUP_GAP_MS))
+    );
+
+    return {
+      ...message,
+      displayTime: currentDate && showTime ? formatTimelineSeparatorTime(currentDate, now) : "",
+      showTime,
+    };
+  });
+}
+
+export function isCompactMessage(previous: ChatMessage | undefined, current: ChatMessage, now = new Date()): boolean {
+  if (!previous || previous.senderUserId !== current.senderUserId) {
+    return false;
+  }
+  const previousDate = parseMessageDate(getMessageTimestamp(previous));
+  const currentDate = parseMessageDate(getMessageTimestamp(current));
+  if (!previousDate || !currentDate || !isSameLocalDate(previousDate, currentDate)) {
+    return false;
+  }
+  if (!isSameLocalDate(currentDate, now)) {
+    return true;
+  }
+  const elapsed = currentDate.getTime() - previousDate.getTime();
+  return elapsed >= 0 && elapsed < MESSAGE_GROUP_GAP_MS;
+}
+
+export function formatHoverMessageTime(value: string, includeDateContext: boolean, now = new Date()): string | null {
+  const date = parseMessageDate(value);
+  if (!date) {
+    return null;
+  }
+  return includeDateContext
+    ? formatContextualMessageTime(date, now, true)
+    : formatClockTime(date, true);
 }
 
 function toOfficialMessage(incoming: ServerTextMessage, local?: ChatMessage): ChatMessage {
@@ -192,6 +243,50 @@ function replaceConversationMessages(data: ChatData, conversationId: number, uns
       [conversationId]: { ...conversation, messages },
     },
   };
+}
+
+function getMessageTimestamp(message: ChatMessage): string {
+  return message.createdAt ?? message.clientSentAt;
+}
+
+function parseMessageDate(value: string): Date | null {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatTimelineSeparatorTime(date: Date, now: Date): string {
+  if (isSameLocalDate(date, now)) {
+    return formatClockTime(date, false);
+  }
+  return date.getFullYear() === now.getFullYear()
+    ? `${date.getMonth() + 1}月${date.getDate()}日`
+    : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function formatContextualMessageTime(date: Date, now: Date, includeSeconds: boolean): string {
+  const time = formatClockTime(date, includeSeconds);
+  if (isSameLocalDate(date, now)) {
+    return time;
+  }
+  const dateLabel = date.getFullYear() === now.getFullYear()
+    ? `${date.getMonth() + 1}月${date.getDate()}日`
+    : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+  return `${dateLabel} ${time}`;
+}
+
+function formatClockTime(date: Date, includeSeconds: boolean): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(includeSeconds ? { second: "2-digit" as const } : {}),
+    hourCycle: "h23",
+  }).format(date);
+}
+
+function isSameLocalDate(left: Date, right: Date): boolean {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
 }
 
 function formatMessageTime(value: string): string {

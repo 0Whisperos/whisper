@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { ChatApiError } from "../api";
 import type { ChatConversation, ChatSelfProfile } from "../types";
+import { formatHoverMessageTime, isCompactMessage } from "../hooks/messageTimeline";
 import { Avatar, Icon, IconButton } from "./ui";
 import { Composer } from "./Composer";
 
@@ -49,6 +50,7 @@ export function ChatPanel({
   onReadThrough,
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
+  const [hoveredMessageKey, setHoveredMessageKey] = useState<string | null>(null);
   const pendingScrollAnchorRef = useRef<{
     conversationId: number;
     messageKey: string | null;
@@ -166,7 +168,8 @@ export function ChatPanel({
           const profile = message.senderUserId === self.userId ? self : conversation.participants[message.senderUserId];
           const isSelf = message.senderUserId === self.userId;
           const previous = conversation.messages[index - 1];
-          const compact = Boolean(previous && previous.senderUserId === message.senderUserId && !message.showTime);
+          const compact = isCompactMessage(previous, message);
+          const hoverTime = formatHoverMessageTime(message.createdAt ?? message.clientSentAt, !compact);
           return (
             <div key={message.localKey} className="auth-message-group">
               {message.showTime ? <time className="auth-message-time">{message.displayTime}</time> : null}
@@ -178,7 +181,25 @@ export function ChatPanel({
                 <Avatar avatar={profile?.avatar ?? "?"} tone={profile?.tone ?? "gray"} className="auth-message-avatar" />
                 <div className={`auth-message-body ${message.receipt ? "has-receipt" : ""}`}>
                   {!isSelf && conversation.type === "group" && !compact ? <small className="auth-message-sender">{profile?.name}</small> : null}
-                  <p className="auth-message-bubble">{message.content.text}</p>
+                  <div
+                    className={`auth-message-bubble-line ${isSelf ? "self" : ""}`}
+                    onMouseEnter={() => setHoveredMessageKey(message.localKey)}
+                    onMouseLeave={() => setHoveredMessageKey(null)}
+                  >
+                    {hoveredMessageKey === message.localKey && compact && hoverTime ? (
+                      <time className={`auth-message-side-time ${isSelf ? "right" : "left"}`} dateTime={message.createdAt ?? message.clientSentAt}>
+                        {hoverTime}
+                      </time>
+                    ) : null}
+                    <div className="auth-message-bubble-wrap">
+                      {hoveredMessageKey === message.localKey && !compact && hoverTime ? (
+                        <time className="auth-message-hover-time" dateTime={message.createdAt ?? message.clientSentAt}>
+                          {hoverTime}
+                        </time>
+                      ) : null}
+                      <p className="auth-message-bubble">{message.content.text}</p>
+                    </div>
+                  </div>
                   {message.receipt ? (
                     <footer className="auth-message-footer">
                       <span className={`auth-message-receipt ${message.receipt === "已读" ? "is-read" : "is-pending"}`} aria-label={message.receipt}>
