@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { ChatApiError } from "../api";
 import type { ChatConversation, ChatSelfProfile } from "../types";
 import { formatHoverMessageTime, isCompactMessage } from "../hooks/messageTimeline";
 import { Avatar, Icon, IconButton } from "./ui";
 import { Composer } from "./Composer";
+
+const MESSAGE_LIST_BOTTOM_THRESHOLD = 32;
 
 interface ChatPanelProps {
   conversation: ChatConversation;
@@ -51,6 +53,16 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
   const [hoveredMessageKey, setHoveredMessageKey] = useState<string | null>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const isAtBottomRef = useRef(true);
+  const previousConversationRef = useRef<number | null>(null);
+  const previousLatestMessageKeyRef = useRef<string | null>(null);
+  const unreadCount = unreadIncomingCount(conversation, self.userId);
+  const updateBottomState = useCallback((list: HTMLElement) => {
+    const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop <= MESSAGE_LIST_BOTTOM_THRESHOLD;
+    isAtBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+  }, []);
   const pendingScrollAnchorRef = useRef<{
     conversationId: number;
     messageKey: string | null;
@@ -82,18 +94,34 @@ export function ChatPanel({
       } else {
         list.scrollTop = anchor.scrollTop + list.scrollHeight - anchor.scrollHeight;
       }
+      updateBottomState(list);
       pendingScrollAnchorRef.current = null;
     } else if (!isHistoryLoading) {
       pendingScrollAnchorRef.current = null;
     }
-  }, [conversation.conversationId, conversation.messages, isHistoryLoading]);
+  }, [conversation.conversationId, conversation.messages, isHistoryLoading, updateBottomState]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const list = messageListRef.current;
-    if (list) {
-      list.scrollTop = list.scrollHeight;
+    const latestMessage = conversation.messages[conversation.messages.length - 1];
+    const latestMessageKey = latestMessage?.localKey ?? null;
+    const isConversationChange = previousConversationRef.current !== conversation.conversationId;
+    const isNewLatestMessage = previousLatestMessageKeyRef.current !== latestMessageKey;
+
+    previousConversationRef.current = conversation.conversationId;
+    previousLatestMessageKeyRef.current = latestMessageKey;
+
+    if (!list) {
+      return;
     }
-  }, [conversation.conversationId]);
+    if (isConversationChange || (isNewLatestMessage && latestMessage?.senderUserId === self.userId)) {
+      list.scrollTop = list.scrollHeight;
+      updateBottomState(list);
+    } else if (isNewLatestMessage && isAtBottomRef.current) {
+      list.scrollTop = list.scrollHeight;
+      updateBottomState(list);
+    }
+  }, [conversation.conversationId, conversation.messages, self.userId, updateBottomState]);
 
   useEffect(() => {
     const list = messageListRef.current;
@@ -115,7 +143,11 @@ export function ChatPanel({
 
   const handleMessageListScroll = () => {
     const list = messageListRef.current;
-    if (!list || list.scrollTop > 32 || !hasMoreHistory || isHistoryLoading || historyError) {
+    if (!list) {
+      return;
+    }
+    updateBottomState(list);
+    if (list.scrollTop > MESSAGE_LIST_BOTTOM_THRESHOLD || !hasMoreHistory || isHistoryLoading || historyError) {
       return;
     }
     if (!pendingScrollAnchorRef.current) {
@@ -224,6 +256,26 @@ export function ChatPanel({
           );
         })}
       </section>
+      {!isAtBottom && unreadCount > 0 ? (
+        <button
+          type="button"
+          className="auth-new-messages-button"
+          aria-label={`跳转到最新消息，${unreadCount} 条未读`}
+          onClick={() => {
+            const list = messageListRef.current;
+            if (list) {
+              list.scrollTop = list.scrollHeight;
+              updateBottomState(list);
+            }
+          }}
+        >
+          <svg className="auth-new-messages-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m5 2 7 7 7-7" />
+            <path d="m5 12 7 7 7-7" />
+          </svg>
+          <span className="auth-new-messages-count">{unreadCount}</span>
+        </button>
+      ) : null}
       {isHistoryLoading ? <output className="auth-panel-status" aria-live="polite">正在加载消息...</output> : null}
       {historyError ? (
         <div className="auth-panel-error" role="alert">
@@ -241,4 +293,13 @@ export function ChatPanel({
       />
     </section>
   );
+}
+
+function unreadIncomingCount(conversation: ChatConversation, selfUserId: number): number {
+  const readSeq = conversation.readSeq ?? 0;
+  return conversation.messages.filter((message) => (
+    message.senderUserId !== selfUserId
+    && message.conversationSeq !== null
+    && message.conversationSeq > readSeq
+  )).length;
 }

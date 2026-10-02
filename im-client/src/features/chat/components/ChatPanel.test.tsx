@@ -42,6 +42,74 @@ function createMessage(): ChatMessage {
   };
 }
 
+function createPeerMessage(sequence: number): ChatMessage {
+  return {
+    ...createMessage(),
+    localKey: `message-${sequence}`,
+    messageId: `message-${sequence}`,
+    conversationSeq: sequence,
+    clientMessageId: `client-${sequence}`,
+    content: { text: `消息 ${sequence}` },
+  };
+}
+
+function createConversation(messages: ChatMessage[], readSeq = 0): ChatConversation {
+  return {
+    conversationId: 42,
+    type: "direct",
+    name: "周然",
+    avatar: "周",
+    tone: "orange",
+    status: "在线",
+    participants: { 20002: { userId: 20002, name: "周然", avatar: "周", tone: "orange" } },
+    messages,
+    readSeq,
+  };
+}
+
+const testSelf: ChatSelfProfile = { userId: 20001, account: "linxiao", name: "林晓", avatar: "林", tone: "blue" };
+
+function renderChatPanel(
+  conversation: ChatConversation,
+  onReadThrough = vi.fn(),
+) {
+  return render(chatPanelElement(conversation, onReadThrough));
+}
+
+function chatPanelElement(conversation: ChatConversation, onReadThrough = vi.fn()) {
+  return (
+    <ChatPanel
+      conversation={conversation}
+      self={testSelf}
+      connectionLabel="在线"
+      draft=""
+      canSend={false}
+      statusMessage=""
+      isHistoryLoading={false}
+      historyError={null}
+      hasMoreHistory={false}
+      onLoadOlderHistory={vi.fn()}
+      onRetryHistory={vi.fn()}
+      isDetailOpen={false}
+      onReturnToSessions={vi.fn()}
+      onOpenDetail={vi.fn()}
+      onToolPreview={vi.fn()}
+      onChangeDraft={vi.fn()}
+      onSendText={vi.fn()}
+      onRetryMessage={vi.fn()}
+      onReadThrough={onReadThrough}
+    />
+  );
+}
+
+function setListScrollMetrics(list: HTMLElement, messageHeight = 100, clientHeight = 100) {
+  Object.defineProperty(list, "scrollHeight", {
+    configurable: true,
+    get: () => list.querySelectorAll("[data-message-key]").length * messageHeight,
+  });
+  Object.defineProperty(list, "clientHeight", { configurable: true, value: clientHeight });
+}
+
 describe("ChatPanel read visibility", () => {
   afterEach(() => {
     cleanup();
@@ -198,6 +266,105 @@ describe("ChatPanel read visibility", () => {
     const anchoredMessage = container.querySelector<HTMLElement>('[data-message-key="message-9"]')!;
     expect(anchoredMessage.getBoundingClientRect().top - list.getBoundingClientRect().top).toBe(originalOffset);
     expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows a new incoming message when the list was already at the bottom", () => {
+    // 测试目标：验证用户正在看最新消息时，对方发来新消息会自动跟随到底部。
+    // 构造方法：渲染一条已读消息，设置列表尺寸并将滚动位置置于底部后，再追加一条对方消息。
+    // 输入数据：原消息序号 9 且 readSeq=9，新消息序号 10。
+    // 预期行为：新消息插入后列表滚动位置更新为最新内容的底部。
+    const initial = createConversation([createPeerMessage(9)], 9);
+    const { container, rerender } = renderChatPanel(initial);
+    const list = container.querySelector<HTMLElement>(".auth-message-list")!;
+    setListScrollMetrics(list);
+    list.scrollTop = 0;
+    fireEvent.scroll(list);
+
+    rerender(chatPanelElement(createConversation([createPeerMessage(9), createPeerMessage(10)], 9)));
+
+    expect(list.scrollTop).toBe(200);
+  });
+
+  it("preserves a history position and shows the count of unread incoming messages", async () => {
+    // 测试目标：验证浏览历史时收到对方消息不会打断阅读，并显示当前已加载的未读条数。
+    // 构造方法：渲染四条已读消息，将列表滚到中间并模拟滚动，再连续追加两条对方消息。
+    // 输入数据：readSeq=9，新增对方消息序号 10 和 11。
+    // 预期行为：滚动位置保持不变，向下按钮显示两条未读。
+    const initialMessages = [6, 7, 8, 9].map(createPeerMessage);
+    const initial = createConversation(initialMessages, 9);
+    const { container, rerender } = renderChatPanel(initial);
+    const list = container.querySelector<HTMLElement>(".auth-message-list")!;
+    setListScrollMetrics(list);
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
+
+    const firstIncoming = createConversation([...initialMessages, createPeerMessage(10)], 9);
+    rerender(chatPanelElement(firstIncoming));
+    expect(list.scrollTop).toBe(100);
+    expect(screen.getByRole("button", { name: "跳转到最新消息，1 条未读" })).toBeInTheDocument();
+
+    rerender(chatPanelElement(createConversation([...initialMessages, createPeerMessage(10), createPeerMessage(11)], 9)));
+    expect(list.scrollTop).toBe(100);
+    const jumpButton = screen.getByRole("button", { name: "跳转到最新消息，2 条未读" });
+    expect(jumpButton).toBeInTheDocument();
+    expect(jumpButton.querySelectorAll("svg path")).toHaveLength(2);
+    expect(jumpButton).toHaveTextContent("2");
+  });
+
+  it("jumps to the bottom from the unread button and reports visible messages as read", async () => {
+    // 测试目标：验证点击未读提示会定位到最新消息，最新消息可见后仍通过现有回调推进已读游标。
+    // 构造方法：安装 IntersectionObserver 替身，浏览历史时追加对方消息，点击按钮并触发最新消息的可见回调。
+    // 输入数据：readSeq=9，新增对方消息序号 10。
+    // 预期行为：列表定位到底部，按钮消失，onReadThrough 收到会话 42 和序号 10。
+    vi.stubGlobal("IntersectionObserver", TestIntersectionObserver as unknown as typeof IntersectionObserver);
+    const initialMessages = [6, 7, 8, 9].map(createPeerMessage);
+    const onReadThrough = vi.fn();
+    const { container, rerender } = renderChatPanel(createConversation(initialMessages, 9), onReadThrough);
+    const list = container.querySelector<HTMLElement>(".auth-message-list")!;
+    setListScrollMetrics(list);
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
+
+    rerender(chatPanelElement(createConversation([...initialMessages, createPeerMessage(10)], 9), onReadThrough));
+
+    await userEvent.click(screen.getByRole("button", { name: "跳转到最新消息，1 条未读" }));
+    expect(list.scrollTop).toBe(500);
+    expect(screen.queryByRole("button", { name: "跳转到最新消息，1 条未读" })).not.toBeInTheDocument();
+
+    const latestMessage = container.querySelector<HTMLElement>('[data-conversation-seq="10"]')!;
+    act(() => {
+      intersectionCallback?.([{ target: latestMessage, isIntersecting: true } as unknown as IntersectionObserverEntry], {} as IntersectionObserver);
+    });
+    expect(onReadThrough).toHaveBeenCalledWith(42, 10);
+  });
+
+  it("always follows the bottom when the user sends a message from history", () => {
+    // 测试目标：验证用户正在浏览历史时发送自己的消息仍会定位到最新消息。
+    // 构造方法：渲染四条对方消息并将列表滚到中间，然后在时间线末尾加入本地发送中的消息。
+    // 输入数据：已有消息序号 6 到 9，自己的新消息 clientMessageId 为 client-self-1。
+    // 预期行为：列表滚动到包含自己新消息的底部。
+    const initialMessages = [6, 7, 8, 9].map(createPeerMessage);
+    const { container, rerender } = renderChatPanel(createConversation(initialMessages, 9));
+    const list = container.querySelector<HTMLElement>(".auth-message-list")!;
+    setListScrollMetrics(list);
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
+
+    const ownMessage: ChatMessage = {
+      ...createPeerMessage(10),
+      localKey: "local:client-self-1",
+      messageId: null,
+      conversationSeq: null,
+      senderUserId: testSelf.userId,
+      clientMessageId: "client-self-1",
+      content: { text: "我发出的消息" },
+      createdAt: null,
+      localStatus: "sending",
+    };
+    rerender(chatPanelElement(createConversation([...initialMessages, ownMessage], 9)));
+
+    expect(list.scrollTop).toBe(500);
+    expect(screen.getByText("我发出的消息")).toBeInTheDocument();
   });
 
   it("shows contextual time above group starts and side times for compact messages", async () => {

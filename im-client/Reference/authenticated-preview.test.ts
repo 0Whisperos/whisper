@@ -331,6 +331,26 @@ describe("authenticated preview", () => {
     expect(messageList?.scrollTop).toBe(720);
   });
 
+  it("点击未读跳转按钮滚到最新消息", () => {
+    // 测试目标：验证预览中的新消息胶囊可以把聊天列表定位到最新消息。
+    // 构造方法：以已知 scrollHeight 载入预览，将列表滚离底部后点击未读跳转按钮。
+    // 输入数据：消息列表高度 720px、当前 scrollTop=120px，未读数为 1。
+    // 预期行为：点击后 scrollTop 更新为 720px。
+    loadPrototype({ messageScrollHeight: 720 });
+    const messageList = document.querySelector<HTMLElement>("[data-message-list]");
+    const jumpButton = document.querySelector<HTMLButtonElement>("[data-new-messages-button]");
+    expect(jumpButton?.getAttribute("aria-label")).toBe("跳转到最新消息，1 条未读");
+    if (messageList) {
+      messageList.scrollTop = 120;
+      messageList.dispatchEvent(new Event("scroll"));
+      messageList.scrollTop = 0;
+    }
+
+    jumpButton?.click();
+
+    expect(messageList?.scrollTop).toBe(720);
+  });
+
   it("resize 重建消息 DOM 后保留用户的非零滚动位置", () => {
     // 测试目标：验证纯布局 resize 不会把正在阅读历史消息的用户强制带回列表底部。
     // 构造方法：记录首个节点，设置非零 scrollTop 并派发 scroll，随后静默归零模拟隐藏布局盒并 resize。

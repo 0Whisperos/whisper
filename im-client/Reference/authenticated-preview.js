@@ -478,8 +478,13 @@
   if (media.addEventListener) add(media, "change", function () { if (state.themeMode === "system") applyTheme(); });
 
   add(document, "click", function (event) {
-    var target = event.target.closest && event.target.closest("[data-conversation-id],[data-contact-id],[data-view-target],[data-enter-chat],[data-detail-trigger],[data-tool],[aria-label='账号与设置'],[data-theme-option],[aria-label='返回会话'],[aria-label='返回联系人']");
+    var target = event.target.closest && event.target.closest("[data-new-messages-button],[data-conversation-id],[data-contact-id],[data-view-target],[data-enter-chat],[data-detail-trigger],[data-tool],[aria-label='账号与设置'],[data-theme-option],[aria-label='返回会话'],[aria-label='返回联系人']");
     if (!target) return;
+    if (target.matches("[data-new-messages-button]")) {
+      var latestList = document.querySelector("[data-message-list]");
+      if (latestList) { latestList.scrollTop = latestList.scrollHeight; messageScrollTop = latestList.scrollTop; }
+      return;
+    }
     if (target.matches("[data-conversation-id]")) { state.conversation = target.dataset.conversationId; state.view = "messages"; if (isNarrow()) state.mobilePanel = "chat"; render(true); return; }
     if (target.matches("[data-contact-id]")) { state.contact = target.dataset.contactId; if (isNarrow()) state.mobilePanel = "contact-detail"; render(); return; }
     if (target.matches("[data-enter-chat]")) {

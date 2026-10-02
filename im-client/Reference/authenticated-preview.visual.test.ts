@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 const referenceDir = resolve(process.cwd(), "Reference");
 const html = () => readFileSync(resolve(referenceDir, "authenticated-preview.html"), "utf8");
 const css = () => readFileSync(resolve(referenceDir, "authenticated-preview.css"), "utf8");
+const appCss = () => readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 const script = () => readFileSync(resolve(referenceDir, "authenticated-preview.js"), "utf8");
 const data = () => readFileSync(resolve(referenceDir, "authenticated-preview-data.js"), "utf8");
 
@@ -191,6 +192,64 @@ describe("authenticated preview visual contract", () => {
     expect(cssProperty(list, "justify-content")).toBe("flex-start");
     expect(cssProperty(list, "overflow-y")).toBe("auto");
     expect(cssRule(source, ".message-list > :first-child")).toBe("");
+  });
+
+  it("未读跳转按钮按主题切换底色并统一双下箭头和数字颜色", () => {
+    // 测试目标：验证预览与正式界面的未读跳转按钮按主题使用指定底色，箭头和数字统一使用指定颜色。
+    // 构造方法：读取预览 HTML、预览 CSS 和正式 CSS，检查按钮语义、双箭头路径及胶囊尺寸颜色。
+    // 输入数据：固定显示 1 条未读，按钮尺寸 57.6×25.6px；浅色白底、深色 #404040，前景色 #5B8DEF。
+    // 预期行为：按钮有可访问名称，两条向下折线和数字都使用 #5B8DEF。
+    const markup = html();
+    const source = css();
+    const appSource = appCss();
+    const button = markup.match(/<button[^>]*data-new-messages-button[\s\S]*?<\/button>/)?.[0] ?? "";
+    const style = cssRule(source, ".new-messages-button");
+    const arrowStyle = cssRule(source, ".new-messages-button svg");
+    const darkStyle = cssRule(source, ':root[data-theme="dark"] .new-messages-button');
+    const firstChevronStyle = cssRule(source, ".new-messages-button svg path:first-child");
+    const secondChevronStyle = cssRule(source, ".new-messages-button svg path:nth-child(2)");
+    const countStyle = cssRule(source, ".new-messages-button span");
+    const appStyle = cssRule(appSource, ".auth-new-messages-button");
+    const appDarkStyle = cssRule(appSource, '.auth-shell[data-auth-theme="dark"] .auth-new-messages-button');
+    const appFirstChevronStyle = cssRule(appSource, ".auth-new-messages-arrow path:first-child");
+    const appSecondChevronStyle = cssRule(appSource, ".auth-new-messages-arrow path:nth-child(2)");
+    const appCountStyle = cssRule(appSource, ".auth-new-messages-count");
+    expect(button).toContain('aria-label="跳转到最新消息，1 条未读"');
+    expect(button.match(/<path\b/g)).toHaveLength(2);
+    expect(button).toContain("<span>1</span>");
+    expect(cssProperty(style, "width")).toBe("57.6px");
+    expect(cssProperty(style, "height")).toBe("25.6px");
+    expect(cssProperty(style, "border-radius")).toBe("999px");
+    expect(cssProperty(style, "border")).toBe("0");
+    expect(cssProperty(style, "background")).toBe("#FFFFFF");
+    expect(cssProperty(darkStyle, "background")).toBe("#404040");
+    expect(cssProperty(darkStyle, "border")).toBe("1px solid #45464a");
+    expect(cssProperty(firstChevronStyle, "stroke")).toBe("#5B8DEF");
+    expect(cssProperty(secondChevronStyle, "stroke")).toBe("#5B8DEF");
+    expect(cssProperty(countStyle, "color")).toBe("#5B8DEF");
+    expect(cssProperty(style, "right")).toBe("24px");
+    expect(cssProperty(arrowStyle, "width")).toBe("15.2px");
+    expect(cssProperty(arrowStyle, "stroke-width")).toBe("2.08");
+    expect(cssProperty(appStyle, "background")).toBe("#FFFFFF");
+    expect(cssProperty(appStyle, "border")).toBe("0");
+    expect(cssProperty(appDarkStyle, "background")).toBe("#404040");
+    expect(cssProperty(appDarkStyle, "border")).toBe("1px solid #45464a");
+    expect(cssProperty(appFirstChevronStyle, "stroke")).toBe("#5B8DEF");
+    expect(cssProperty(appSecondChevronStyle, "stroke")).toBe("#5B8DEF");
+    expect(cssProperty(appCountStyle, "color")).toBe("#5B8DEF");
+  });
+
+  it("chat-surface 浅色主题使用 #F5F5F5，深色主题保持原值", () => {
+    // 测试目标：验证所有复用 chat-surface 的聊天与联系人区域在浅色主题下统一使用新底色。
+    // 构造方法：读取 Reference 和正式界面的主题 token 规则并对比浅色、深色取值。
+    // 输入数据：浅色 #F5F5F5，深色 #151515。
+    // 预期行为：两套界面的浅色 chat-surface 均为 #F5F5F5，深色 chat-surface 均保持 #151515。
+    const previewSource = css();
+    const appSource = appCss();
+    expect(cssProperty(cssRule(previewSource, ":root"), "--chat-surface")).toBe("#F5F5F5");
+    expect(cssProperty(cssRule(previewSource, ':root[data-theme="dark"]'), "--chat-surface")).toBe("#151515");
+    expect(cssProperty(cssRule(appSource, ".auth-shell"), "--chat-surface")).toBe("#F5F5F5");
+    expect(cssProperty(cssRule(appSource, '.auth-shell[data-auth-theme="dark"]'), "--chat-surface")).toBe("#151515");
   });
 
   it("全局滚动条在亮暗主题与主流浏览器中使用统一视觉契约", () => {
