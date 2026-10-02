@@ -10,6 +10,7 @@ use crate::connection::ConnectionRegistry;
 use crate::delivery::DeliveryService;
 use crate::error::{Error, Result};
 use crate::kafka::ConsumerService;
+use crate::node_rpc::client::NodeRpcClient;
 use crate::presence::PresenceManager;
 
 use super::AppState;
@@ -23,10 +24,18 @@ pub(super) struct PreparedApp {
 pub(super) async fn prepare(config: Arc<Config>) -> Result<PreparedApp> {
     let mysql_pool = connect_mysql(&config.mysql_config).await?;
     let redis_client = create_redis_client(&config.redis_config)?;
+    let presence = Arc::new(PresenceManager::new(redis_client.clone()));
+    let connections = ConnectionRegistry::new();
+    let rpc_client = Arc::new(NodeRpcClient::new(
+        presence.clone(),
+        config.node_config.node_id.clone(),
+        config.node_config.rpc_secret.clone(),
+    ));
     let state = AppState {
         config,
-        presence: Arc::new(PresenceManager::new(redis_client.clone())),
-        connections: ConnectionRegistry::new(),
+        presence,
+        connections,
+        rpc_client,
         mysql_pool,
     };
     let listener = bind_listener(&state.config.server_config).await?;
@@ -80,6 +89,7 @@ fn create_consumer(state: &AppState, redis_client: redis::Client) -> Result<Cons
         state.presence.clone(),
         state.connections.clone(),
         config.node_config.node_id.clone(),
+        state.rpc_client.clone(),
     );
     ConsumerService::new(
         config.kafka_config.clone(),

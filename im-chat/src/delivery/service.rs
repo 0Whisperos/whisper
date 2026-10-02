@@ -1,6 +1,7 @@
 use crate::connection::{ConnectionRegistry, SendToConnectionResult};
 use crate::frame::PushFrame;
 use crate::message::{AcceptedMessage, MessageCreatedEvent};
+use crate::node_rpc::{EnqueueStatus, ForwardMessageRequest, client::NodeRpcClient};
 use crate::presence::{PresenceManager, RouteState};
 use axum::extract::ws::Message;
 use serde::Serialize;
@@ -24,6 +25,7 @@ pub(crate) struct DeliveryService {
     presence: Arc<PresenceManager>,
     connections: ConnectionRegistry,
     node_id: String,
+    rpc_client: Arc<NodeRpcClient>,
 }
 
 #[derive(Serialize)]
@@ -58,12 +60,14 @@ impl DeliveryService {
         presence: Arc<PresenceManager>,
         connections: ConnectionRegistry,
         node_id: String,
+        rpc_client: Arc<NodeRpcClient>,
     ) -> Self {
         Self {
             pool,
             presence,
             connections,
             node_id,
+            rpc_client,
         }
     }
 
@@ -90,8 +94,9 @@ impl DeliveryService {
             routes.push((user_id, lookup.route(user_id).await?));
         }
 
-        // All fallible IO and serialization has completed. Queue failures below
-        // finish this delivery decision rather than causing partial fanout retries.
+        // Member and presence reads and frame serialization completed before fanout.
+        // Remote address, HTTP and queue failures are best effort; retrying the
+        // Kafka event here could duplicate frames already enqueued for other members.
         for (user_id, route) in routes {
             match route {
                 RouteState::Offline => tracing::debug!(
@@ -101,7 +106,6 @@ impl DeliveryService {
                     event_id = %event.event_id, user_id, "skip malformed presence route"
                 ),
                 RouteState::Online(route) if route.node_id != self.node_id => {
-                    // TODO: 后续通过 RPC 转发到目标 im-chat 节点；当前仅记录日志，不执行跨节点投递。
                     tracing::info!(
                         event_id = %event.event_id,
                         message_id = %event.message.message_id,
@@ -110,8 +114,41 @@ impl DeliveryService {
                         current_node = %self.node_id,
                         target_node = %route.node_id,
                         connection_id = %route.connection_id,
-                        "remote message delivery deferred until RPC is implemented"
+                        "forwarding message to connection owner"
                     );
+                    let request = ForwardMessageRequest {
+                        target_user_id: user_id,
+                        connection_id: route.connection_id.clone(),
+                        event_id: event.event_id.clone(),
+                        message: event.message.clone(),
+                    };
+                    match self
+                        .rpc_client
+                        .forward_message(&route.node_id, request)
+                        .await
+                    {
+                        Ok(EnqueueStatus::Queued) => {}
+                        Ok(status) => tracing::warn!(
+                            event_id = %event.event_id,
+                            message_id = %event.message.message_id,
+                            conversation_id = event.message.conversation_id,
+                            user_id,
+                            target_node = %route.node_id,
+                            connection_id = %route.connection_id,
+                            ?status,
+                            "remote message was not enqueued"
+                        ),
+                        Err(error) => tracing::warn!(
+                            event_id = %event.event_id,
+                            message_id = %event.message.message_id,
+                            conversation_id = event.message.conversation_id,
+                            user_id,
+                            target_node = %route.node_id,
+                            connection_id = %route.connection_id,
+                            %error,
+                            "remote message forwarding failed"
+                        ),
+                    }
                 }
                 RouteState::Online(route) => {
                     let result = self.connections.send_to_connection(

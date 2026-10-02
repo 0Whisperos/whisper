@@ -42,15 +42,22 @@ fn local_route(connection_id: &str) -> RouteState {
 }
 
 fn service() -> DeliveryService {
+    let presence = Arc::new(PresenceManager::new(
+        redis::Client::open("redis://127.0.0.1:1/").expect("redis URL"),
+    ));
+    let rpc_client = Arc::new(NodeRpcClient::new(
+        presence.clone(),
+        "node-a".to_owned(),
+        "test-secret".to_owned(),
+    ));
     DeliveryService::new(
         sqlx::mysql::MySqlPoolOptions::new()
             .connect_lazy("mysql://localhost/unused")
             .expect("lazy pool"),
-        Arc::new(PresenceManager::new(
-            redis::Client::open("redis://localhost/").expect("redis URL"),
-        )),
+        presence,
         ConnectionRegistry::new(),
         "node-a".to_owned(),
+        rpc_client,
     )
 }
 

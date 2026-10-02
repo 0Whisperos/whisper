@@ -18,7 +18,8 @@ db = 0
 [node]
 node_id = "node-1"
 public_ws_url = "ws://127.0.0.1:9090/ws"
-rpc_addr = "127.0.0.1:9000"
+rpc_addr = "127.0.0.1:9090"
+rpc_secret = "replace-with-the-same-private-secret-on-all-chat-nodes"
 
 [mysql]
 username = "whisper"

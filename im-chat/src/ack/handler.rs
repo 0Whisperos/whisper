@@ -1,6 +1,9 @@
 use super::store::{self, AckError, AckKind, Cursor};
-use crate::connection::ConnectionRegistry;
+use crate::connection::{ConnectionRegistry, SendToConnectionResult};
 use crate::frame::{self, Frame, PushFrame};
+use crate::node_rpc::client::NodeRpcClient;
+use crate::node_rpc::{EnqueueStatus, NotifyCursorRequest};
+use crate::presence::{PresenceManager, RouteState};
 use axum::extract::ws::Message;
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
@@ -59,7 +62,10 @@ struct ReceiptUpdatedPayload {
 pub(crate) async fn handle_frame(
     raw_frame: Frame<serde_json::Value>,
     pool: &MySqlPool,
+    presence: &PresenceManager,
     connections: &ConnectionRegistry,
+    node_rpc: &NodeRpcClient,
+    node_id: &str,
     write_tx: mpsc::Sender<Message>,
     user_id: u64,
     connection_id: &str,
@@ -125,7 +131,17 @@ pub(crate) async fn handle_frame(
                 connection_id,
             )
             .await;
-            notify_other_members(pool, connections, user_id, payload.conversation_id, cursor).await;
+            notify_other_members(
+                pool,
+                presence,
+                connections,
+                node_rpc,
+                node_id,
+                user_id,
+                payload.conversation_id,
+                cursor,
+            )
+            .await;
             response_sent
         }
         Err(error) => {
@@ -256,7 +272,10 @@ async fn send_text<T: Serialize>(
 
 async fn notify_other_members(
     pool: &MySqlPool,
+    presence: &PresenceManager,
     connections: &ConnectionRegistry,
+    node_rpc: &NodeRpcClient,
+    node_id: &str,
     acking_user_id: u64,
     conversation_id: u64,
     cursor: Cursor,
@@ -276,6 +295,74 @@ async fn notify_other_members(
             return;
         }
     };
+    let text = match receipt_frame_text(conversation_id, acking_user_id, &cursor) {
+        Ok(text) => text,
+        Err(error) => {
+            tracing::warn!(%error, conversation_id, "failed to serialize receipt update");
+            return;
+        }
+    };
+
+    // The cursor is already persisted. Route failures only skip live notifications.
+    let mut routes = Vec::with_capacity(members.len());
+    for member_id in members {
+        match presence.read_route(member_id).await {
+            Ok(route) => routes.push((member_id, route)),
+            Err(error) => {
+                tracing::warn!(%error, conversation_id, member_id, "failed to resolve receipt recipient");
+            }
+        }
+    }
+    for (member_id, route) in routes {
+        match route {
+            RouteState::Offline => {}
+            RouteState::Invalid => {
+                tracing::warn!(
+                    conversation_id,
+                    member_id,
+                    "skip malformed receipt recipient route"
+                );
+            }
+            RouteState::Online(route) if route.node_id == node_id => {
+                let result =
+                    enqueue_local_receipt(connections, member_id, &route.connection_id, &text);
+                if result != SendToConnectionResult::Sent {
+                    tracing::debug!(
+                        conversation_id,
+                        member_id,
+                        ?result,
+                        "receipt update was not enqueued"
+                    );
+                }
+            }
+            RouteState::Online(route) => {
+                let request = NotifyCursorRequest {
+                    target_user_id: member_id,
+                    connection_id: route.connection_id,
+                    conversation_id,
+                    user_id: acking_user_id,
+                    delivered_seq: cursor.delivered_seq,
+                    read_seq: cursor.read_seq,
+                };
+                match node_rpc.notify_cursor(&route.node_id, request).await {
+                    Ok(EnqueueStatus::Queued) => {}
+                    Ok(status) => {
+                        tracing::warn!(conversation_id, member_id, target_node = %route.node_id, ?status, "remote receipt update was not enqueued")
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, conversation_id, member_id, target_node = %route.node_id, "failed to notify remote receipt recipient")
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn receipt_frame_text(
+    conversation_id: u64,
+    acking_user_id: u64,
+    cursor: &Cursor,
+) -> Result<String, serde_json::Error> {
     let frame = PushFrame::new(
         CONVERSATION_RECEIPT_UPDATED,
         ReceiptUpdatedPayload {
@@ -285,27 +372,20 @@ async fn notify_other_members(
             read_seq: cursor.read_seq,
         },
     );
-    let Ok(text) = serde_json::to_string(&frame) else {
-        return;
-    };
-    for member_id in members {
-        let Some(connection) = connections.get(member_id) else {
-            continue;
-        };
-        let result = connections.send_to_connection(
-            member_id,
-            &connection.connection_id,
-            Message::Text(text.clone().into()),
-        );
-        if result != crate::connection::SendToConnectionResult::Sent {
-            tracing::debug!(
-                conversation_id,
-                member_id,
-                ?result,
-                "receipt update was not enqueued"
-            );
-        }
-    }
+    serde_json::to_string(&frame)
+}
+
+fn enqueue_local_receipt(
+    connections: &ConnectionRegistry,
+    member_id: u64,
+    connection_id: &str,
+    text: &str,
+) -> SendToConnectionResult {
+    connections.send_to_connection(
+        member_id,
+        connection_id,
+        Message::Text(text.to_owned().into()),
+    )
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::connection::{ActiveConnection, ConnectionRegistry};
 use crate::frame;
 use crate::heartbeat::client::{self, ClientFrameHandleResult, ClientHeartbeat};
+use crate::node_rpc::client::NodeRpcClient;
 use crate::presence::PresenceManager;
 use crate::{ack, auth, message};
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
@@ -21,6 +22,7 @@ pub(crate) async fn handle_socket(
     presence: Arc<PresenceManager>,
     connections: ConnectionRegistry,
     mysql_pool: MySqlPool,
+    rpc_client: Arc<NodeRpcClient>,
 ) {
     let authenticated = match auth::certification(socket, config.clone()).await {
         Ok(Some(authenticated)) => authenticated,
@@ -78,6 +80,8 @@ pub(crate) async fn handle_socket(
         write_tx,
         presence.clone(),
         connections.clone(),
+        rpc_client,
+        config.node_config.node_id.clone(),
         mysql_pool,
     )
     .await;
@@ -154,6 +158,8 @@ async fn run_connection_loop(
     write_tx: mpsc::Sender<Message>,
     presence: Arc<PresenceManager>,
     connections: ConnectionRegistry,
+    rpc_client: Arc<NodeRpcClient>,
+    node_id: String,
     mysql_pool: MySqlPool,
 ) {
     // TODO: 当前循环先搭建连接生命周期骨架，后续补充 token 刷新通知、客户端消息分发和关闭原因。
@@ -195,7 +201,10 @@ async fn run_connection_loop(
                             user_id,
                             connection_id,
                             write_tx.clone(),
+                            presence.as_ref(),
                             &connections,
+                            rpc_client.as_ref(),
+                            &node_id,
                             &mysql_pool,
                         ).await {
                             break;
@@ -254,7 +263,10 @@ async fn handle_client_frame(
     user_id: u64,
     connection_id: &str,
     write_tx: mpsc::Sender<Message>,
+    presence: &PresenceManager,
     connections: &ConnectionRegistry,
+    rpc_client: &NodeRpcClient,
+    node_id: &str,
     mysql_pool: &MySqlPool,
 ) -> bool {
     let raw_frame: frame::Frame<serde_json::Value> = match serde_json::from_slice(bytes) {
@@ -285,7 +297,10 @@ async fn handle_client_frame(
             ack::handle_frame(
                 raw_frame,
                 mysql_pool,
+                presence,
                 connections,
+                rpc_client,
+                node_id,
                 write_tx,
                 user_id,
                 connection_id,

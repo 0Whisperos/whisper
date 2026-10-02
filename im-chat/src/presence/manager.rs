@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use time::{OffsetDateTime, UtcOffset};
 
 #[derive(Clone)]
@@ -8,6 +9,34 @@ pub(crate) struct PresenceManager {
 impl PresenceManager {
     pub(crate) fn new(client: redis::Client) -> Self {
         Self { client }
+    }
+
+    /// Missing or malformed node records are stale routing data, not Redis failures.
+    pub(crate) async fn read_node_rpc_addr(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<String>, redis::RedisError> {
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let fields: HashMap<Vec<u8>, Vec<u8>> = match redis::cmd("HGETALL")
+            .arg(format!("chat_nodes:{node_id}"))
+            .query_async(&mut conn)
+            .await
+        {
+            Ok(fields) => fields,
+            Err(error) if error.code() == Some("WRONGTYPE") => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let field = |name: &str| {
+            fields
+                .get(name.as_bytes())
+                .and_then(|value| std::str::from_utf8(value).ok())
+        };
+        if field("node_id") != Some(node_id) || field("state") != Some("ready") {
+            return Ok(None);
+        }
+        Ok(field("rpc_addr")
+            .filter(|address| !address.trim().is_empty())
+            .map(str::to_owned))
     }
 
     pub(crate) async fn register_node(

@@ -5,6 +5,7 @@ use sqlx::MySqlPool;
 use crate::config;
 use crate::connection::ConnectionRegistry;
 use crate::error::Result;
+use crate::node_rpc::client::NodeRpcClient;
 use crate::presence::PresenceManager;
 
 use super::{bootstrap, lifecycle};
@@ -14,6 +15,7 @@ pub(super) struct AppState {
     pub(super) config: Arc<config::Config>,
     pub(super) presence: Arc<PresenceManager>,
     pub(super) connections: ConnectionRegistry,
+    pub(super) rpc_client: Arc<NodeRpcClient>,
     pub(super) mysql_pool: MySqlPool,
 }
 

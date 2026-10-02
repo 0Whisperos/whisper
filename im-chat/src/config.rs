@@ -50,6 +50,7 @@ pub(crate) struct NodeConfig {
     pub(crate) node_id: String,
     pub(crate) public_ws_url: String,
     pub(crate) rpc_addr: String,
+    pub(crate) rpc_secret: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,5 +82,11 @@ pub(crate) fn load_config() -> Result<Config> {
         path: path.to_string(),
         source,
     })?;
+    if config.node_config.rpc_secret.trim().is_empty() {
+        return Err(Error::InvalidConfig {
+            field: "node.rpc_secret",
+            reason: "must not be empty",
+        });
+    }
     Ok(config)
 }

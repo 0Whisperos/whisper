@@ -10,4 +10,5 @@ mod handle;
 mod heartbeat;
 mod kafka;
 mod message;
+mod node_rpc;
 mod presence;
