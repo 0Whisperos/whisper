@@ -252,6 +252,15 @@ canvas {
   background: transparent;
 }
 
+.login-panel {
+  --login-accent: #2f6f88;
+  --login-accent-hover: #285f74;
+  --login-accent-text: #ffffff;
+  --saved-user-bg: #ffffff;
+  --saved-user-border: #c9d2da;
+  --saved-user-text: #23282f;
+}
+
 .login-card {
   width: min(390px, 100%);
 }
@@ -273,6 +282,11 @@ canvas {
   color: var(--accent-text);
   font-weight: 700;
   transition: background-color 5200ms ease-in-out, color 5200ms ease-in-out;
+}
+
+.login-panel .brand-mark {
+  background: var(--login-accent);
+  color: var(--login-accent-text);
 }
 
 .brand-name {
@@ -358,6 +372,10 @@ canvas {
   accent-color: var(--accent);
 }
 
+.login-panel .auto-login-toggle input {
+  accent-color: var(--login-accent);
+}
+
 .register-link {
   border: 0;
   padding: 0;
@@ -374,6 +392,15 @@ canvas {
 .register-link:focus-visible {
   color: var(--accent-hover);
   text-decoration: underline;
+}
+
+.login-panel .register-link {
+  color: var(--login-accent);
+}
+
+.login-panel .register-link:hover,
+.login-panel .register-link:focus-visible {
+  color: var(--login-accent-hover);
 }
 
 .login-button {
@@ -393,6 +420,15 @@ canvas {
   background: var(--accent-hover);
   transform: translateY(-1px);
   box-shadow: 0 10px 24px rgb(47 111 136 / 18%);
+}
+
+.login-panel .login-button {
+  color: var(--login-accent-text);
+  background: var(--login-accent);
+}
+
+.login-panel .login-button:hover {
+  background: var(--login-accent-hover);
 }
 
 .login-button:active {
@@ -504,11 +540,23 @@ canvas {
   transition: border-color 220ms ease, box-shadow 220ms ease, color 220ms ease;
 }
 
+.login-panel .saved-user-button {
+  border-color: var(--saved-user-border);
+  color: var(--saved-user-text);
+  background: var(--saved-user-bg);
+}
+
 .saved-user-button:hover,
 .saved-user-button:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
   outline: none;
+}
+
+.login-panel .saved-user-button:hover,
+.login-panel .saved-user-button:focus-visible {
+  border-color: var(--login-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--login-accent) 14%, transparent);
 }
 
 .saved-user-button:disabled {
