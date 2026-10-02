@@ -115,7 +115,7 @@ chat_nodes:{node_id} -> {
 TTL = 30s
 ```
 
-`im-chat` 需要定期刷新该 key 的 TTL。正常关闭时主动删除；异常宕机时依靠 TTL 自动过期。当前阶段只部署一个 `im-chat`，因此 `im-api` 查询后通常只会返回唯一可用节点。
+`im-chat` 需要定期刷新该 key 的 TTL。正常关闭时主动删除；异常宕机时依靠 TTL 自动过期。`rpc_addr` 指向当前节点已有的 Axum HTTP 监听端口，供其他聊天节点发送内部推送请求。
 
 客户端拿到 WebSocket 地址后连接 `im-chat`。第一阶段建议采用“建连后第一条消息发送 `auth`”的方式，认证通过前不处理任何业务消息：
 
@@ -201,7 +201,7 @@ presence:user:{user_id} -> {
 TTL = 30s
 ```
 
-连接存活期间，`im-chat` 每 5s 尝试刷新 presence TTL；刷新前必须确认最近 30s 内收到过客户端 `heartbeat`，并且 Redis 中的 `connection_id` 仍然匹配当前连接。连接断开或客户端心跳超时时主动清理。当前单节点阶段，presence 查询结果通常指向当前 `im-chat`；若后续出现 `presence.node_id != current_node_id`，再通过 RPC 转发到目标节点。
+连接存活期间，`im-chat` 每 5s 尝试刷新 presence TTL；刷新前必须确认最近 30s 内收到过客户端 `heartbeat`，并且 Redis 中的 `connection_id` 仍然匹配当前连接。连接断开或客户端心跳超时时主动清理。若 `presence.node_id != current_node_id`，通过节点间 HTTP 接口将实时推送送到持有连接的节点。
 
 ### 2.2 事务外校验
 
@@ -853,9 +853,7 @@ Kafka 写入成功不等于客户端已送达。
 
 本阶段负责把 Kafka 中的 `message_created` 事件投递给当前在线的会话成员。Kafka 只负责实时事件分发，离线消息仍以 MySQL `messages` 表为准。
 
-当前阶段以单 `im-chat` 节点、单用户单连接完成在线投递验收。每个节点运行一个 Kafka
-消费者，所有节点共享消费组，由 Kafka 分配分区。消费节点通过 Redis presence 判断实际
-连接归属；需要跨节点投递时只记录日志并保留 RPC TODO，因此多节点尚不保证实时送达。
+每个节点运行一个 Kafka 消费者，所有节点共享消费组，由 Kafka 分配分区。消费节点通过 Redis presence 判断实际连接归属，并在连接属于另一节点时向该节点的内部 HTTP 接口转发实时推送。
 
 ### 5.1 投递前提
 
@@ -897,13 +895,14 @@ ActiveConnection
 7. 如果 `presence.node_id == current_node_id`，从本机 `ConnectionRegistry` 按 `member_user_id` 查询 `ActiveConnection`。
 8. 如果本机连接存在，且 `ActiveConnection.connection_id == presence.connection_id`，通过 `ActiveConnection.sender` 推送 `message_created`。
 9. 如果本机连接不存在，或 connection_id 不一致，说明 presence 可能已经过期或连接刚发生重连。本次实时投递可视为未送达；若实现主动删除 stale presence，也必须先校验 Redis 中的 `connection_id` 仍等于待删除的旧连接 ID，否则等待 TTL 自动过期。
-10. 如果 `presence.node_id != current_node_id`，当前阶段不做跨节点转发，先保留 `TODO: 后续通过 RPC 转发到目标 im-chat 节点`。
+10. 如果 `presence.node_id != current_node_id`，读取 `chat_nodes:{node_id}` 中的 `rpc_addr`，请求 `POST /internal/v1/messages/forward`。目标节点核对 `user_id + connection_id` 后入本机 WebSocket 队列，不将请求重新写入 Kafka。
 11. 当前事件的投递决策完成后，再提交 Kafka offset。
 
 实现中第 1 步只查询 Redis 已完成事件标记，不领取任务或建立租约。
-完成所有成员/路由读取后再进行非阻塞入队；满/关闭队列、stale/畸形路由和远端日志
-均记录为本轮决策结束。此后写入 `chat:delivery:done:{group_id}:{event_id}`（7 天 TTL），
-成功后才提交 offset。MySQL/Redis 故障重试且不越过当前记录；已投递但标记写入失败时
+完成成员查询、各成员 presence 读取和帧序列化后再开始入队；满/关闭队列、stale/畸形路由、
+远端 `chat_nodes` 地址查询或 HTTP 转发失败均记录为本轮决策结束。此后写入
+`chat:delivery:done:{group_id}:{event_id}`（7 天 TTL），成功后才提交 offset。完成标记、
+会话成员或成员 presence 的读取失败会重试且不越过当前记录；已投递但标记写入失败时
 当前流程只重试标记。坏事件则记录原因并跳过。详细消费与恢复边界见
 `kafka-outbox-event-envelope.md`。
 
@@ -1090,7 +1089,7 @@ delivered_seq = GREATEST(delivered_seq, ack.delivered_seq)
 read_seq = GREATEST(read_seq, ack.read_seq)
 ```
 
-后续如果需要让对方看到“已读到哪里”，服务端可以再产生 `message_read` 或 `conversation_read` 事件并推送给会话内其他在线成员。第一阶段也可以先只保存 `read_seq`，暂不做已读状态广播。
+MySQL 游标更新成功后，`im-chat` 向会话内其他在线成员推送 `conversation_receipt_updated`。成员连接在其他节点时，请求该节点的 `POST /internal/v1/cursors/notify`，由目标节点入 WebSocket 队列；目标节点不再写游标。通知失败时，客户端重新获取会话状态仍以 MySQL 游标为准。
 
 `delivered_seq` 和 `read_seq` 不应混用：
 
@@ -1123,4 +1122,4 @@ conversation_seq > delivered_seq
 5. Kafka topic 分区键、consumer group、offset 提交策略和重复事件处理。
 6. JWT 签名密钥管理、access_token 有效期、refresh_token TTL、刷新接口和退出登录接口的具体实现细节。
 7. Redis service registry、Redis presence 的 key 命名、TTL、刷新频率和异常清理策略。
-8. 跨节点投递时的 RPC 协议、超时、重试和幂等策略。
+8. 节点间共享密钥轮换与生产网络访问限制。

@@ -59,7 +59,7 @@ Delete: im-chat 正常关闭时主动删除；异常宕机依赖 TTL 自动过�
 | --- | --- | --- | --- |
 | `node_id` | 是 | `chat-001` | 聊天节点 ID。必须在当前部署环境内唯一，用于标识一个 `im-chat` 实例。 |
 | `public_ws_url` | 是 | `ws://127.0.0.1:9001/ws` | 客户端可访问的 WebSocket 地址。`im-api` 把该地址返回给客户端。 |
-| `rpc_addr` | 是 | `127.0.0.1:9101` | 节点间 RPC 地址。第一阶段不做跨节点转发，但保留该字段给后续 RPC 投递使用。 |
+| `rpc_addr` | 是 | `127.0.0.1:9001` | 其他 `im-chat` 节点访问当前 Axum HTTP 服务的地址和端口；与本节点 WebSocket 使用同一个监听器。 |
 | `state` | 是 | `ready` | 节点状态。第一阶段可用 `ready` 表示可接入；非 `ready` 节点不应被 `im-api` 选中。 |
 | `started_at` | 是 | `2026-08-16T12:00:00+08:00` | 节点启动并完成注册的时间，使用 GB/T 7408 扩展格式。 |
 | `last_heartbeat_at` | 是 | `2026-08-16T12:00:10+08:00` | 最近一次刷新注册信息的时间，使用 GB/T 7408 扩展格式。 |
@@ -70,7 +70,7 @@ Delete: im-chat 正常关闭时主动删除；异常宕机依赖 TTL 自动过�
 HSET chat_nodes:chat-001 \
   node_id chat-001 \
   public_ws_url ws://127.0.0.1:9001/ws \
-  rpc_addr 127.0.0.1:9101 \
+  rpc_addr 127.0.0.1:9001 \
   state ready \
   started_at 2026-08-16T12:00:00+08:00 \
   last_heartbeat_at 2026-08-16T12:00:10+08:00
@@ -225,7 +225,7 @@ Delete: 同一用户重新登录替换时删除旧索引；主动退出登录或
 标记写入失败时，当前流程只重试写入；进程重启后可能重复推送，由客户端按 message_id 合并。
 
 与 presence 不同，完成标记不表示在线，也不表示送达。离线、stale、满/关闭队列和远端
-日志也可完成本轮决策；Redis 数据丢失、7 天后过期或 rebalance 并发均可能再次处理事件。
+HTTP 转发失败也可完成本轮决策；Redis 数据丢失、7 天后过期或 rebalance 并发均可能再次处理事件。
 
 Kafka Consumer 处理 `message_created` 事件时：
 
@@ -235,9 +235,11 @@ Kafka Consumer 处理 `message_created` 事件时：
 4. 如果 `presence.node_id == current_node_id`，继续查询本机 `ConnectionRegistry`。
 5. 如果本机连接存在，且 `ActiveConnection.connection_id == presence.connection_id`，通过该连接推送 `message_created`。
 6. 如果本机连接不存在，或 `connection_id` 不一致，视为本次未送达。实现可以删除 stale presence，也可以等待 TTL 自动过期。
-7. 如果 `presence.node_id != current_node_id`，第一阶段不做跨节点转发；后续通过 RPC 转发到目标 `im-chat` 节点。
+7. 如果 `presence.node_id != current_node_id`，读取目标节点 `chat_nodes:{node_id}` 中 `state = ready` 的 `rpc_addr`，请求其 `POST /internal/v1/messages/forward`。目标节点核对 `user_id + connection_id` 后将 `message_created` 入本机 WebSocket 队列，不再写入 Kafka。
 
 实时投递失败不影响消息可靠性。正式消息已经保存在 MySQL `messages` 中，用户重新上线后根据 `conversation_member_cursors.delivered_seq` 补齐缺失消息。
+
+两个节点间接口 `POST /internal/v1/messages/forward` 和 `POST /internal/v1/cursors/notify` 共用现有 Axum 监听端口及签名校验中间件。各节点配置相同、独立于 JWT 的 `node.rpc_secret`；中间件对方法、路径、时间戳和原始请求体校验 HMAC 签名及 30 秒时间窗口。调用方每次超时 1 秒，网络或服务端临时错误最多尝试两次，间隔 100 毫秒。响应“已入队”只表示目标节点接受实时推送。回执由收到客户端 ACK 的节点先写入 MySQL，再按相同 presence 路由通知其他在线成员；`/internal/v1/cursors/notify` 不更新数据库游标。
 
 ## 失败场景与处理
 

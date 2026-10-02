@@ -181,10 +181,11 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
   当前分区的 offset + 1，不跨过未完成记录。业务重试预算 60 秒，poll 间隔上限 300 秒。
 - Redis `chat:delivery:done:{group_id}:{event_id}` 仅保存已完成标记，TTL 为 604800 秒。
   没有领取、释放、租约或 token。先查询标记，完成投递决策后写标记，再提交 offset。
-- 本地入队、离线跳过、stale/畸形路由、队列满/关闭和远端 RPC TODO 日志均属于已完成的
+- 本地入队、离线跳过、stale/畸形路由、队列满/关闭和远端 HTTP 转发尝试结束均属于已完成的
   本轮投递决策，不推进 delivered_seq/read_seq。
-- Redis 查询或 MySQL/Redis 路由读取失败不提交 offset。已经投递后完成标记写入失败，
-  当前流程只重试写标记；offset 提交失败保留标记并重建消费者，不再次执行已完成投递。
+- 完成标记、会话成员或成员 presence 的读取失败不提交 offset；远端 `chat_nodes` 地址查询
+  失败按本次实时转发失败处理。已经投递后完成标记写入失败，当前流程只重试写标记；
+  offset 提交失败保留标记并重建消费者，不再次执行已完成投递。
 - 坏 JSON、未知事件类型/版本、缺失必需字段/headers 或 key/header/value 冲突，记录
   topic、partition、offset、可解析的 event_id 与原因，跳过并提交；不记录完整聊天正文。
 - 事件写入 Kafka 后可能重复。并发 rebalance、进程崩溃和 Redis 数据丢失不提供严格
@@ -215,7 +216,7 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 - 不重复 Redis `presence:user:{user_id}`、`chat_nodes:{node_id}` 的 key 结构。
 - 不定义认证、refresh token、登录或退出登录协议。
 - 不定义 Debezium Connector、Outbox Event Router、Kafka Connect 的完整部署配置。
-- 不定义 DLQ 策略、跨节点 RPC 投递协议或通用后台任务调度。
+- 不定义 DLQ 策略、节点间 HTTP 接口的详细报文或通用后台任务调度；路由和鉴权语义见 `docs/redis-routing-presence.md`。
 
 ## 实现检查清单
 

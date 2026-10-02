@@ -405,7 +405,7 @@
 
 ## `conversation_receipt_updated` 主动推送
 
-会话成员的送达或已读游标推进后，服务端向本节点上该会话的其他在线成员推送 `conversation_receipt_updated`。它不是请求响应，不携带 `request_id`；发送方按 `user_id` 和游标更新对端状态。
+会话成员的送达或已读游标保存到 MySQL 后，服务端向该会话的其他在线成员推送 `conversation_receipt_updated`，包括连接在其他 `im-chat` 节点的成员。它不是请求响应，不携带 `request_id`；发送方按 `user_id` 和游标更新对端状态。
 
 ```json
 {
@@ -419,7 +419,7 @@
 }
 ```
 
-`user_id` 是推进游标的成员。接收端对 `delivered_seq` 和 `read_seq` 采用单调推进；当一条己方消息的 `conversation_seq <= peer_read_seq` 时显示已读，因此最新消息已读时，此前消息也自动显示已读。当前实时推送只发送到同一 `im-chat` 节点的在线连接。
+`user_id` 是推进游标的成员。接收端对 `delivered_seq` 和 `read_seq` 采用单调推进；当一条己方消息的 `conversation_seq <= peer_read_seq` 时显示已读，因此最新消息已读时，此前消息也自动显示已读。跨节点通知使用 `POST /internal/v1/cursors/notify`，接收节点只向其 WebSocket 连接入队，不写数据库。内部 HTTP 入队成功不表示客户端已经收到通知；通知丢失时以 MySQL 中保存的游标为准。
 
 ## 幂等、排序、缺口和本地合并规则
 
