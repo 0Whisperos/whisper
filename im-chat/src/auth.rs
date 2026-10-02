@@ -6,7 +6,7 @@ use jsonwebtoken::errors::ErrorKind;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use time::OffsetDateTime;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 type AuthFrame = frame::Frame<AuthPayload>;
 const AUTH_FAILED: &str = "auth_failed";
@@ -107,7 +107,10 @@ pub(crate) async fn certification(
         AuthOkPayload {
             user_id: verified.user_id,
             connection_id: connection_id.clone(),
-            access_token_expires_at: verified.expires_at.to_string(),
+            access_token_expires_at: verified
+                .expires_at
+                .format(&Rfc3339)
+                .expect("JWT expiration timestamps should format as RFC3339"),
         },
     );
     frame::send(&mut socket, &response).await?;
