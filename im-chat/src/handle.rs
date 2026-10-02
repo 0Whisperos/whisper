@@ -165,8 +165,11 @@ async fn run_connection_loop(
     );
     loop {
         tokio::select! {
-            should_continue = client_heartbeat.refresh_presence(presence.as_ref()) => {
-                if !should_continue {
+            _ = client_heartbeat.wait_for_refresh_tick() => {
+                // A completed tick must always run its Redis refresh. Putting both
+                // waits in select! lets an incoming frame cancel the I/O after the
+                // interval has advanced, losing this refresh cycle.
+                if !client_heartbeat.refresh_presence(presence.as_ref()).await {
                     break;
                 }
             }

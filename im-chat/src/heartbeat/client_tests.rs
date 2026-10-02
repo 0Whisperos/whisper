@@ -53,6 +53,30 @@ async fn presence_refresh_ticker_uses_five_second_interval() {
     assert!(!heartbeat.is_expired(now + Duration::from_secs(29)));
 }
 
+#[tokio::test(start_paused = true)]
+async fn completed_refresh_tick_does_not_delay_the_refresh_action() {
+    // 测试目标：验证定时等待与刷新动作分离，tick 完成后的动作不会再次等待下一个 tick。
+    // 构造方法：暂停 Tokio 时钟，先推进 5s 并消费 tick，再在未收到客户端心跳的状态下执行刷新动作。
+    // 输入数据：user_id=20001、connection_id="connection-1"、无首个客户端 heartbeat。
+    // 预期行为：刷新动作立即返回 true 并跳过 Redis；不会因定时器再次阻塞，导致已消费的刷新周期丢失。
+    let now = Instant::now();
+    let (sender, _receiver) = mpsc::channel(1);
+    let mut heartbeat = ClientHeartbeat::new(now, sender, 20001, "connection-1".to_owned());
+    let presence =
+        PresenceManager::new(redis::Client::open("redis://127.0.0.1:1/").expect("valid Redis URL"));
+
+    tokio::time::advance(Duration::from_secs(5)).await;
+    heartbeat.wait_for_refresh_tick().await;
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(1),
+            heartbeat.refresh_presence(&presence)
+        )
+        .await
+        .expect("refresh action must not wait for another interval tick")
+    );
+}
+
 #[tokio::test]
 async fn mark_received_extends_client_heartbeat_deadline() {
     // 测试目标：验证收到新的客户端心跳后，会用最新交互时间延长保活窗口。

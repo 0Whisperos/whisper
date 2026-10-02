@@ -80,8 +80,14 @@ impl ClientHeartbeat {
             .is_some_and(|last_seen_at| now.duration_since(last_seen_at) < self.timeout)
     }
 
-    pub(crate) async fn refresh_presence(&mut self, presence: &PresenceManager) -> bool {
-        match self.refresh_presence_tick(presence).await {
+    /// Wait only for the timer. This future may be cancelled by another select branch.
+    pub(crate) async fn wait_for_refresh_tick(&mut self) {
+        self.refresh_ticker.tick().await;
+    }
+
+    /// Complete the Redis refresh after a timer tick, outside tokio::select!.
+    pub(crate) async fn refresh_presence(&self, presence: &PresenceManager) -> bool {
+        match self.refresh_presence_once(presence).await {
             Ok(ClientPresenceRefresh::Refreshed) => {
                 tracing::debug!(
                     user_id = self.user_id,
@@ -126,12 +132,10 @@ impl ClientHeartbeat {
         }
     }
 
-    async fn refresh_presence_tick(
-        &mut self,
+    async fn refresh_presence_once(
+        &self,
         presence: &PresenceManager,
     ) -> Result<ClientPresenceRefresh, redis::RedisError> {
-        self.refresh_ticker.tick().await;
-
         let now = Instant::now();
         if self.is_expired(now) {
             return Ok(ClientPresenceRefresh::ClientTimedOut);
