@@ -57,6 +57,12 @@ pub(super) struct TestServer {
 
 impl TestServer {
     pub(super) fn start() -> Result<(Self, Settings)> {
+        let (mut servers, settings) = Self::start_cluster(1)?;
+        Ok((servers.remove(0), settings))
+    }
+
+    pub(super) fn start_cluster(count: usize) -> Result<(Vec<Self>, Settings)> {
+        ensure!(count > 0, "cluster must contain at least one node");
         let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .context("im-chat must be inside the repository")?
@@ -85,41 +91,49 @@ impl TestServer {
             "CDC JWT secret must not be empty"
         );
 
-        let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
-        let ws_url = format!("ws://127.0.0.1:{port}/ws");
         let run_id = Uuid::new_v4().to_string();
-        let log_dir = repository.join(".tmp").join("cdc-delivery").join(&run_id);
-        fs::create_dir_all(&log_dir)?;
-        let mut config: toml::Value = toml::from_str(&raw)?;
-        config["server"]["ip"] = "127.0.0.1".into();
-        config["server"]["port"] = i64::from(port).into();
-        config["node"]["node_id"] = format!("cdc-test-{run_id}").into();
-        config["node"]["public_ws_url"] = ws_url.clone().into();
-        config["kafka"]["group_id"] = format!("cdc-test-{run_id}").into();
-        let config_text = toml::to_string(&config)?;
-        let settings = toml::from_str(&config_text)?;
-        fs::write(log_dir.join("config.toml"), config_text)?;
+        let root_dir = repository.join(".tmp").join("cdc-delivery").join(&run_id);
+        fs::create_dir_all(&root_dir)?;
         let executable = PathBuf::from(env!("CARGO_BIN_EXE_im-chat")).canonicalize()?;
         ensure!(
             executable.starts_with(&repository),
             "build the test binary inside the repository"
         );
-        let child = Command::new(executable)
-            .current_dir(&log_dir)
-            .env("TEMP", &log_dir)
-            .env("TMP", &log_dir)
-            .stdout(Stdio::from(File::create(log_dir.join("stdout.log"))?))
-            .stderr(Stdio::from(File::create(log_dir.join("stderr.log"))?))
-            .spawn()
-            .context("start im-chat binary")?;
-        Ok((
-            Self {
+        let mut servers = Vec::with_capacity(count);
+        let mut settings = None;
+        for index in 0..count {
+            let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+            let ws_url = format!("ws://127.0.0.1:{port}/ws");
+            let log_dir = root_dir.join(format!("node-{index}"));
+            fs::create_dir_all(&log_dir)?;
+            let mut config: toml::Value = toml::from_str(&raw)?;
+            config["server"]["ip"] = "127.0.0.1".into();
+            config["server"]["port"] = i64::from(port).into();
+            config["node"]["node_id"] = format!("cdc-test-{run_id}-{index}").into();
+            config["node"]["public_ws_url"] = ws_url.clone().into();
+            config["node"]["rpc_addr"] = format!("127.0.0.1:{port}").into();
+            config["node"]["rpc_secret"] = format!("cdc-test-rpc-secret-{run_id}").into();
+            config["kafka"]["group_id"] = format!("cdc-test-{run_id}").into();
+            let config_text = toml::to_string(&config)?;
+            if settings.is_none() {
+                settings = Some(toml::from_str(&config_text)?);
+            }
+            fs::write(log_dir.join("config.toml"), config_text)?;
+            let child = Command::new(&executable)
+                .current_dir(&log_dir)
+                .env("TEMP", &log_dir)
+                .env("TMP", &log_dir)
+                .stdout(Stdio::from(File::create(log_dir.join("stdout.log"))?))
+                .stderr(Stdio::from(File::create(log_dir.join("stderr.log"))?))
+                .spawn()
+                .context("start im-chat binary")?;
+            servers.push(Self {
                 child,
                 ws_url,
                 log_dir,
-            },
-            settings,
-        ))
+            });
+        }
+        Ok((servers, settings.context("cluster settings missing")?))
     }
 
     pub(super) fn check_running(&mut self) -> Result<()> {
@@ -128,6 +142,12 @@ impl TestServer {
             "im-chat exited; see {}",
             self.log_dir.display()
         );
+        Ok(())
+    }
+
+    pub(super) fn stop(&mut self) -> Result<()> {
+        self.child.kill()?;
+        self.child.wait()?;
         Ok(())
     }
 }

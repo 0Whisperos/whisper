@@ -136,6 +136,28 @@ impl Client {
         Ok(())
     }
 
+    pub(super) fn send_ack(&mut self, kind: &str, conversation: u64, seq: u64) -> Result<()> {
+        let cursor_field = match kind {
+            "delivered_ack" => "delivered_seq",
+            "read_ack" => "read_seq",
+            _ => bail!("unsupported acknowledgement kind"),
+        };
+        let mut payload = json!({"conversation_id": conversation});
+        payload[cursor_field] = seq.into();
+        self.outgoing
+            .send(Message::Text(
+                json!({
+                    "type": kind,
+                    "request_id": format!("cdc-{kind}-{seq}"),
+                    "payload": payload,
+                })
+                .to_string()
+                .into(),
+            ))
+            .context("test socket writer closed")?;
+        Ok(())
+    }
+
     pub(super) async fn receive(&mut self) -> Result<Value> {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
