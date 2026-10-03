@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Whisper · 无好友空态蓝图</title>
+    <link rel="stylesheet" href="authenticated-preview.css" />
+    <style>
+      .session-list.empty-session-list { display: grid; place-items: center; color: var(--muted); }
+      .session-empty-copy { margin: 0; padding: 16px; text-align: center; }
+      .empty-chat-region { min-width: 0; min-height: 0; background: var(--chat-surface); }
+      .empty-contact-detail { display: grid; min-width: 0; min-height: 100%; place-items: center; padding: 24px; background: var(--chat-surface); }
+      .empty-contact-copy { margin: 0; color: var(--muted); text-align: center; }
+      [data-view="contacts"] .session-panel,
+      [data-view="contacts"] .empty-chat-region { display: none; }
+      [data-view="contacts"] .contacts-panel { display: block; }
+      [data-view="messages"] .contacts-panel { display: none; }
+      @media (max-width: 679px) {
+        .empty-chat-region { grid-column: 1; grid-row: 1; }
+        [data-mobile-panel="sessions"] .empty-chat-region,
+        [data-mobile-panel="contacts"] .empty-chat-region { display: none; }
+        [data-mobile-panel="sessions"] .session-panel,
+        [data-mobile-panel="contacts"] .contacts-panel { display: grid; }
+        [data-mobile-panel="sessions"] .contacts-panel,
+        [data-mobile-panel="contacts"] .session-panel { display: none; }
+        .contacts-panel { grid-template-rows: 60px minmax(0, 1fr); }
+        .contacts-layout { display: grid; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: calc(100% - 60px); min-height: 0; }
+        .empty-contact-detail { min-height: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <svg aria-hidden="true" class="icon-sprite">
+      <symbol id="icon-message" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3V5z" /></symbol>
+      <symbol id="icon-contact" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3" /><path d="M5 20c1-4 3-6 7-6s6 2 7 6" /></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5" /><path d="m15 15 5 5" /></symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+    </svg>
+
+    <main class="app-shell" data-view="messages" data-mobile-panel="sessions" data-rail-expanded="false">
+      <aside class="function-rail" aria-label="主导航">
+        <button class="avatar-button" type="button" aria-label="账号"><span class="rail-mark">Z</span></button>
+        <a class="brand" href="#messages" aria-label="Whisper 首页"><span class="rail-mark">W</span></a>
+        <nav class="rail-nav" aria-label="功能">
+          <button class="icon-button is-active" type="button" aria-label="消息" title="消息" data-view-target="messages"><svg><use href="#icon-message" /></svg></button>
+          <button class="icon-button" type="button" aria-label="好友" title="好友" data-view-target="contacts"><svg><use href="#icon-contact" /></svg></button>
+        </nav>
+        <div class="rail-bottom"></div>
+      </aside>
+
+      <section class="session-panel" aria-label="会话">
+        <header class="session-head">
+          <label class="search-field"><svg aria-hidden="true"><use href="#icon-search" /></svg><input type="search" placeholder="搜索" aria-label="搜索会话" /></label>
+          <button class="icon-button" type="button" aria-label="新建消息" title="新建消息"><svg><use href="#icon-plus" /></svg></button>
+        </header>
+        <output class="panel-status" aria-live="polite"></output>
+        <div class="session-list empty-session-list"><p class="session-empty-copy">暂时没有新消息</p></div>
+      </section>
+
+      <div class="empty-chat-region" aria-label="空白聊天区域"></div>
+
+      <section class="contacts-panel" aria-label="好友" hidden>
+        <header class="contacts-head">
+          <div><p class="eyebrow">通讯录</p><h1>好友</h1></div>
+          <button class="icon-button" type="button" aria-label="添加好友" title="添加好友"><svg><use href="#icon-plus" /></svg></button>
+        </header>
+        <div class="contacts-layout">
+          <section class="contact-list" aria-label="联系人列表">
+            <button class="system-contact" type="button"><svg aria-hidden="true"><use href="#icon-plus" /></svg><span>新的朋友</span></button>
+            <button class="system-contact" type="button"><svg aria-hidden="true"><use href="#icon-plus" /></svg><span>群聊</span></button>
+          </section>
+          <section class="empty-contact-detail" aria-label="好友资料">
+            <p class="empty-contact-copy">当前没有好友</p>
+          </section>
+        </div>
+      </section>
+
+      <nav class="bottom-nav" aria-label="主导航">
+        <button class="is-active" type="button" aria-label="消息" title="消息" data-view-target="messages"><svg><use href="#icon-message" /></svg><small>消息</small></button>
+        <button type="button" aria-label="好友" title="好友" data-view-target="contacts"><svg><use href="#icon-contact" /></svg><small>好友</small></button>
+        <button type="button" aria-label="账号" title="账号"><small>账号</small></button>
+      </nav>
+    </main>
+
+    <script>
+      (() => {
+        const shell = document.querySelector(".app-shell");
+        const controls = document.querySelectorAll("[data-view-target]");
+        controls.forEach((control) => {
+          control.addEventListener("click", () => {
+            const view = control.dataset.viewTarget;
+            shell.dataset.view = view;
+            shell.dataset.mobilePanel = view === "contacts" ? "contacts" : "sessions";
+            controls.forEach((item) => item.classList.toggle("is-active", item.dataset.viewTarget === view));
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 
-import type { ChatContact, ChatConversation, ChatData, MobilePanel, StatusScope, WorkspaceView } from "../types";
+import type { ChatContact, ChatData, MobilePanel, StatusScope, WorkspaceView } from "../types";
 
 function isNarrowViewport(): boolean {
   return window.innerWidth < 680;
@@ -21,10 +21,10 @@ export function useChatWorkspace(data: ChatData) {
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("sessions");
   const [statusMessages, setStatusMessages] = useState<StatusMessages>({ session: "", chat: "", contacts: "" });
 
-  const activeConversation = data.conversations[activeConversationId]
-    ?? data.conversations[initialSession?.conversationId ?? 0]
-    ?? emptyConversation();
-  const activeContact = data.contacts.find((contact) => contact.id === activeContactId) ?? data.contacts[0] ?? emptyContact();
+  const activeConversation = data.sessions.length === 0
+    ? null
+    : data.conversations[activeConversationId] ?? data.conversations[initialSession?.conversationId ?? 0] ?? null;
+  const activeContact = data.contacts.find((contact) => contact.id === activeContactId) ?? data.contacts[0] ?? null;
 
   const showStatus = useCallback((message: string, scope: StatusScope) => {
     setStatusMessages((current) => ({ ...current, [scope]: message }));
@@ -104,31 +104,4 @@ export function useChatWorkspace(data: ChatData) {
     statusMessages,
     view,
   ]);
-}
-
-function emptyConversation(): ChatConversation {
-  return {
-    conversationId: 0,
-    type: "direct",
-    name: "鏆傛棤浼氳瘽",
-    avatar: "?",
-    tone: "gray",
-    status: "鐘舵€佹湭鐭?",
-    participants: {},
-    messages: [],
-  };
-}
-
-function emptyContact(): ChatContact {
-  return {
-    id: "",
-    userId: 0,
-    name: "鏆傛棤濂藉弸",
-    avatar: "?",
-    tone: "gray",
-    account: "",
-    region: "鏈彁渚?",
-    status: "鐘舵€佹湭鐭?",
-    section: "friends",
-  };
 }

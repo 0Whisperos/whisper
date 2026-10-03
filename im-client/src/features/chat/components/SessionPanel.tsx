@@ -26,6 +26,7 @@ export function SessionPanel({ sessions, activeConversationId, statusMessage, on
       </header>
       <output className="auth-panel-status" aria-live="polite">{statusMessage}</output>
       <div className="auth-session-list">
+        {sessions.length === 0 ? <p className="auth-session-empty-state">暂时没有新消息</p> : null}
         {sessions.map((session) => (
           <button
             key={session.id}

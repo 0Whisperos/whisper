@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthenticatedShell } from "../components/AuthenticatedShell";
 import { chatMockData } from "../mockData";
+import type { ChatData } from "../types";
 
 interface RenderShellOptions {
   canSendMessages?: boolean;
@@ -25,12 +26,84 @@ function renderShell({ canSendMessages, onSendText, onRetryMessage }: RenderShel
   );
 }
 
+function renderShellWithData(data: ChatData) {
+  return render(
+    <AuthenticatedShell
+      data={data}
+      connectionLabel="聊天连接在线：connection-uuid"
+      isLoggingOut={false}
+      onLogout={() => undefined}
+    />,
+  );
+}
+
+function noFriendsData(): ChatData {
+  return {
+    ...structuredClone(chatMockData),
+    sessions: [],
+    conversations: {},
+    contacts: [],
+    contactSections: [],
+  };
+}
+
 afterEach(() => {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   window.localStorage.clear();
 });
 
 describe("AuthenticatedShell", () => {
+  it("shows the empty session message and leaves the chat area blank when there are no friends", () => {
+    // 测试目标：验证没有好友和会话时显示会话空态，并移除聊天标题、消息和编辑区。
+    // 构造方法：用空 sessions、conversations、contacts 渲染已登录工作台。
+    // 输入数据：当前用户资料保留，好友、会话和会话数据均为空。
+    // 预期行为：会话列表显示“暂时没有新消息”，右侧只有空白区域，没有聊天面板或消息输入框。
+    renderShellWithData(noFriendsData());
+
+    expect(screen.getByText("暂时没有新消息")).toBeInTheDocument();
+    expect(screen.getByLabelText("空白聊天区域")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "聊天详情" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("消息列表")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("输入消息")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "发送消息" })).not.toBeInTheDocument();
+  });
+
+  it("keeps contact shortcuts and shows the empty friend message instead of a fake profile", async () => {
+    // 测试目标：验证无好友时仅替换右侧联系人资料，保留左侧系统入口。
+    // 构造方法：用空联系人数据渲染工作台并切换到好友视图。
+    // 输入数据：联系人与分组为空，好友页的添加好友和系统入口仍由组件提供。
+    // 预期行为：资料区域中央显示“当前没有好友”，不显示头像、资料字段或发消息按钮。
+    const user = userEvent.setup();
+    renderShellWithData(noFriendsData());
+    await user.click(screen.getAllByRole("button", { name: "好友" })[0]);
+
+    expect(screen.getByText("当前没有好友")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加好友" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新的朋友" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "群聊" })).toBeInTheDocument();
+    expect(screen.queryByText(/^备注：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^账号：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^地区：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^状态：/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "发消息" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the no-friends message available in the narrow contacts view", async () => {
+    // 测试目标：验证窄屏下切换到好友视图仍呈现无好友提示。
+    // 构造方法：将视口设为 320px，渲染无好友工作台并点击好友导航。
+    // 输入数据：320px 窄屏，contacts 为空。
+    // 预期行为：工作台切换到 contacts 面板，页面显示“当前没有好友”。
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    const user = userEvent.setup();
+    const { container } = renderShellWithData(noFriendsData());
+    const shell = container.querySelector(".auth-shell");
+
+    await user.click(screen.getAllByRole("button", { name: "好友" })[0]);
+
+    expect(shell).toHaveAttribute("data-mobile-panel", "contacts");
+    expect(screen.getByText("当前没有好友")).toBeInTheDocument();
+  });
+
   it("switches conversations and renders representative mock session states", async () => {
     // 测试目标：验证会话列表呈现 mock 数据状态，并可切换到另一会话。
     // 构造方法：渲染聊天工作台，检查代表性会话与状态文本后点击周然会话。

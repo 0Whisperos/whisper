@@ -5,7 +5,7 @@ interface ContactsPanelProps {
   hidden: boolean;
   contacts: ChatContact[];
   sections: ChatContactSection[];
-  activeContact: ChatContact;
+  activeContact: ChatContact | null;
   activeContactId: string;
   statusMessage: string;
   onSelectContact: (contactId: string) => void;
@@ -71,17 +71,23 @@ export function ContactsPanel({
             );
           })}
         </section>
-        <aside className="auth-contact-detail" aria-label="联系人资料">
-          <Avatar avatar={activeContact.avatar} tone={activeContact.tone} />
-          <h2>{activeContact.name}</h2>
-          <p>备注：{activeContact.name}</p>
-          <p>账号：{activeContact.account}</p>
-          <p>地区：{activeContact.region}</p>
-          <p>状态：{activeContact.status}</p>
-          <button type="button" onClick={() => onEnterConversation(activeContact)} disabled={!activeContact.conversationId}>
-            发消息
-          </button>
-        </aside>
+        {activeContact ? (
+          <aside className="auth-contact-detail" aria-label="联系人资料">
+            <Avatar avatar={activeContact.avatar} tone={activeContact.tone} />
+            <h2>{activeContact.name}</h2>
+            <p>备注：{activeContact.name}</p>
+            <p>账号：{activeContact.account}</p>
+            <p>地区：{activeContact.region}</p>
+            <p>状态：{activeContact.status}</p>
+            <button type="button" onClick={() => onEnterConversation(activeContact)} disabled={!activeContact.conversationId}>
+              发消息
+            </button>
+          </aside>
+        ) : (
+          <aside className="auth-contact-detail auth-empty-contact-state" aria-label="联系人资料">
+            <p>当前没有好友</p>
+          </aside>
+        )}
       </div>
     </section>
   );

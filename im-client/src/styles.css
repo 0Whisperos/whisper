@@ -986,6 +986,16 @@ canvas {
   overflow-y: auto;
 }
 
+.auth-session-empty-state {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  margin: 0;
+  padding: 20px;
+  color: var(--auth-muted);
+  text-align: center;
+}
+
 .auth-session-row {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) auto;
@@ -1092,6 +1102,13 @@ canvas {
 .auth-contacts-panel {
   min-width: 0;
   min-height: 0;
+}
+
+.auth-empty-chat-region {
+  grid-column: 3;
+  min-width: 0;
+  min-height: 0;
+  background: var(--chat-surface);
 }
 
 .auth-chat-panel {
@@ -1559,6 +1576,17 @@ canvas {
   background: var(--chat-surface);
 }
 
+.auth-empty-contact-state {
+  display: grid;
+  place-items: center;
+  color: var(--auth-muted);
+  text-align: center;
+}
+
+.auth-empty-contact-state p {
+  margin: 0;
+}
+
 .auth-contact-detail .auth-person-avatar {
   width: 64px;
   height: 64px;
@@ -1710,6 +1738,10 @@ canvas {
   display: none;
 }
 
+.auth-shell[data-view="contacts"] .auth-empty-chat-region {
+  display: none;
+}
+
 .auth-shell[data-view="contacts"] .auth-contacts-panel {
   display: block;
 }
@@ -1743,6 +1775,11 @@ canvas {
     grid-column: 1;
     grid-row: 1;
     border-right: 0;
+  }
+
+  .auth-empty-chat-region {
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .auth-chat-panel {
@@ -1815,8 +1852,10 @@ canvas {
   }
 
   .auth-shell[data-mobile-panel="sessions"] .auth-chat-panel,
+  .auth-shell[data-mobile-panel="sessions"] .auth-empty-chat-region,
   .auth-shell[data-mobile-panel="sessions"] .auth-contacts-panel,
   .auth-shell[data-mobile-panel="contacts"] .auth-chat-panel,
+  .auth-shell[data-mobile-panel="contacts"] .auth-empty-chat-region,
   .auth-shell[data-mobile-panel="contacts"] .auth-session-panel,
   .auth-shell[data-mobile-panel="contact-detail"] .auth-chat-panel,
   .auth-shell[data-mobile-panel="contact-detail"] .auth-session-panel {
@@ -1841,6 +1880,11 @@ canvas {
 
   .auth-shell[data-mobile-panel="contact-detail"] .auth-contact-detail {
     display: block;
+  }
+
+  .auth-shell[data-mobile-panel="contacts"] .auth-empty-contact-state {
+    display: grid;
+    min-height: calc(100dvh - 116px);
   }
 
   .auth-shell[data-mobile-panel="contact-detail"] .auth-contact-back {

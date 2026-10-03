@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { ChatApiError } from "../api";
-import type { ChatData, StatusScope } from "../types";
+import type { ChatContact, ChatData, StatusScope } from "../types";
 import { useChatDrafts } from "../hooks/useChatDrafts";
 import { useChatLayout } from "../hooks/useChatLayout";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
@@ -150,7 +150,7 @@ export function AuthenticatedShell({
     workspace.setView(nextView);
   };
 
-  const handleEnterContactConversation = (contact = workspace.activeContact) => {
+  const handleEnterContactConversation = (contact: ChatContact) => {
     if (workspace.enterContactConversation(contact)) {
       setIsDetailOpen(false);
     }
@@ -191,28 +191,34 @@ export function AuthenticatedShell({
         onToolPreview={(name) => showToolPreview(name, "session")}
       />
       <div className="auth-layout-resizer auth-sidebar-resizer" aria-label="调整会话或联系人列表宽度" {...layout.resizerProps("sidebar")} />
-      <ChatPanel
-        conversation={workspace.activeConversation}
-        self={data.self}
-        connectionLabel={connectionLabel}
-        draft={drafts.draft}
-        canSend={drafts.canSend && canSendMessages}
-        statusMessage={workspace.statusMessages.chat}
-        isHistoryLoading={loadingConversationId === workspace.activeConversationId}
-        historyError={getConversationHistoryError(workspace.activeConversationId)}
-        hasMoreHistory={hasMoreConversationHistory(workspace.activeConversationId)}
-        onLoadOlderHistory={() => { void loadOlderConversationHistory?.(workspace.activeConversationId); }}
-        onRetryHistory={() => retryConversationHistory?.(workspace.activeConversationId)}
-        isDetailOpen={isDetailOpen}
-        onReturnToSessions={workspace.returnToSessions}
-        onOpenDetail={openDetailPanel}
-        onToolPreview={(name) => showToolPreview(name, "chat")}
-        onChangeDraft={drafts.setDraft}
-        onSendText={handleSendText}
-        onRetryMessage={onRetryMessage}
-        onReadThrough={onReadAck}
-      />
-      <div className="auth-layout-resizer auth-composer-resizer" aria-label="调整消息输入区高度" {...layout.resizerProps("composer")} />
+      {workspace.activeConversation ? (
+        <>
+          <ChatPanel
+            conversation={workspace.activeConversation}
+            self={data.self}
+            connectionLabel={connectionLabel}
+            draft={drafts.draft}
+            canSend={drafts.canSend && canSendMessages}
+            statusMessage={workspace.statusMessages.chat}
+            isHistoryLoading={loadingConversationId === workspace.activeConversationId}
+            historyError={getConversationHistoryError(workspace.activeConversationId)}
+            hasMoreHistory={hasMoreConversationHistory(workspace.activeConversationId)}
+            onLoadOlderHistory={() => { void loadOlderConversationHistory?.(workspace.activeConversationId); }}
+            onRetryHistory={() => retryConversationHistory?.(workspace.activeConversationId)}
+            isDetailOpen={isDetailOpen}
+            onReturnToSessions={workspace.returnToSessions}
+            onOpenDetail={openDetailPanel}
+            onToolPreview={(name) => showToolPreview(name, "chat")}
+            onChangeDraft={drafts.setDraft}
+            onSendText={handleSendText}
+            onRetryMessage={onRetryMessage}
+            onReadThrough={onReadAck}
+          />
+          <div className="auth-layout-resizer auth-composer-resizer" aria-label="调整消息输入区高度" {...layout.resizerProps("composer")} />
+        </>
+      ) : (
+        <div className="auth-empty-chat-region" aria-label="空白聊天区域" />
+      )}
       <ContactsPanel
         hidden={workspace.view !== "contacts"}
         contacts={data.contacts}
