@@ -10,7 +10,7 @@
 - `presence:user:{user_id}` 属于 Redis presence。
 - Kafka 的 topic、key、headers、value、partition、offset 不是 MySQL 表。
 - 不单独创建发送幂等记录表。发送幂等由 `messages` 表的唯一键 `uk_messages_sender_client_msg (sender_user_id, client_message_id)` 承担。
-- 数据库中的时间字段使用 `DATETIME(6)` 保存。对外 API、WebSocket payload、Kafka payload 中的时间文本使用 GB/T 7408 扩展格式，包含日期、时间和时区偏移。
+- 数据库中的时间字段使用 `DATETIME(6)` 保存。`im-chat` 新写入的数据库时间按 Asia/Shanghai（UTC+08:00）保存为无时区墙上时间；切换前的历史值仍按 UTC 保留。对外 API、WebSocket payload、Kafka payload 中的时间文本使用 GB/T 7408 扩展格式，包含日期、时间和时区偏移。
 - UUID 字段暂按带连字符格式保存，使用 `CHAR(36)`。
 - 第一阶段只支持 `conversation_type = 'direct'`、`message_type = 'text'`、`member_state = 'active'`。
 

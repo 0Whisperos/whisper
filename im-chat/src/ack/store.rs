@@ -1,5 +1,5 @@
+use crate::db_time::to_database_datetime;
 use sqlx::{MySqlPool, Row};
-use time::PrimitiveDateTime;
 
 #[derive(Clone, Copy)]
 pub(super) enum AckKind {
@@ -90,8 +90,7 @@ pub(super) async fn acknowledge(
         AckKind::Delivered => next_delivered > delivered_seq,
         AckKind::Read => next_read > read_seq,
     };
-    let utc_now = time::OffsetDateTime::now_utc();
-    let now = PrimitiveDateTime::new(utc_now.date(), utc_now.time());
+    let now = to_database_datetime(time::OffsetDateTime::now_utc());
     match kind {
         AckKind::Delivered => {
             sqlx::query(

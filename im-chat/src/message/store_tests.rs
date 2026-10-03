@@ -51,6 +51,15 @@ async fn accept_message_writes_message_and_outbox_when_test_database_is_configur
 
     assert_eq!(accepted.conversation_seq, 1);
     assert_eq!(accepted.content, json!({ "text": "hello" }));
+    let stored_created_at: PrimitiveDateTime =
+        sqlx::query_scalar("SELECT created_at FROM messages WHERE message_id = ?")
+            .bind(&accepted.message_id)
+            .fetch_one(&pool)
+            .await
+            .expect("message timestamp should load");
+    let accepted_created_at = OffsetDateTime::parse(&accepted.created_at, &Rfc3339)
+        .expect("accepted timestamp is RFC3339");
+    assert_eq!(stored_created_at, to_database_datetime(accepted_created_at));
     let message_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE message_id = ?")
             .bind(&accepted.message_id)
@@ -291,7 +300,7 @@ struct TestFixture {
 
 impl TestFixture {
     async fn create(pool: &MySqlPool, user_id: u64, active_member: bool) -> Self {
-        let now = primitive_utc(OffsetDateTime::now_utc());
+        let now = to_database_datetime(OffsetDateTime::now_utc());
         let result = sqlx::query(
             "INSERT INTO conversations (conversation_type, last_seq, created_at, updated_at) \
              VALUES (?, 0, ?, ?)",

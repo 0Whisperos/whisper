@@ -4,6 +4,7 @@ use super::{
     AcceptedMessage, CONVERSATION_NOT_FOUND, DUPLICATE_CLIENT_MESSAGE_CONFLICT, INTERNAL_ERROR,
     INVALID_MESSAGE, NOT_CONVERSATION_MEMBER, SendMessagePayload,
 };
+use crate::db_time::{from_database_datetime, to_database_datetime, to_storage_offset};
 use sqlx::mysql::{MySqlQueryResult, MySqlRow};
 use sqlx::{MySqlPool, Row};
 use time::format_description::well_known::Rfc3339;
@@ -85,7 +86,7 @@ pub(super) async fn accept_message(
     }
 
     let now = OffsetDateTime::now_utc();
-    let created_at = primitive_utc(now);
+    let created_at = to_database_datetime(now);
     let conversation_seq =
         next_conversation_seq(&mut tx, payload.conversation_id, created_at).await?;
     let message = AcceptedMessage {
@@ -96,7 +97,7 @@ pub(super) async fn accept_message(
         client_message_id: payload.client_message_id.clone(),
         message_type: validated.message_type.clone(),
         content: validated.content.clone(),
-        created_at: format_protocol_time(now),
+        created_at: format_protocol_time(to_storage_offset(now)),
     };
 
     let insert_result =
@@ -244,7 +245,10 @@ async fn insert_outbox_event(
     occurred_at: OffsetDateTime,
     created_at: PrimitiveDateTime,
 ) -> Result<(), AcceptMessageError> {
-    let event = MessageCreatedEvent::new(message.clone(), format_protocol_time(occurred_at));
+    let event = MessageCreatedEvent::new(
+        message.clone(),
+        format_protocol_time(to_storage_offset(occurred_at)),
+    );
     let payload = serde_json::to_string(&event)?;
     sqlx::query(
         "INSERT INTO outbox_events \
@@ -310,7 +314,7 @@ fn stored_message_from_row(row: MySqlRow) -> Result<StoredMessage, AcceptMessage
         client_message_id: row.try_get("client_message_id")?,
         message_type: row.try_get("message_type")?,
         content,
-        created_at: format_protocol_time(created_at.assume_utc()),
+        created_at: format_protocol_time(from_database_datetime(created_at)),
     };
     Ok(StoredMessage {
         message,
@@ -318,13 +322,9 @@ fn stored_message_from_row(row: MySqlRow) -> Result<StoredMessage, AcceptMessage
     })
 }
 
-fn primitive_utc(offset: OffsetDateTime) -> PrimitiveDateTime {
-    PrimitiveDateTime::new(offset.date(), offset.time())
-}
-
 fn format_protocol_time(time: OffsetDateTime) -> String {
     time.format(&Rfc3339)
-        .expect("UTC message timestamps should format as RFC3339")
+        .expect("message timestamps should format as RFC3339")
 }
 
 fn is_duplicate_key_error(error: &sqlx::Error) -> bool {
