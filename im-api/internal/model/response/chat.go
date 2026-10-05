@@ -19,6 +19,16 @@ type Friend struct {
 	ConversationID  *uint64 `json:"conversation_id"`
 }
 
+type FriendRequest struct {
+	RequestID           string      `json:"request_id"`
+	Sender              UserProfile `json:"sender"`
+	Recipient           UserProfile `json:"recipient"`
+	VerificationMessage string      `json:"verification_message"`
+	Status              string      `json:"status"`
+	CreatedAt           string      `json:"created_at"`
+	UpdatedAt           string      `json:"updated_at"`
+}
+
 type Me struct {
 	UserProfile
 }

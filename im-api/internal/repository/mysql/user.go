@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/0Whisperos/whisper/im-server/internal/global"
 	"github.com/0Whisperos/whisper/im-server/internal/model/entity"
@@ -28,6 +29,21 @@ func FindUserByAccount(account string) (entity.User, bool, error) {
 	}
 
 	return user, true, nil
+}
+
+func FindUsersByIDs(userIDs []uint64) ([]entity.User, error) {
+	if global.MysqlDB == nil {
+		return nil, ErrNotInitialized
+	}
+	if len(userIDs) == 0 {
+		return []entity.User{}, nil
+	}
+	sort.Slice(userIDs, func(i, j int) bool { return userIDs[i] < userIDs[j] })
+	var users []entity.User
+	if err := global.MysqlDB.Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("find users by ids: %w", err)
+	}
+	return users, nil
 }
 
 func FindUserByID(userID uint64) (entity.User, bool, error) {
