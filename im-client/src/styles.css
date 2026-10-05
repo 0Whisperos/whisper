@@ -1470,7 +1470,7 @@ canvas {
   font-size: 11px;
 }
 
-.auth-send-button {
+.auth-shell .auth-send-button:not(:disabled) {
   grid-column: 2;
   grid-row: 3;
   min-height: 36px;
@@ -1916,7 +1916,7 @@ canvas {
 .auth-friend-search-line input { flex: 1; height: 43px; padding: 0 13px; }
 .auth-friend-search-line input:focus, .auth-friend-verification:focus { outline: 2px solid color-mix(in srgb, var(--brand) 45%, transparent); outline-offset: 1px; }
 .auth-friend-primary, .auth-friend-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 9px 17px; border-radius: 9px; font-weight: 800; white-space: nowrap; cursor: pointer; }
-.auth-friend-primary { border: 1px solid var(--brand); background: var(--brand); color: #fff; }
+.auth-shell .auth-friend-primary { border: 1px solid var(--brand); background: var(--brand); color: #fff; }
 .auth-friend-primary:hover:not(:disabled) { filter: brightness(1.08); }
 .auth-friend-secondary { border: 1px solid var(--border-strong); background: var(--surface-raised); color: var(--text); }
 .auth-friend-secondary:hover:not(:disabled) { background: var(--list-hover); }
