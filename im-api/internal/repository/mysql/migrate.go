@@ -27,6 +27,7 @@ func migrationModels() []interface{} {
 	return []interface{}{
 		&entity.User{},
 		&entity.Friendship{},
+		&entity.FriendRequest{},
 		&entity.Conversation{},
 		&entity.ConversationMember{},
 		&entity.Message{},
