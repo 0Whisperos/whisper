@@ -10,6 +10,7 @@ import type {
   ChatDeliveredAckRejectedFrame,
   ChatReadAckRejectedFrame,
   ChatConversationReceiptUpdatedFrame,
+  ChatFriendRequestUpdatedFrame,
   ChatMessageCreatedFrame,
   ChatSendMessageFrame,
   ChatSendMessageRejectedFrame,
@@ -207,6 +208,7 @@ function parseServerFrame(data: unknown): ChatServerFrame | null {
     || isDeliveredAckRejectedFrame(value)
     || isReadAckRejectedFrame(value)
     || isConversationReceiptUpdatedFrame(value)
+    || isFriendRequestUpdatedFrame(value)
   ) {
     return value;
   }
@@ -221,7 +223,8 @@ function isBusinessServerFrame(frame: ChatServerFrame): frame is ChatBusinessSer
     || frame.type === "read_ack_accepted"
     || frame.type === "delivered_ack_rejected"
     || frame.type === "read_ack_rejected"
-    || frame.type === "conversation_receipt_updated";
+    || frame.type === "conversation_receipt_updated"
+    || frame.type === "friend_request_updated";
 }
 
 function isDeliveredAckAcceptedFrame(value: unknown): value is ChatDeliveredAckAcceptedFrame {
@@ -259,6 +262,15 @@ function isConversationReceiptUpdatedFrame(value: unknown): value is ChatConvers
     && hasNumberProperty(value.payload, "user_id")
     && hasNumberProperty(value.payload, "delivered_seq")
     && hasNumberProperty(value.payload, "read_seq");
+}
+
+function isFriendRequestUpdatedFrame(value: unknown): value is ChatFriendRequestUpdatedFrame {
+  return hasFrameEnvelope(value, "friend_request_updated", false)
+    && hasNumberProperty(value.payload, "request_id")
+    && "status" in value.payload
+    && (value.payload.status === "pending"
+      || value.payload.status === "accepted"
+      || value.payload.status === "rejected");
 }
 
 function isAuthOkFrame(value: unknown): value is ChatServerFrame {

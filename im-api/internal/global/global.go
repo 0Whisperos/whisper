@@ -10,3 +10,4 @@ import (
 var MysqlDB *gorm.DB
 var MysqlSQLDB *sql.DB
 var RedisClient *goredis.Client
+var ChatRPCSecret string

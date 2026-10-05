@@ -8,12 +8,13 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
-	Auth     AuthConfig     `yaml:"auth"`
-	CORS     CORSConfig     `yaml:"cors"`
-	Seed     SeedConfig     `yaml:"seed"`
+	Server        ServerConfig   `yaml:"server"`
+	Database      DatabaseConfig `yaml:"database"`
+	Redis         RedisConfig    `yaml:"redis"`
+	Auth          AuthConfig     `yaml:"auth"`
+	ChatRPCSecret string         `yaml:"chat_rpc_secret"`
+	CORS          CORSConfig     `yaml:"cors"`
+	Seed          SeedConfig     `yaml:"seed"`
 }
 
 func (config *Config) ValidateServer() error {
@@ -25,6 +26,8 @@ func (config *Config) ValidateServer() error {
 		return err
 	} else if config.Auth.JWTSecret == "" {
 		return fmt.Errorf("auth JWT secret is empty")
+	} else if config.ChatRPCSecret == "" {
+		return fmt.Errorf("chat rpc secret is empty")
 	} else if _, err := config.Auth.AccessTokenDuration(); err != nil {
 		return err
 	} else if _, err := config.Auth.RefreshTokenDuration(); err != nil {

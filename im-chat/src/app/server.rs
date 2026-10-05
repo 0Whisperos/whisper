@@ -6,7 +6,9 @@ use axum::response::Response;
 use axum::routing::{get, post};
 
 use crate::handle;
-use crate::node_rpc::{self, EnqueueStatus, ForwardMessageRequest, NotifyCursorRequest};
+use crate::node_rpc::{
+    self, EnqueueStatus, ForwardMessageRequest, NotifyCursorRequest, NotifyFriendRequest,
+};
 
 use super::AppState;
 
@@ -14,6 +16,7 @@ pub(super) fn build_router(state: AppState) -> Router {
     let internal = Router::new()
         .route(node_rpc::MESSAGE_PATH, post(forward_message))
         .route(node_rpc::CURSOR_PATH, post(notify_cursor))
+        .route(node_rpc::FRIEND_REQUEST_PATH, post(notify_friend_request))
         .route_layer(middleware::from_fn_with_state(
             state.config.node_config.rpc_secret.clone(),
             node_rpc::verify_signature,
@@ -44,6 +47,18 @@ async fn notify_cursor(
         .map(Json)
         .map_err(|error| {
             tracing::warn!(%error, "failed to serialize cursor notification frame");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn notify_friend_request(
+    State(state): State<AppState>,
+    Json(request): Json<NotifyFriendRequest>,
+) -> Result<Json<EnqueueStatus>, StatusCode> {
+    node_rpc::notify_friend_request(&state.connections, request)
+        .map(Json)
+        .map_err(|error| {
+            tracing::warn!(%error, "failed to serialize friend request notification frame");
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }

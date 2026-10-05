@@ -23,6 +23,42 @@ type ChatNode struct {
 	LastHeartbeatAt string
 }
 
+type PresenceRoute struct {
+	NodeID       string
+	ConnectionID string
+}
+
+func FindPresenceRoute(userID uint64) (PresenceRoute, bool, error) {
+	if global.RedisClient == nil {
+		return PresenceRoute{}, false, ErrNotInitialized
+	}
+	values, err := global.RedisClient.HGetAll(context.Background(), fmt.Sprintf("presence:user:%d", userID)).Result()
+	if err != nil {
+		return PresenceRoute{}, false, fmt.Errorf("read user presence route: %w", err)
+	}
+	if len(values) == 0 {
+		return PresenceRoute{}, false, nil
+	}
+	if values["user_id"] != fmt.Sprint(userID) || values["node_id"] == "" || values["connection_id"] == "" {
+		return PresenceRoute{}, false, nil
+	}
+	return PresenceRoute{NodeID: values["node_id"], ConnectionID: values["connection_id"]}, true, nil
+}
+
+func FindChatNode(nodeID string) (ChatNode, bool, error) {
+	if global.RedisClient == nil {
+		return ChatNode{}, false, ErrNotInitialized
+	}
+	values, err := global.RedisClient.HGetAll(context.Background(), "chat_nodes:"+nodeID).Result()
+	if err != nil {
+		return ChatNode{}, false, fmt.Errorf("read chat node: %w", err)
+	}
+	if len(values) == 0 || values["node_id"] != nodeID || values["rpc_addr"] == "" || values["state"] != chatNodeReadyState {
+		return ChatNode{}, false, nil
+	}
+	return ChatNode{NodeID: nodeID, RPCAddr: values["rpc_addr"], State: values["state"]}, true, nil
+}
+
 func SelectReadyChatNode() (ChatNode, bool, error) {
 	if global.RedisClient == nil {
 		return ChatNode{}, false, ErrNotInitialized

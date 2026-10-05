@@ -160,6 +160,14 @@ export interface ChatConversationReceiptUpdatedFrame {
   };
 }
 
+export interface ChatFriendRequestUpdatedFrame {
+  type: "friend_request_updated";
+  payload: {
+    request_id: number;
+    status: "pending" | "accepted" | "rejected";
+  };
+}
+
 export type ChatBusinessServerFrame =
   | ChatServerAcceptedFrame
   | ChatSendMessageRejectedFrame
@@ -168,7 +176,8 @@ export type ChatBusinessServerFrame =
   | ChatReadAckAcceptedFrame
   | ChatDeliveredAckRejectedFrame
   | ChatReadAckRejectedFrame
-  | ChatConversationReceiptUpdatedFrame;
+  | ChatConversationReceiptUpdatedFrame
+  | ChatFriendRequestUpdatedFrame;
 
 export type ChatServerFrame =
   | ChatAuthOkFrame

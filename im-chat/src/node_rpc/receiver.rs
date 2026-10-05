@@ -1,6 +1,8 @@
 //! Receives authenticated node requests and enqueues existing WebSocket frames.
 
-use super::protocol::{EnqueueStatus, ForwardMessageRequest, NotifyCursorRequest};
+use super::protocol::{
+    EnqueueStatus, ForwardMessageRequest, NotifyCursorRequest, NotifyFriendRequest,
+};
 use crate::connection::ConnectionRegistry;
 use crate::frame::PushFrame;
 use crate::message::AcceptedMessage;
@@ -19,6 +21,12 @@ struct ReceiptUpdatedPayload {
     user_id: u64,
     delivered_seq: u64,
     read_seq: u64,
+}
+
+#[derive(Serialize)]
+struct FriendRequestUpdatedPayload {
+    request_id: u64,
+    status: super::protocol::FriendRequestStatus,
 }
 
 pub(crate) fn forward_message(
@@ -51,6 +59,25 @@ pub(crate) fn notify_cursor(
             user_id: request.user_id,
             delivered_seq: request.delivered_seq,
             read_seq: request.read_seq,
+        },
+    );
+    enqueue(
+        connections,
+        request.target_user_id,
+        &request.connection_id,
+        &frame,
+    )
+}
+
+pub(crate) fn notify_friend_request(
+    connections: &ConnectionRegistry,
+    request: NotifyFriendRequest,
+) -> Result<EnqueueStatus, serde_json::Error> {
+    let frame = PushFrame::new(
+        "friend_request_updated",
+        FriendRequestUpdatedPayload {
+            request_id: request.request_id,
+            status: request.status,
         },
     );
     enqueue(

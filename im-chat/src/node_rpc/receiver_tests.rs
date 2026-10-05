@@ -98,6 +98,71 @@ fn cursor_notification_only_enqueues_existing_frame() {
 }
 
 #[test]
+fn friend_request_notification_targets_the_exact_connection_and_serializes_status() {
+    // 测试目标：验证好友申请推送只进入匹配用户和 connection_id 的队列，且状态帧格式稳定。
+    // 构造方法：注册用户 20 的 connection-1，先使用旧连接 ID 投递，再向当前连接投递。
+    // 输入数据：申请 ID 42、状态 pending、目标用户 20 和连接 connection-1。
+    // 预期行为：旧连接返回 connection_id_mismatch 且无帧；当前连接返回 queued 并收到指定字段。
+    let registry = ConnectionRegistry::new();
+    let mut receiver = connection(&registry, 2);
+    let mut request = NotifyFriendRequest {
+        target_user_id: 20,
+        connection_id: "old-connection".into(),
+        request_id: 42,
+        status: FriendRequestStatus::Pending,
+    };
+    assert_eq!(
+        notify_friend_request(&registry, request.clone()).unwrap(),
+        EnqueueStatus::ConnectionIdMismatch
+    );
+    assert!(receiver.try_recv().is_err());
+
+    request.connection_id = "connection-1".into();
+    assert_eq!(
+        notify_friend_request(&registry, request).unwrap(),
+        EnqueueStatus::Queued
+    );
+    let Message::Text(text) = receiver.try_recv().unwrap() else {
+        panic!("expected text frame")
+    };
+    let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(frame["type"], "friend_request_updated");
+    assert_eq!(
+        frame["payload"],
+        serde_json::json!({"request_id": 42, "status": "pending"})
+    );
+}
+
+#[test]
+fn friend_request_notification_reports_missing_and_full_queues() {
+    // 测试目标：验证好友申请 RPC 将离线用户和满载队列映射为标准 EnqueueStatus。
+    // 构造方法：先向空注册表投递，再注册容量为 1 的连接并填满后再次投递。
+    // 输入数据：目标用户 20、申请 ID 43、状态 accepted 和 connection-1。
+    // 预期行为：无连接时返回 no_such_connection；队列已满时返回 full，已有队列内容不变。
+    let registry = ConnectionRegistry::new();
+    let request = NotifyFriendRequest {
+        target_user_id: 20,
+        connection_id: "connection-1".into(),
+        request_id: 43,
+        status: FriendRequestStatus::Accepted,
+    };
+    assert_eq!(
+        notify_friend_request(&registry, request.clone()).unwrap(),
+        EnqueueStatus::NoSuchConnection
+    );
+    let mut receiver = connection(&registry, 1);
+    assert_eq!(
+        notify_friend_request(&registry, request.clone()).unwrap(),
+        EnqueueStatus::Queued
+    );
+    assert_eq!(
+        notify_friend_request(&registry, request).unwrap(),
+        EnqueueStatus::Full
+    );
+    assert!(receiver.try_recv().is_ok());
+}
+
+#[test]
 fn reports_missing_full_and_closed_queues() {
     // 测试目标：验证节点响应准确表示连接消失、发送队列满和队列关闭。
     // 构造方法：先使用空注册表，再建立容量为 1 的连接并填满、关闭接收端。

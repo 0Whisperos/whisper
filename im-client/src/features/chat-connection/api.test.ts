@@ -401,6 +401,78 @@ describe("chat connection API", () => {
     expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 
+  it("forwards authenticated friend request updates to the typed callback", () => {
+    // 测试目标：验证好友申请状态推送经运行时解析后到达已认证客户端回调。
+    // 构造方法：认证测试 socket 后依次注入 pending、accepted、rejected 三种合法通知帧。
+    // 输入数据：申请 ID 42、43、44 和三个协议状态值。
+    // 预期行为：回调收到三种完整 friend_request_updated 帧，连接保持打开。
+    vi.useFakeTimers();
+    const socket = new MockWebSocket();
+    const onServerFrame = vi.fn();
+    connectChatWebSocket({
+      session: testSession,
+      onStateChange: vi.fn(),
+      onServerFrame,
+      webSocketFactory: () => socket,
+      requestIdFactory: () => "req-1",
+    });
+    authenticateSocket(socket);
+
+    for (const [request_id, status] of [
+      [42, "pending"],
+      [43, "accepted"],
+      [44, "rejected"],
+    ] as const) {
+      socket.receive(JSON.stringify({
+        type: "friend_request_updated",
+        payload: { request_id, status },
+      }));
+    }
+
+    expect(onServerFrame).toHaveBeenCalledTimes(3);
+    expect(onServerFrame).toHaveBeenNthCalledWith(1, {
+      type: "friend_request_updated",
+      payload: { request_id: 42, status: "pending" },
+    });
+    expect(onServerFrame).toHaveBeenNthCalledWith(2, {
+      type: "friend_request_updated",
+      payload: { request_id: 43, status: "accepted" },
+    });
+    expect(onServerFrame).toHaveBeenNthCalledWith(3, {
+      type: "friend_request_updated",
+      payload: { request_id: 44, status: "rejected" },
+    });
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it("rejects a friend request update with an unknown status", () => {
+    // 测试目标：验证不在 friend request 状态联合中的值不会进入业务回调。
+    // 构造方法：认证测试 socket 后注入包含未知 status 的好友申请推送。
+    // 输入数据：request_id=42、status=cancelled。
+    // 预期行为：客户端报告非法服务端帧并关闭 socket，业务回调不被调用。
+    vi.useFakeTimers();
+    const socket = new MockWebSocket();
+    const onStateChange = vi.fn();
+    const onServerFrame = vi.fn();
+    connectChatWebSocket({
+      session: testSession,
+      onStateChange,
+      onServerFrame,
+      webSocketFactory: () => socket,
+      requestIdFactory: () => "req-1",
+    });
+    authenticateSocket(socket);
+
+    socket.receive(JSON.stringify({
+      type: "friend_request_updated",
+      payload: { request_id: 42, status: "cancelled" },
+    }));
+
+    expect(onStateChange).toHaveBeenCalledWith({ status: "error", message: "invalid chat server frame" });
+    expect(onServerFrame).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+  });
+
   it("rejects server_accepted when its envelope and message client ids disagree", () => {
     // 测试目标：验证请求关联字段不一致的 accepted 帧不能被当作合法确认处理。
     // 构造方法：认证测试 socket 后注入外层和内层 client_message_id 不同的 server_accepted JSON。

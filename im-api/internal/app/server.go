@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/0Whisperos/whisper/im-server/internal/config"
+	"github.com/0Whisperos/whisper/im-server/internal/global"
 	"github.com/0Whisperos/whisper/im-server/internal/logging"
 	"github.com/0Whisperos/whisper/im-server/internal/repository/mysql"
 	redisrepo "github.com/0Whisperos/whisper/im-server/internal/repository/redis"
@@ -41,6 +42,7 @@ func RunServer(configPath string) error {
 		return err
 	}
 	auth.SetTokenConfig([]byte(cfg.Auth.JWTSecret), accessTokenTTL, refreshTokenTTL)
+	global.ChatRPCSecret = cfg.ChatRPCSecret
 	engine := router.New(cfg.CORS.AllowedOrigins)
 	return engine.Run(cfg.Server.ListenAddr)
 }

@@ -42,6 +42,8 @@ auth:
   access_token_ttl: 15m
   refresh_token_ttl: 720h
 
+chat_rpc_secret: test-chat-rpc-secret
+
 cors:
   allowed_origins:
     - http://127.0.0.1:1420

@@ -64,7 +64,8 @@ func validConfig() Config {
 			AccessTokenTTL:  "15m",
 			RefreshTokenTTL: "720h",
 		},
-		CORS: CORSConfig{AllowedOrigins: []string{"http://127.0.0.1:1420"}},
+		ChatRPCSecret: "development-chat-rpc-secret",
+		CORS:          CORSConfig{AllowedOrigins: []string{"http://127.0.0.1:1420"}},
 		Seed: SeedConfig{Users: []SeedUserConfig{
 			{Account: "00100001", Password: "development-password"},
 			{Account: "00100002", Password: "development-password"},
@@ -118,6 +119,7 @@ auth:
   jwt_secret: development-secret
   access_token_ttl: 15m
   refresh_token_ttl: 720h
+chat_rpc_secret: development-chat-rpc-secret
 cors:
   allowed_origins:
     - http://127.0.0.1:1420
@@ -183,6 +185,7 @@ func TestValidateServerRejectsMissingRequiredValues(t *testing.T) {
 		{name: "invalid redis port", change: func(config *Config) { config.Redis.Port = 70000 }},
 		{name: "invalid redis db", change: func(config *Config) { config.Redis.DB = -1 }},
 		{name: "empty jwt secret", change: func(config *Config) { config.Auth.JWTSecret = "" }},
+		{name: "empty chat rpc secret", change: func(config *Config) { config.ChatRPCSecret = "" }},
 		{name: "empty cors origins", change: func(config *Config) { config.CORS.AllowedOrigins = nil }},
 	}
 
