@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Whisper · 添加好友蓝图</title>
+    <link rel="stylesheet" href="authenticated-preview.css" />
+    <link rel="stylesheet" href="friend-request-blueprint.css" />
+    <script src="friend-request-blueprint.js" defer></script>
+  </head>
+  <body>
+    <div class="friend-blueprint" data-blueprint-root>
+      <header class="bp-demo-bar">
+        <div class="bp-demo-heading">
+          <span class="bp-demo-mark" aria-hidden="true">W</span>
+          <div>
+            <strong>添加好友 · 交互蓝图</strong>
+            <small>用两个账号体验发送与接收申请</small>
+          </div>
+        </div>
+        <div class="bp-demo-controls">
+          <span class="bp-control-label">当前账号</span>
+          <div class="bp-segmented" role="group" aria-label="切换演示账号">
+            <button type="button" data-switch-user="a" aria-pressed="true">林澈</button>
+            <button type="button" data-switch-user="b" aria-pressed="false">周宁</button>
+          </div>
+          <span class="bp-current-user" data-current-user aria-live="polite">林澈 · 00100001</span>
+          <button class="bp-online-toggle" type="button" data-toggle-peer-online aria-pressed="true">对方在线</button>
+          <span class="bp-peer-notice" data-peer-notice aria-live="polite">对方在线，可实时看到申请</span>
+        </div>
+      </header>
+
+      <div class="bp-app">
+        <aside class="bp-rail" aria-label="主导航预览">
+          <div class="bp-rail-avatar" aria-hidden="true">林</div>
+          <div class="bp-rail-logo" aria-hidden="true">W</div>
+          <div class="bp-rail-item" aria-label="消息" title="消息" aria-hidden="true">◌</div>
+          <div class="bp-rail-item is-current" aria-label="好友" title="好友" aria-hidden="true">♧</div>
+        </aside>
+
+        <section class="bp-workspace" aria-label="好友界面">
+          <header class="bp-workspace-head">
+            <div>
+              <span class="bp-eyebrow">通讯录</span>
+              <h1>好友</h1>
+            </div>
+            <div class="bp-view-head">
+              <h2 data-view-title>好友申请</h2>
+              <div class="bp-request-direction" data-request-direction-group role="group" aria-label="申请方向">
+                <button type="button" data-request-direction="incoming" aria-pressed="true">收到的申请</button>
+                <button type="button" data-request-direction="outgoing" aria-pressed="false">发出的申请</button>
+              </div>
+              <output data-status role="status" aria-live="polite"></output>
+            </div>
+          </header>
+
+          <div class="bp-workspace-body">
+            <nav class="bp-contact-list" aria-label="好友操作">
+              <div class="bp-list-heading">发现</div>
+              <button class="bp-nav-row bp-add-row" type="button" data-open-search>
+                <span class="bp-row-icon bp-row-icon-blue" aria-hidden="true">+</span>
+                <span class="bp-row-copy"><strong>朋友</strong><small>通过账号搜索</small></span>
+                <span class="bp-row-chevron" aria-hidden="true">›</span>
+              </button>
+              <button class="bp-nav-row" type="button" data-group-preview>
+                <span class="bp-row-icon bp-row-icon-muted" aria-hidden="true">+</span>
+                <span class="bp-row-copy"><strong>群聊</strong><small>敬请期待</small></span>
+                <span class="bp-row-chevron" aria-hidden="true">›</span>
+              </button>
+
+              <div class="bp-list-heading bp-list-heading-spaced">通知</div>
+              <button class="bp-nav-row bp-request-row is-selected" type="button" data-open-requests>
+                <span class="bp-row-icon bp-row-icon-green" aria-hidden="true">♧</span>
+                <span class="bp-row-copy"><strong>新的朋友</strong><small>查看好友申请</small></span>
+                <span class="bp-pending-count" data-pending-count hidden>0</span>
+                <span class="bp-row-chevron" aria-hidden="true">›</span>
+              </button>
+
+              <div class="bp-list-heading bp-list-heading-spaced">联系人</div>
+              <p class="bp-empty-list">好友将在这里出现</p>
+              <div data-friend-list></div>
+            </nav>
+
+            <main class="bp-detail-panel" data-detail-panel aria-label="好友申请详情">
+              <div class="bp-detail-empty">
+                <div class="bp-empty-icon" aria-hidden="true">✉</div>
+                <p>收到的申请会出现在这里。选择一条申请，可查看对方的昵称、账号与验证信息。</p>
+                <button type="button" class="bp-link-button" data-open-search>先去添加朋友 <span aria-hidden="true">→</span></button>
+              </div>
+            </main>
+          </div>
+        </section>
+      </div>
+
+      <div class="bp-dialog-backdrop" data-search-dialog role="dialog" aria-modal="true" aria-labelledby="bp-search-title" hidden>
+        <section class="bp-dialog bp-search-dialog">
+          <header class="bp-dialog-head">
+            <div><span class="bp-eyebrow">添加好友</span><h2 id="bp-search-title">搜索账号</h2></div>
+            <button class="bp-close-button" type="button" data-close-search aria-label="关闭搜索">×</button>
+          </header>
+          <p class="bp-dialog-intro">目前仅支持通过完整账号查找用户。</p>
+          <form class="bp-search-form" data-search-form>
+            <label class="bp-field-label" for="bp-account-input">对方账号</label>
+            <div class="bp-search-line">
+              <input id="bp-account-input" data-account-input type="search" autocomplete="off" inputmode="numeric" placeholder="例如：00100002" />
+              <button class="bp-primary-button" type="submit" data-search-submit>搜索</button>
+            </div>
+          </form>
+          <div class="bp-search-results" aria-live="polite">
+            <div class="bp-result-heading">搜索结果</div>
+            <div class="bp-result-placeholder" data-search-placeholder>输入账号后点击“搜索”</div>
+            <div data-search-result hidden></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="bp-dialog-backdrop" data-apply-dialog role="dialog" aria-modal="true" aria-labelledby="bp-apply-title" hidden>
+        <section class="bp-dialog bp-apply-dialog">
+          <header class="bp-dialog-head">
+            <div><span class="bp-eyebrow">新的朋友</span><h2 id="bp-apply-title">申请添加好友</h2></div>
+            <button class="bp-close-button" type="button" data-cancel-apply aria-label="关闭申请">×</button>
+          </header>
+          <div class="bp-apply-target" data-apply-target></div>
+          <label class="bp-field-label" for="bp-verification-input">验证信息</label>
+          <textarea id="bp-verification-input" data-verification-input rows="4" maxlength="200" placeholder="介绍一下自己，让对方知道你是谁"></textarea>
+          <p class="bp-field-hint">对方将在好友申请详情中看到这段信息。</p>
+          <div class="bp-dialog-actions">
+            <button class="bp-secondary-button" type="button" data-cancel-apply>取消</button>
+            <button class="bp-primary-button" type="button" data-send-request>发送申请</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>
