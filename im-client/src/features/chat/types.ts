@@ -117,6 +117,33 @@ export interface ChatFriendDto extends ChatUserProfileDto {
   conversationId: number | null;
 }
 
+export type FriendRequestStatus = "pending" | "accepted" | "rejected";
+export type FriendRequestDirection = "incoming" | "outgoing";
+
+export interface FriendRequestUserDto {
+  userId: number;
+  account: string;
+  nickname: string;
+  signature: string;
+  avatarObjectKey: string | null;
+}
+
+export interface FriendRequestDto {
+  requestId: string;
+  sender: FriendRequestUserDto;
+  recipient: FriendRequestUserDto;
+  verificationMessage: string;
+  status: FriendRequestStatus;
+  createdAt: string;
+}
+
+export interface FriendRequestPageDto {
+  requests: FriendRequestDto[];
+  pendingCount: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 export interface ChatMessageDto {
   messageId: string;
   conversationId: number;

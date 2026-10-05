@@ -13,7 +13,8 @@ export type ChatApiErrorCode =
   | "not_conversation_member"
   | "invalid_pagination"
   | "internal_error"
-  | "network_error";
+  | "network_error"
+  | "friend_request_pending";
 
 export class ChatApiError extends Error {
   constructor(readonly code: ChatApiErrorCode) {
@@ -116,7 +117,8 @@ function isChatApiErrorCode(value: unknown): value is ChatApiErrorCode {
     || value === "not_conversation_member"
     || value === "invalid_pagination"
     || value === "internal_error"
-    || value === "network_error";
+    || value === "network_error"
+    || value === "friend_request_pending";
 }
 
 function parseUserProfile(value: unknown): ChatUserProfileDto | null {

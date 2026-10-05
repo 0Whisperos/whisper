@@ -281,11 +281,49 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     setData(updater);
   }, []);
 
+  const refreshFriends = useCallback(async () => {
+    try {
+      const friends = await loadFriends(apiBaseUrl, session.accessToken);
+      setData((current) => {
+        if (!current) return current;
+        const refreshed = buildChatData({
+          userId: current.self.userId,
+          account: current.self.account,
+          nickname: current.self.name,
+          signature: current.self.signature ?? "",
+          avatarObjectKey: current.self.avatarObjectKey ?? null,
+        }, friends);
+        const conversations = { ...refreshed.conversations };
+        for (const [id, conversation] of Object.entries(conversations)) {
+          const previous = current.conversations[Number(id)];
+          if (previous) {
+            conversations[Number(id)] = {
+              ...conversation,
+              ...previous,
+              name: conversation.name,
+              avatar: conversation.avatar,
+              tone: conversation.tone,
+              participants: conversation.participants,
+            };
+          }
+        }
+        const sessions = refreshed.sessions.map((sessionItem) => {
+          const previous = current.sessions.find((item) => item.conversationId === sessionItem.conversationId);
+          return previous ? { ...sessionItem, ...previous, name: sessionItem.name, avatar: sessionItem.avatar, tone: sessionItem.tone } : sessionItem;
+        });
+        return { ...refreshed, conversations, sessions };
+      });
+    } catch {
+      // The next request refresh can recover; keep the current contacts available.
+    }
+  }, [apiBaseUrl, session.accessToken]);
+
   return {
     data,
     isLoading,
     error,
     retry: loadInitialData,
+    refreshFriends,
     loadHistory,
     loadOlderHistory,
     retryHistory,
