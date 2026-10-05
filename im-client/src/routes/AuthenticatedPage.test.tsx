@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,10 @@ vi.mock("../features/chat-connection/hooks/useChatConnection", () => ({
 
 vi.mock("../features/chat/hooks/useChatData", () => ({
   useChatData: useChatDataMock,
+}));
+
+vi.mock("../features/chat/hooks/useFriendRequests", () => ({
+  useFriendRequests: () => ({ incoming: [], outgoing: [], incomingHasMore: false, outgoingHasMore: false, pendingCount: 0, loading: false, error: null, refresh: vi.fn(async () => undefined), loadMore: vi.fn(async () => undefined) }),
 }));
 
 const session = {
@@ -45,6 +49,7 @@ describe("AuthenticatedPage", () => {
       isLoading: false,
       error: null,
       retry: vi.fn(),
+      refreshFriends: vi.fn(async () => undefined),
       loadHistory: vi.fn(),
       retryHistory: vi.fn(),
       loadingConversationId: null,
@@ -105,6 +110,22 @@ describe("AuthenticatedPage", () => {
     expect(screen.getAllByRole("button", { name: "好友" })[0]).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "林晓" })).toBeInTheDocument();
     expect(screen.getByText(/聊天连接在线：connection-uuid/)).toBeInTheDocument();
+  });
+
+  it("reloads friend requests and friend data after a friend request push", async () => {
+    // 测试目标：验证收到 friend_request_updated WebSocket 帧后重新加载收发申请首屏和好友列表。
+    // 构造方法：mock 已认证连接并渲染页面，从连接配置中取出 onServerFrame 回调后注入申请更新帧。
+    // 输入数据：type=friend_request_updated，payload 含 request_id=req-1、status=accepted。
+    // 预期行为：好友列表刷新回调执行，申请 hook 的 refresh 也会执行。
+    const refreshFriends = vi.fn(async () => undefined);
+    useChatDataMock.mockReturnValue({ data: chatMockData, isLoading: false, error: null, retry: vi.fn(), refreshFriends, loadHistory: vi.fn(), retryHistory: vi.fn(), loadingConversationId: null, historyError: () => null, updateData: vi.fn() });
+    useChatConnectionMock.mockReturnValue({ state: { status: "authenticated", userId: 20001, connectionId: "connection-1", accessTokenExpiresAt: session.accessTokenExpiresAt } satisfies ChatConnectionState, close: vi.fn(), sendTextMessage: vi.fn(), sendDeliveredAck: vi.fn(), sendReadAck: vi.fn() });
+    render(<AuthenticatedPage apiBaseUrl="http://127.0.0.1:8080" session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
+
+    const connectionOptions = useChatConnectionMock.mock.calls.at(-1)?.[0] as { onServerFrame: (frame: { type: string; payload: { request_id: string; status: string } }) => void };
+    await act(async () => connectionOptions.onServerFrame({ type: "friend_request_updated", payload: { request_id: "req-1", status: "accepted" } }));
+
+    expect(refreshFriends).toHaveBeenCalledTimes(1);
   });
 
   it("coordinates authenticated send requests through chat data and the WebSocket transport", async () => {

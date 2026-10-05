@@ -6,6 +6,7 @@ import { useChatDrafts } from "../hooks/useChatDrafts";
 import { useChatLayout } from "../hooks/useChatLayout";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useThemeMode } from "../hooks/useThemeMode";
+import type { useFriendRequests } from "../hooks/useFriendRequests";
 import { AccountMenu } from "./AccountMenu";
 import { BottomNav } from "./BottomNav";
 import { ChatPanel } from "./ChatPanel";
@@ -31,6 +32,10 @@ interface AuthenticatedShellProps {
   retryConversationHistory?: (conversationId: number) => void;
   loadingConversationId?: number | null;
   getConversationHistoryError?: (conversationId: number) => ChatApiError | null;
+  friendRequests?: ReturnType<typeof useFriendRequests>;
+  onRefreshFriends?: () => Promise<void>;
+  apiBaseUrl?: string;
+  accessToken?: string;
 }
 
 export function AuthenticatedShell({
@@ -49,6 +54,10 @@ export function AuthenticatedShell({
   retryConversationHistory,
   loadingConversationId = null,
   getConversationHistoryError = () => null,
+  friendRequests = EMPTY_FRIEND_REQUESTS,
+  onRefreshFriends = async () => undefined,
+  apiBaseUrl = "",
+  accessToken = "",
 }: AuthenticatedShellProps) {
   const workspace = useChatWorkspace(data);
   const drafts = useChatDrafts(workspace.activeConversationId);
@@ -230,6 +239,11 @@ export function AuthenticatedShell({
         onEnterConversation={handleEnterContactConversation}
         onReturnToContacts={workspace.returnToContacts}
         onToolPreview={(name) => showToolPreview(name, "contacts")}
+        self={data.self}
+        friendRequests={friendRequests}
+        onRefreshFriends={onRefreshFriends}
+        apiBaseUrl={apiBaseUrl}
+        accessToken={accessToken}
       />
       <ConversationDetailPanel
         panelRef={detailPanelRef}
@@ -255,3 +269,10 @@ export function AuthenticatedShell({
     </main>
   );
 }
+
+const EMPTY_FRIEND_REQUESTS = {
+  incoming: [], outgoing: [], incomingHasMore: false, outgoingHasMore: false,
+  pendingCount: 0, loading: false, error: null,
+  refresh: async () => undefined,
+  loadMore: async () => undefined,
+} as unknown as ReturnType<typeof useFriendRequests>;

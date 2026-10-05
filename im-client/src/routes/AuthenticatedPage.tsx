@@ -6,6 +6,7 @@ import { AuthenticatedShell } from "../features/chat/components/AuthenticatedShe
 import { useChatData } from "../features/chat/hooks/useChatData";
 import { useChatMessaging } from "../features/chat/hooks/useChatMessaging";
 import type { AuthSession } from "../features/login/types";
+import { useFriendRequests } from "../features/chat/hooks/useFriendRequests";
 
 interface AuthenticatedPageProps {
   apiBaseUrl: string;
@@ -23,6 +24,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     refreshSession,
     onServerFrame: (frame) => serverFrameHandlerRef.current(frame),
   });
+  const friendRequests = useFriendRequests(apiBaseUrl, session.accessToken, chatConnection.state.status === "authenticated");
   const pendingDeliveredAcksRef = useRef(new Map<number, number>());
   const pendingReadAcksRef = useRef(new Map<number, number>());
   const sendDeliveredAck = useCallback((conversationId: number, deliveredSeq: number) => {
@@ -70,7 +72,14 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     sendReadAck,
     reloadHistory: chatData.retryHistory,
   });
-  serverFrameHandlerRef.current = messaging.handleServerFrame;
+  serverFrameHandlerRef.current = (frame) => {
+    if (frame.type === "friend_request_updated") {
+      void friendRequests.refresh();
+      void chatData.refreshFriends();
+      return;
+    }
+    messaging.handleServerFrame(frame);
+  };
 
   const canSendMessages = chatConnection.state.status === "authenticated";
 
@@ -117,6 +126,10 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
       retryConversationHistory={chatData.retryHistory}
       loadingConversationId={chatData.loadingConversationId}
       getConversationHistoryError={chatData.historyError}
+      friendRequests={friendRequests}
+      onRefreshFriends={chatData.refreshFriends}
+      apiBaseUrl={apiBaseUrl}
+      accessToken={session.accessToken}
     />
   );
 }

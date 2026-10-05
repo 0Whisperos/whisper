@@ -71,16 +71,18 @@ describe("AuthenticatedShell", () => {
   it("keeps contact shortcuts and shows the empty friend message instead of a fake profile", async () => {
     // 测试目标：验证无好友时仅替换右侧联系人资料，保留左侧系统入口。
     // 构造方法：用空联系人数据渲染工作台并切换到好友视图。
-    // 输入数据：联系人与分组为空，好友页的添加好友和系统入口仍由组件提供。
+    // 输入数据：联系人为空，好友页仍展示发现入口、通知入口和联系人空状态。
     // 预期行为：资料区域中央显示“当前没有好友”，不显示头像、资料字段或发消息按钮。
     const user = userEvent.setup();
     renderShellWithData(noFriendsData());
     await user.click(screen.getAllByRole("button", { name: "好友" })[0]);
 
     expect(screen.getByText("当前没有好友")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "添加好友" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新的朋友" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "群聊" })).toBeInTheDocument();
+    expect(screen.getByText("发现")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /朋友.*通过账号搜索/ })).toBeInTheDocument();
+    expect(screen.getByText("通知")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /新的朋友.*查看好友申请/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /群聊.*敬请期待/ })).toBeInTheDocument();
     expect(screen.queryByText(/^备注：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^账号：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^地区：/)).not.toBeInTheDocument();
