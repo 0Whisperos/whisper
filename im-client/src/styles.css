@@ -1470,7 +1470,7 @@ canvas {
   font-size: 11px;
 }
 
-.auth-shell .auth-send-button:not(:disabled) {
+.auth-send-button {
   grid-column: 2;
   grid-row: 3;
   min-height: 36px;
@@ -1478,8 +1478,11 @@ canvas {
   border: 0;
   border-radius: var(--auth-radius);
   background: var(--brand);
-  color: #ffffff;
   cursor: pointer;
+}
+
+.auth-shell .auth-send-button {
+  color: #ffffff;
 }
 
 .auth-send-button:disabled {
