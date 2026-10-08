@@ -1,15 +1,19 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthenticatedPage } from "./AuthenticatedPage";
 import { ChatApiError } from "../features/chat/api";
 import type { ChatConnectionState } from "../features/chat-connection/types";
+import { AvatarResourceCache } from "../features/chat/avatarResourceCache";
 import { chatMockData } from "../features/chat/mockData";
 
-const { useChatConnectionMock, useChatDataMock } = vi.hoisted(() => ({
+const { saveCurrentProfileMock, updateSelfProfileMock, useChatConnectionMock, useChatDataMock, exportAvatarCropMock } = vi.hoisted(() => ({
+  saveCurrentProfileMock: vi.fn(),
+  updateSelfProfileMock: vi.fn(),
   useChatConnectionMock: vi.fn(),
   useChatDataMock: vi.fn(),
+  exportAvatarCropMock: vi.fn(),
 }));
 
 vi.mock("../features/chat-connection/hooks/useChatConnection", () => ({
@@ -18,6 +22,15 @@ vi.mock("../features/chat-connection/hooks/useChatConnection", () => ({
 
 vi.mock("../features/chat/hooks/useChatData", () => ({
   useChatData: useChatDataMock,
+}));
+
+vi.mock("../features/chat/profileApi", () => ({
+  saveCurrentProfile: saveCurrentProfileMock,
+}));
+
+vi.mock("../features/chat/components/avatarCrop", () => ({
+  AVATAR_CROP_VIEWPORT_SIZE: 280,
+  exportAvatarCrop: exportAvatarCropMock,
 }));
 
 vi.mock("../features/chat/hooks/useFriendRequests", () => ({
@@ -35,8 +48,14 @@ const session = {
 
 describe("AuthenticatedPage", () => {
   beforeEach(() => {
+    saveCurrentProfileMock.mockReset();
+    updateSelfProfileMock.mockReset();
     useChatConnectionMock.mockReset();
     useChatDataMock.mockReset();
+    exportAvatarCropMock.mockReset();
+    exportAvatarCropMock.mockResolvedValue(new File(["cropped"], "avatar.png", { type: "image/png" }));
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:page-avatar") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
     useChatConnectionMock.mockReturnValue({
       state: { status: "closed" } satisfies ChatConnectionState,
       close: vi.fn(),
@@ -55,7 +74,12 @@ describe("AuthenticatedPage", () => {
       loadingConversationId: null,
       historyError: () => null,
       updateData: vi.fn(),
+      updateSelfProfile: updateSelfProfileMock,
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("keeps the authenticated page available for retry when chat data loading fails", async () => {
@@ -206,4 +230,128 @@ describe("AuthenticatedPage", () => {
 
     expect(events).toEqual(["close", "logout"]);
   });
+
+  it("updates text-only profile data without priming an avatar resource", async () => {
+    // 测试目标：验证页面层纯昵称和个签保存成功后只更新 useChatData 的当前用户资料。
+    // 构造方法：mock 资料保存响应，打开编辑器修改两个文本字段并提交，同时监视头像缓存 prime。
+    // 输入数据：昵称“页面昵称”、个签“页面个签”、头像操作 keep。
+    // 预期行为：saveCurrentProfile 收到纯文字输入，updateSelfProfile 收到响应，prime 不执行。
+    const updatedProfile = profileDto({ nickname: "页面昵称", signature: "页面个签" });
+    saveCurrentProfileMock.mockResolvedValueOnce(updatedProfile);
+    const prime = vi.spyOn(AvatarResourceCache.prototype, "prime");
+    const user = userEvent.setup();
+    render(<AuthenticatedPage apiBaseUrl="http://127.0.0.1:8080" session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
+    await openProfileEditor(user);
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    const nickname = within(dialog).getByRole("textbox", { name: /昵称/ });
+    const signature = within(dialog).getByRole("textbox", { name: /个签/ });
+    await user.clear(nickname);
+    await user.type(nickname, "页面昵称");
+    await user.clear(signature);
+    await user.type(signature, "页面个签");
+
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(saveCurrentProfileMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8080",
+      "jwt-access-token",
+      { nickname: "页面昵称", signature: "页面个签", avatar: { action: "keep" } },
+    ));
+    expect(prime).not.toHaveBeenCalled();
+    expect(updateSelfProfileMock).toHaveBeenCalledWith(updatedProfile);
+  });
+
+  it("primes the committed avatar key before updating the shared profile state", async () => {
+    // 测试目标：验证头像保存采用服务端响应的 committed key，并按 prime 后 updateSelfProfile 的顺序发布资料。
+    // 构造方法：mock 保存响应返回不同于上传 pending key 的 committed key，记录缓存和资料更新调用顺序。
+    // 输入数据：new-avatar.webp 源图、裁剪后 avatar.png、响应 avatar_object_key=avatars/7/committed.png。
+    // 预期行为：File 交给保存 API，缓存以 committed key 预热，然后资料状态使用同一响应更新。
+    const events: string[] = [];
+    const committedProfile = profileDto({ avatarObjectKey: "avatars/7/committed.png" });
+    saveCurrentProfileMock.mockImplementationOnce(async () => {
+      events.push("save");
+      return committedProfile;
+    });
+    const prime = vi.spyOn(AvatarResourceCache.prototype, "prime").mockImplementation((objectKey) => {
+      events.push(`prime:${objectKey}`);
+    });
+    updateSelfProfileMock.mockImplementation((profile: { avatarObjectKey: string | null }) => {
+      events.push(`update:${profile.avatarObjectKey}`);
+    });
+    const user = userEvent.setup();
+    render(<AuthenticatedPage apiBaseUrl="http://127.0.0.1:8080" session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
+    await openProfileEditor(user);
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    const file = new File(["image"], "new-avatar.webp", { type: "image/webp" });
+    const croppedFile = new File(["cropped"], "avatar.png", { type: "image/png" });
+    exportAvatarCropMock.mockResolvedValueOnce(croppedFile);
+    await user.upload(within(dialog).getByLabelText("选择头像图片"), file);
+    const cropImage = screen.getByRole("img", { name: "待裁剪图片" });
+    Object.defineProperty(cropImage, "naturalWidth", { configurable: true, value: 600 });
+    Object.defineProperty(cropImage, "naturalHeight", { configurable: true, value: 400 });
+    fireEvent.load(cropImage);
+    await user.click(screen.getByRole("button", { name: "使用此头像" }));
+
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(updateSelfProfileMock).toHaveBeenCalledWith(committedProfile));
+    expect(saveCurrentProfileMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8080",
+      "jwt-access-token",
+      expect.objectContaining({ avatar: { action: "replace", file: croppedFile } }),
+    );
+    expect(prime).toHaveBeenCalledWith("avatars/7/committed.png", croppedFile);
+    expect(events).toEqual(["save", "prime:avatars/7/committed.png", "update:avatars/7/committed.png"]);
+  });
+
+  it("does not prime or update profile state when remote saving fails", async () => {
+    // 测试目标：验证上传或资料提交失败时页面层不发布任何头像缓存或个人资料变更。
+    // 构造方法：让 saveCurrentProfile 拒绝，选择头像后提交并观察缓存、资料状态和错误界面。
+    // 输入数据：failed.png 文件和 upload_failed 异常。
+    // 预期行为：编辑器保留并显示失败提示，prime 与 updateSelfProfile 都不执行。
+    saveCurrentProfileMock.mockRejectedValueOnce(new Error("upload_failed"));
+    const prime = vi.spyOn(AvatarResourceCache.prototype, "prime");
+    const user = userEvent.setup();
+    const { unmount } = render(<AuthenticatedPage apiBaseUrl="http://127.0.0.1:8080" session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
+    await openProfileEditor(user);
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    await user.upload(
+      within(dialog).getByLabelText("选择头像图片"),
+      new File(["image"], "failed.png", { type: "image/png" }),
+    );
+    const cropImage = screen.getByRole("img", { name: "待裁剪图片" });
+    Object.defineProperty(cropImage, "naturalWidth", { configurable: true, value: 400 });
+    Object.defineProperty(cropImage, "naturalHeight", { configurable: true, value: 400 });
+    fireEvent.load(cropImage);
+    await user.click(screen.getByRole("button", { name: "使用此头像" }));
+
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("资料保存失败，请稍后重试");
+    expect(prime).not.toHaveBeenCalled();
+    expect(updateSelfProfileMock).not.toHaveBeenCalled();
+    unmount();
+  });
 });
+
+async function openProfileEditor(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getAllByRole("button", { name: "账号与设置" })[0]);
+  await user.click(screen.getByRole("button", { name: "编辑" }));
+}
+
+function profileDto(overrides: Partial<{
+  userId: number;
+  account: string;
+  nickname: string;
+  signature: string;
+  avatarObjectKey: string | null;
+}> = {}) {
+  return {
+    userId: 20001,
+    account: "lin@whisper.local",
+    nickname: "林澈",
+    signature: "",
+    avatarObjectKey: null,
+    ...overrides,
+  };
+}

@@ -9,6 +9,7 @@ interface AccountMenuProps {
   hidden: boolean;
   themeMode: ThemeMode;
   isLoggingOut: boolean;
+  onEditProfile: () => void;
   onSelectTheme: (mode: ThemeMode) => void;
   onLogout: () => void;
 }
@@ -19,7 +20,7 @@ const themeOptions: Array<{ mode: ThemeMode; label: string }> = [
   { mode: "dark", label: "深色" },
 ];
 
-export function AccountMenu({ self, menuRef, hidden, themeMode, isLoggingOut, onSelectTheme, onLogout }: AccountMenuProps) {
+export function AccountMenu({ self, menuRef, hidden, themeMode, isLoggingOut, onEditProfile, onSelectTheme, onLogout }: AccountMenuProps) {
   const handleThemeKeyDown = (event: KeyboardEvent<HTMLFieldSetElement>) => {
     if (!["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"].includes(event.key)) {
       return;
@@ -50,11 +51,12 @@ export function AccountMenu({ self, menuRef, hidden, themeMode, isLoggingOut, on
       hidden={hidden}
     >
       <div className="auth-account-summary">
-        <Avatar avatar={self.avatar} tone={self.tone} />
+        <Avatar avatar={self.avatar} tone={self.tone} imageUrl={self.avatarImageUrl} />
         <span>
           <strong>{self.name}</strong>
           <small>{self.account}</small>
         </span>
+        <button className="auth-profile-edit-button" type="button" onClick={onEditProfile}>编辑</button>
       </div>
       <fieldset className="auth-theme-options" role="radiogroup" onKeyDown={handleThemeKeyDown}>
         <legend>外观</legend>

@@ -6,7 +6,10 @@ import { useChatDrafts } from "../hooks/useChatDrafts";
 import { useChatLayout } from "../hooks/useChatLayout";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useThemeMode } from "../hooks/useThemeMode";
+import { useAvatarObjectUrl } from "../hooks/useAvatarObjectUrl";
 import type { useFriendRequests } from "../hooks/useFriendRequests";
+import { AvatarResourceCache } from "../avatarResourceCache";
+import type { EditableSelfProfile } from "../types";
 import { AccountMenu } from "./AccountMenu";
 import { BottomNav } from "./BottomNav";
 import { ChatPanel } from "./ChatPanel";
@@ -14,6 +17,7 @@ import { ContactsPanel } from "./ContactsPanel";
 import { ConversationDetailPanel } from "./ConversationDetailPanel";
 import { FunctionRail } from "./FunctionRail";
 import { IconSprite } from "./ui";
+import { ProfileEditor } from "./ProfileEditor";
 import { SessionPanel } from "./SessionPanel";
 
 interface AuthenticatedShellProps {
@@ -36,6 +40,8 @@ interface AuthenticatedShellProps {
   onRefreshFriends?: () => Promise<void>;
   apiBaseUrl?: string;
   accessToken?: string;
+  avatarResourceCache?: AvatarResourceCache;
+  onSaveProfile: (profile: EditableSelfProfile) => Promise<void>;
 }
 
 export function AuthenticatedShell({
@@ -58,12 +64,30 @@ export function AuthenticatedShell({
   onRefreshFriends = async () => undefined,
   apiBaseUrl = "",
   accessToken = "",
+  avatarResourceCache,
+  onSaveProfile,
 }: AuthenticatedShellProps) {
   const workspace = useChatWorkspace(data);
   const drafts = useChatDrafts(workspace.activeConversationId);
   const layout = useChatLayout();
   const theme = useThemeMode();
+  const fallbackAvatarCacheRef = useRef<AvatarResourceCache | null>(null);
+  if (!fallbackAvatarCacheRef.current) {
+    fallbackAvatarCacheRef.current = new AvatarResourceCache();
+  }
+  const resolvedAvatarCache = avatarResourceCache ?? fallbackAvatarCacheRef.current;
+  const avatarImageUrl = useAvatarObjectUrl(
+    resolvedAvatarCache,
+    apiBaseUrl,
+    accessToken,
+    data.self.avatarObjectKey,
+  );
+  const selfProfile = {
+    ...data.self,
+    avatarImageUrl: avatarImageUrl ?? data.self.avatarImageUrl ?? null,
+  };
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const desktopAccountTriggerRef = useRef<HTMLButtonElement | null>(null);
   const mobileAccountTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -71,7 +95,11 @@ export function AuthenticatedShell({
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const detailPanelRef = useRef<HTMLDivElement | null>(null);
-
+  useEffect(() => () => {
+    if (!avatarResourceCache) {
+      fallbackAvatarCacheRef.current?.clear();
+    }
+  }, [avatarResourceCache]);
   useEffect(() => {
     if (workspace.activeConversationId > 0 && loadConversationHistory) {
       void Promise.resolve(loadConversationHistory(workspace.activeConversationId)).then((deliveredSeq) => {
@@ -99,6 +127,23 @@ export function AuthenticatedShell({
       const fallback = window.innerWidth < 680 ? mobileAccountTriggerRef.current : desktopAccountTriggerRef.current;
       window.setTimeout(() => (fallback ?? lastAccountTriggerRef.current)?.focus(), 0);
     }
+  };
+
+  const openProfileEditor = () => {
+    setIsAccountMenuOpen(false);
+    setIsDetailOpen(false);
+    setIsProfileEditorOpen(true);
+  };
+
+  const closeProfileEditor = () => {
+    setIsProfileEditorOpen(false);
+    window.setTimeout(() => lastAccountTriggerRef.current?.focus(), 0);
+  };
+
+  const saveProfile = async (profile: EditableSelfProfile) => {
+    await onSaveProfile(profile);
+    setIsProfileEditorOpen(false);
+    window.setTimeout(() => lastAccountTriggerRef.current?.focus(), 0);
   };
 
   const openDetailPanel = (trigger: HTMLButtonElement) => {
@@ -143,6 +188,9 @@ export function AuthenticatedShell({
       if (isAccountMenuOpen) {
         closeAccountMenu(true);
       }
+      if (isProfileEditorOpen) {
+        closeProfileEditor();
+      }
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -151,7 +199,7 @@ export function AuthenticatedShell({
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isAccountMenuOpen, isDetailOpen]);
+  }, [isAccountMenuOpen, isDetailOpen, isProfileEditorOpen]);
 
   const handleSelectView = (nextView: "messages" | "contacts") => {
     setIsAccountMenuOpen(false);
@@ -183,7 +231,7 @@ export function AuthenticatedShell({
     >
       <IconSprite />
       <FunctionRail
-        self={data.self}
+        self={selfProfile}
         view={workspace.view}
         accountButtonRef={desktopAccountTriggerRef}
         isAccountMenuOpen={isAccountMenuOpen}
@@ -204,7 +252,7 @@ export function AuthenticatedShell({
         <>
           <ChatPanel
             conversation={workspace.activeConversation}
-            self={data.self}
+            self={selfProfile}
             connectionLabel={connectionLabel}
             draft={drafts.draft}
             canSend={drafts.canSend && canSendMessages}
@@ -239,7 +287,7 @@ export function AuthenticatedShell({
         onEnterConversation={handleEnterContactConversation}
         onReturnToContacts={workspace.returnToContacts}
         onToolPreview={(name) => showToolPreview(name, "contacts")}
-        self={data.self}
+        self={selfProfile}
         friendRequests={friendRequests}
         onRefreshFriends={onRefreshFriends}
         apiBaseUrl={apiBaseUrl}
@@ -251,14 +299,16 @@ export function AuthenticatedShell({
         onToolPreview={(name) => showToolPreview(name, "chat")}
       />
       <AccountMenu
-        self={data.self}
+        self={selfProfile}
         menuRef={accountMenuRef}
         hidden={!isAccountMenuOpen}
         themeMode={theme.themeMode}
         isLoggingOut={isLoggingOut}
+        onEditProfile={openProfileEditor}
         onSelectTheme={theme.setThemeMode}
         onLogout={onLogout}
       />
+      {isProfileEditorOpen ? <ProfileEditor self={selfProfile} onSave={saveProfile} onCancel={closeProfileEditor} /> : null}
       <BottomNav
         view={workspace.view}
         accountButtonRef={mobileAccountTriggerRef}

@@ -210,7 +210,7 @@ export function ChatPanel({
                 data-conversation-seq={message.conversationSeq ?? undefined}
                 className={`auth-message-row ${isSelf ? "self" : ""} ${compact ? "compact" : ""}`}
               >
-                <Avatar avatar={profile?.avatar ?? "?"} tone={profile?.tone ?? "gray"} className="auth-message-avatar" />
+                <Avatar avatar={profile?.avatar ?? "?"} tone={profile?.tone ?? "gray"} imageUrl={isSelf ? self.avatarImageUrl : undefined} className="auth-message-avatar" />
                 <div className={`auth-message-body ${message.receipt ? "has-receipt" : ""}`}>
                   {!isSelf && conversation.type === "group" && !compact ? <small className="auth-message-sender">{profile?.name}</small> : null}
                   <div

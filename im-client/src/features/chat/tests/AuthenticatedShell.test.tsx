@@ -1,29 +1,72 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect, useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const { exportAvatarCropMock } = vi.hoisted(() => ({ exportAvatarCropMock: vi.fn() }));
+
+vi.mock("../components/avatarCrop", () => ({
+  AVATAR_CROP_VIEWPORT_SIZE: 280,
+  exportAvatarCrop: exportAvatarCropMock,
+}));
+
+import { AvatarResourceCache } from "../avatarResourceCache";
 import { AuthenticatedShell } from "../components/AuthenticatedShell";
 import { chatMockData } from "../mockData";
-import type { ChatData } from "../types";
+import type { ChatData, EditableSelfProfile } from "../types";
+
+const initialCreateObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+const initialRevokeObjectUrlDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
 
 interface RenderShellOptions {
   canSendMessages?: boolean;
   onSendText?: (conversationId: number, text: string) => boolean | void;
   onRetryMessage?: (clientMessageId: string) => void;
+  onSaveProfile?: (profile: EditableSelfProfile) => Promise<void>;
 }
 
-function renderShell({ canSendMessages, onSendText, onRetryMessage }: RenderShellOptions = {}) {
-  return render(
-    <AuthenticatedShell
-      data={chatMockData}
-      connectionLabel="聊天连接在线：connection-uuid"
-      canSendMessages={canSendMessages}
-      isLoggingOut={false}
-      onLogout={() => undefined}
-      onSendText={onSendText}
-      onRetryMessage={onRetryMessage}
-    />,
-  );
+function renderShell(options: RenderShellOptions = {}) {
+  function ShellHarness() {
+    const [data, setData] = useState(() => structuredClone(chatMockData));
+    const avatarResourceCacheRef = useRef<AvatarResourceCache | null>(null);
+    if (!avatarResourceCacheRef.current) avatarResourceCacheRef.current = new AvatarResourceCache();
+    useEffect(() => () => avatarResourceCacheRef.current?.clear(), []);
+    const saveProfile = async (profile: EditableSelfProfile) => {
+      await options.onSaveProfile?.(profile);
+      const avatarObjectKey = profile.avatar.action === "replace"
+        ? "avatars/test/profile-image"
+        : profile.avatar.action === "remove"
+          ? null
+          : data.self.avatarObjectKey ?? null;
+      if (profile.avatar.action === "replace" && avatarObjectKey) avatarResourceCacheRef.current?.prime(avatarObjectKey, profile.avatar.file);
+      setData((current) => ({
+        ...current,
+        self: {
+          ...current.self,
+          name: profile.name,
+          avatar: Array.from(profile.name)[0] ?? "?",
+          signature: profile.signature,
+          avatarObjectKey,
+        },
+      }));
+    };
+    return (
+      <AuthenticatedShell
+        data={data}
+        connectionLabel="聊天连接在线：connection-uuid"
+        canSendMessages={options.canSendMessages}
+        isLoggingOut={false}
+        onLogout={() => undefined}
+        onSendText={options.onSendText}
+        onRetryMessage={options.onRetryMessage}
+        apiBaseUrl="http://api.test"
+        accessToken="access-token"
+        avatarResourceCache={avatarResourceCacheRef.current}
+        onSaveProfile={saveProfile}
+      />
+    );
+  }
+  return render(<ShellHarness />);
 }
 
 function renderShellWithData(data: ChatData) {
@@ -33,6 +76,7 @@ function renderShellWithData(data: ChatData) {
       connectionLabel="聊天连接在线：connection-uuid"
       isLoggingOut={false}
       onLogout={() => undefined}
+      onSaveProfile={async () => undefined}
     />,
   );
 }
@@ -50,6 +94,12 @@ function noFriendsData(): ChatData {
 afterEach(() => {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   window.localStorage.clear();
+  vi.restoreAllMocks();
+  exportAvatarCropMock.mockReset();
+  if (initialCreateObjectUrlDescriptor) Object.defineProperty(URL, "createObjectURL", initialCreateObjectUrlDescriptor);
+  else Reflect.deleteProperty(URL, "createObjectURL");
+  if (initialRevokeObjectUrlDescriptor) Object.defineProperty(URL, "revokeObjectURL", initialRevokeObjectUrlDescriptor);
+  else Reflect.deleteProperty(URL, "revokeObjectURL");
 });
 
 describe("AuthenticatedShell", () => {
@@ -213,6 +263,7 @@ describe("AuthenticatedShell", () => {
         isLoggingOut={false}
         onLogout={() => undefined}
         onSendText={() => true}
+        onSaveProfile={async () => undefined}
       />,
     );
 
@@ -255,6 +306,7 @@ describe("AuthenticatedShell", () => {
         onLogout={() => undefined}
         onSendText={() => true}
         onRetryMessage={onRetryMessage}
+        onSaveProfile={async () => undefined}
       />,
     );
 
@@ -390,5 +442,276 @@ describe("AuthenticatedShell", () => {
     expect(shell).toHaveAttribute("data-mobile-panel", "contact-detail");
     await user.click(screen.getByRole("button", { name: "返回联系人" }));
     expect(shell).toHaveAttribute("data-mobile-panel", "contacts");
+  });
+
+  it("opens the profile editor with current values and applies saved text to the running profile", async () => {
+    // 测试目标：验证账号菜单可以打开资料编辑器，且保存昵称和个签只更新当前运行界面。
+    // 构造方法：渲染已登录工作台，从账号菜单进入编辑器，修改两个文本字段后保存。
+    // 输入数据：昵称“新昵称”和个签“专注当下”。
+    // 预期行为：编辑器初值与当前资料一致；保存后导航栏和账号菜单显示新昵称，其他账号资料保持不变。
+    const user = userEvent.setup();
+    renderShell();
+    const accountTrigger = screen.getAllByRole("button", { name: "账号与设置" })[0];
+
+    await user.click(accountTrigger);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    const nickname = within(dialog).getByRole("textbox", { name: /昵称/ });
+    const signature = within(dialog).getByRole("textbox", { name: /个签/ });
+    expect(nickname).toHaveValue(chatMockData.self.name);
+    expect(signature).toHaveValue(chatMockData.self.signature ?? "");
+    expect(within(dialog).getByRole("button", { name: "更换头像" })).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/账号|地区|状态/)).not.toBeInTheDocument();
+
+    await user.clear(nickname);
+    await user.type(nickname, "新昵称");
+    await user.type(signature, "专注当下");
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    expect(screen.getByText("新昵称", { selector: ".auth-rail-label" })).toBeInTheDocument();
+    await user.click(accountTrigger);
+    expect(screen.getByRole("dialog", { name: "账号与设置" })).toHaveTextContent("新昵称");
+    expect(screen.getByText(chatMockData.self.account)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const reopenedEditor = screen.getByRole("dialog", { name: "编辑资料" });
+    expect(within(reopenedEditor).getByRole("textbox", { name: /昵称/ })).toHaveValue("新昵称");
+    expect(within(reopenedEditor).getByRole("textbox", { name: /个签/ })).toHaveValue("专注当下");
+  });
+
+  it("submits the reset avatar with the profile form", async () => {
+    // 测试目标：验证点击恢复默认头像只修改草稿，并在提交资料时使用 remove 操作。
+    // 构造方法：打开当前用户资料编辑器，点击恢复按钮后再点击表单保存。
+    // 输入数据：当前头像状态和头像操作 remove。
+    // 预期行为：保存回调收到 avatar.action=remove，工作台切换到默认文字头像。
+    const onSaveProfile = vi.fn(async () => undefined);
+    const user = userEvent.setup();
+    const { container } = renderShell({ onSaveProfile });
+    await user.click(screen.getAllByRole("button", { name: "账号与设置" })[0]);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+
+    await user.click(within(dialog).getByRole("button", { name: "恢复默认头像" }));
+    expect(onSaveProfile).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    expect(onSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ avatar: { action: "remove" } }));
+    await waitFor(() => expect(container.querySelector(".auth-person-avatar img")).toBeNull());
+  });
+
+  it("blocks invalid profile fields and unsupported image extensions with clear errors", async () => {
+    // 测试目标：验证空昵称、超长 Unicode 昵称、超长个签、GIF 和未知文件后缀均不能保存。
+    // 构造方法：打开编辑器，依次提交无效文本并上传非图片扩展名文件。
+    // 输入数据：空白昵称、16 个 emoji、81 个签名字符、portrait.gif 和 notes.txt。
+    // 预期行为：每种无效输入都显示明确错误，编辑器保持打开且不会保存。
+    const user = userEvent.setup({ applyAccept: false });
+    renderShell();
+    await user.click(screen.getAllByRole("button", { name: "账号与设置" })[0]);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    const nickname = within(dialog).getByRole("textbox", { name: /昵称/ });
+    const signature = within(dialog).getByRole("textbox", { name: /个签/ });
+    const save = within(dialog).getByRole("button", { name: "保存" });
+
+    await user.clear(nickname);
+    await user.click(save);
+    expect(screen.getByRole("alert")).toHaveTextContent("请输入昵称");
+
+    await user.type(nickname, "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀");
+    await user.clear(signature);
+    await user.type(signature, "签".repeat(81));
+    await user.click(save);
+    expect(screen.getByText("昵称不能超过 15 个字符。", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("个签不能超过 80 个字符。", { exact: true })).toBeInTheDocument();
+
+    const unsupportedFile = new File(["not an image"], "notes.txt", { type: "text/plain" });
+    await user.upload(within(dialog).getByLabelText("选择头像图片"), unsupportedFile);
+    expect(screen.getByText("请选择 PNG、JPG、WebP 或 BMP 图片。", { exact: true })).toBeInTheDocument();
+    await user.upload(within(dialog).getByLabelText("选择头像图片"), new File(["gif"], "portrait.gif", { type: "image/gif" }));
+    expect(screen.getByText("请选择 PNG、JPG、WebP 或 BMP 图片。", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "编辑资料" })).toBeInTheDocument();
+  });
+
+  it("previews an accepted image, hands the file to saving, and lets the shared cache own the saved image", async () => {
+    // 测试目标：验证选图使用临时 Blob URL 预览，保存时传递 File，并由共享缓存创建正式展示 URL。
+    // 构造方法：替换 URL.createObjectURL/revokeObjectURL 为可观察替身，在资料编辑器连续选择两张图片后保存。
+    // 输入数据：portrait.png、portrait.webp、两张裁剪 PNG，以及 source、preview 和 cache Blob URL。
+    // 预期行为：裁剪源图和替换预览及时释放；多个本人头像使用缓存 URL，卸载时再释放缓存 URL。
+    const originalCreateDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevokeDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce("blob:first-source")
+      .mockReturnValueOnce("blob:first-preview")
+      .mockReturnValueOnce("blob:second-source")
+      .mockReturnValueOnce("blob:profile-preview")
+      .mockReturnValueOnce("blob:cached-avatar");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+
+    const user = userEvent.setup();
+    const onSendText = vi.fn();
+    const onSaveProfile = vi.fn(async () => undefined);
+    const { container, unmount } = renderShell({ onSendText, onSaveProfile });
+    await user.click(screen.getAllByRole("button", { name: "账号与设置" })[0]);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    const imageInput = within(dialog).getByLabelText("选择头像图片");
+    const firstImage = new File(["first image"], "portrait.png", { type: "image/png" });
+    const firstCrop = new File(["first crop"], "avatar.png", { type: "image/png" });
+    exportAvatarCropMock.mockResolvedValueOnce(firstCrop);
+    await user.upload(imageInput, firstImage);
+
+    expect(createObjectURL).toHaveBeenCalledWith(firstImage);
+    const firstCropImage = screen.getByRole("img", { name: "待裁剪图片" });
+    Object.defineProperty(firstCropImage, "naturalWidth", { configurable: true, value: 600 });
+    Object.defineProperty(firstCropImage, "naturalHeight", { configurable: true, value: 400 });
+    fireEvent.load(firstCropImage);
+    await user.click(screen.getByRole("button", { name: "使用此头像" }));
+    expect(dialog.querySelector(".auth-profile-editor-avatar img")).toHaveAttribute("src", "blob:first-preview");
+    await user.upload(imageInput, []);
+    expect(dialog.querySelector(".auth-profile-editor-avatar img")).toHaveAttribute("src", "blob:first-preview");
+
+    const image = new File(["image bytes"], "portrait.webp", { type: "image/webp" });
+    const croppedImage = new File(["cropped image"], "avatar.png", { type: "image/png" });
+    exportAvatarCropMock.mockResolvedValueOnce(croppedImage);
+    await user.upload(imageInput, image);
+    expect(createObjectURL).toHaveBeenLastCalledWith(image);
+    const nextCropImage = screen.getByRole("img", { name: "待裁剪图片" });
+    Object.defineProperty(nextCropImage, "naturalWidth", { configurable: true, value: 400 });
+    Object.defineProperty(nextCropImage, "naturalHeight", { configurable: true, value: 600 });
+    fireEvent.load(nextCropImage);
+    await user.click(screen.getByRole("button", { name: "使用此头像" }));
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:first-preview");
+    expect(dialog.querySelector(".auth-profile-editor-avatar img")).toHaveAttribute("src", "blob:profile-preview");
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+    expect(onSaveProfile).toHaveBeenCalledWith({
+      name: chatMockData.self.name,
+      signature: chatMockData.self.signature ?? "",
+      avatar: { action: "replace", file: croppedImage },
+    });
+    await user.click(screen.getAllByRole("button", { name: "账号与设置" })[0]);
+    await waitFor(() => expect(container.querySelectorAll('.auth-person-avatar img[src="blob:cached-avatar"]').length).toBeGreaterThanOrEqual(2));
+    expect(container.querySelector('.auth-message-avatar img[src="blob:cached-avatar"]')).toBeInTheDocument();
+    expect(onSendText).not.toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:first-source");
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:second-source");
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:first-preview");
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:profile-preview");
+
+    unmount();
+    expect(revokeObjectURL).toHaveBeenCalledTimes(5);
+    expect(revokeObjectURL).toHaveBeenLastCalledWith("blob:cached-avatar");
+    if (originalCreateDescriptor) Object.defineProperty(URL, "createObjectURL", originalCreateDescriptor);
+    else Reflect.deleteProperty(URL, "createObjectURL");
+    if (originalRevokeDescriptor) Object.defineProperty(URL, "revokeObjectURL", originalRevokeDescriptor);
+    else Reflect.deleteProperty(URL, "revokeObjectURL");
+  });
+
+  it("keeps the editor and selected preview when remote profile saving fails", async () => {
+    // 测试目标：验证头像上传或资料提交失败时不会关闭编辑器，也不会覆盖当前运行资料。
+    // 构造方法：让保存回调拒绝，选择图片、修改昵称并点击保存。
+    // 输入数据：failed.png、本地预览 URL blob:failed-preview、昵称“未保存昵称”。
+    // 预期行为：显示保存失败提示，预览仍可见，保存按钮恢复可用，导航栏仍显示旧昵称。
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:failed-preview") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    const user = userEvent.setup();
+    const { unmount } = renderShell({ onSaveProfile: vi.fn(async () => { throw new Error("upload failed"); }) });
+    await user.click(screen.getAllByRole("button", { name: "账号与设置" })[0]);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    const nickname = within(dialog).getByRole("textbox", { name: /昵称/ });
+    await user.clear(nickname);
+    await user.type(nickname, "未保存昵称");
+    exportAvatarCropMock.mockResolvedValueOnce(new File(["cropped"], "avatar.png", { type: "image/png" }));
+    await user.upload(
+      within(dialog).getByLabelText("选择头像图片"),
+      new File(["image"], "failed.png", { type: "image/png" }),
+    );
+    const cropImage = screen.getByRole("img", { name: "待裁剪图片" });
+    Object.defineProperty(cropImage, "naturalWidth", { configurable: true, value: 400 });
+    Object.defineProperty(cropImage, "naturalHeight", { configurable: true, value: 400 });
+    fireEvent.load(cropImage);
+    await user.click(screen.getByRole("button", { name: "使用此头像" }));
+
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("资料保存失败，请稍后重试");
+    expect(dialog.querySelector('.auth-profile-editor-avatar img[src="blob:failed-preview"]')).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeEnabled();
+    expect(screen.getByText(chatMockData.self.name, { selector: ".auth-rail-label" })).toBeInTheDocument();
+    unmount();
+  });
+
+  it("keeps the reset draft and current profile unchanged when saving the reset fails", async () => {
+    // 测试目标：验证清除头像提交失败时编辑器保留清除草稿，当前资料不提前更新。
+    // 构造方法：让保存回调拒绝，打开编辑器点击恢复默认头像并提交。
+    // 输入数据：头像操作 remove 和 upload_failed 保存错误。
+    // 预期行为：显示保存失败提示、编辑器仍打开、未发布资料状态更新。
+    const onSaveProfile = vi.fn(async () => { throw new Error("update_failed"); });
+    const user = userEvent.setup();
+    renderShell({ onSaveProfile });
+    await user.click(screen.getAllByRole("button", { name: "账号与设置" })[0]);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    await user.click(within(dialog).getByRole("button", { name: "恢复默认头像" }));
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("资料保存失败，请稍后重试");
+    expect(onSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ avatar: { action: "remove" } }));
+    expect(within(dialog).getByRole("button", { name: "恢复默认头像" })).toBeDisabled();
+    expect(screen.getByText(chatMockData.self.name, { selector: ".auth-rail-label" })).toBeInTheDocument();
+  });
+
+  it("discards an unsubmitted avatar and restores focus after Escape", async () => {
+    // 测试目标：验证取消编辑会丢弃未保存头像，Escape 可关闭对话框并把焦点交还账号入口。
+    // 构造方法：打开编辑器，聚焦首个按钮后用 Shift+Tab 检查焦点循环，再上传图片并按 Escape。
+    // 输入数据：未保存图片 draft.png、Shift+Tab 和 Escape 键。
+    // 预期行为：焦点循环留在对话框内；Escape 关闭对话框、恢复账号触发器焦点，且头像草稿 URL 被释放。
+    const originalCreateDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevokeDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    const createObjectURL = vi.fn(() => "blob:discarded-preview");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+
+    const user = userEvent.setup();
+    const { container } = renderShell();
+    const accountTrigger = screen.getAllByRole("button", { name: "账号与设置" })[0];
+    await user.click(accountTrigger);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    const cameraButton = within(dialog).getByRole("button", { name: "更换头像" });
+    const fileInput = within(dialog).getByLabelText("选择头像图片");
+    const openPicker = vi.spyOn(fileInput, "click");
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(within(dialog).getByRole("button", { name: "恢复默认头像" })).toHaveFocus();
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(cameraButton).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(openPicker).toHaveBeenCalledOnce();
+
+    const close = within(dialog).getByRole("button", { name: "关闭编辑资料" });
+    close.focus();
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(within(dialog).getByRole("button", { name: "保存" })).toHaveFocus();
+
+    exportAvatarCropMock.mockResolvedValueOnce(new File(["cropped"], "avatar.png", { type: "image/png" }));
+    await user.upload(within(dialog).getByLabelText("选择头像图片"), new File(["bytes"], "draft.png", { type: "image/png" }));
+    const cropImage = screen.getByRole("img", { name: "待裁剪图片" });
+    Object.defineProperty(cropImage, "naturalWidth", { configurable: true, value: 400 });
+    Object.defineProperty(cropImage, "naturalHeight", { configurable: true, value: 400 });
+    fireEvent.load(cropImage);
+    await user.click(screen.getByRole("button", { name: "使用此头像" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "编辑资料" })).not.toBeInTheDocument();
+    await waitFor(() => expect(accountTrigger).toHaveFocus());
+    expect(container.querySelector('.auth-person-avatar img[src="blob:discarded-preview"]')).toBeNull();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:discarded-preview");
+
+    if (originalCreateDescriptor) Object.defineProperty(URL, "createObjectURL", originalCreateDescriptor);
+    else Reflect.deleteProperty(URL, "createObjectURL");
+    if (originalRevokeDescriptor) Object.defineProperty(URL, "revokeObjectURL", originalRevokeDescriptor);
+    else Reflect.deleteProperty(URL, "revokeObjectURL");
   });
 });

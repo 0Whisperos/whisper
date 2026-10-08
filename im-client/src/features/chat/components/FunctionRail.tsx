@@ -35,7 +35,7 @@ export function FunctionRail({
         title="账号与设置"
         onClick={(event) => onOpenAccountMenu(event.currentTarget)}
       >
-        <Avatar avatar={self.avatar} tone={self.tone} className="rail-mark" />
+        <Avatar avatar={self.avatar} tone={self.tone} imageUrl={self.avatarImageUrl} className="rail-mark" />
         <span className="auth-rail-label">{self.name}</span>
       </button>
       <a className="auth-brand" href="#messages" aria-label="Whisper 首页" title="Whisper">

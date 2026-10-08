@@ -281,6 +281,17 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     setData(updater);
   }, []);
 
+  const updateSelfProfile = useCallback((profile: {
+    userId: number;
+    account: string;
+    nickname: string;
+    signature: string;
+    avatarObjectKey: string | null;
+  }) => {
+    const nextSelf = toSelfProfile(profile);
+    setData((current) => current ? { ...current, self: nextSelf } : current);
+  }, []);
+
   const refreshFriends = useCallback(async () => {
     try {
       const friends = await loadFriends(apiBaseUrl, session.accessToken);
@@ -328,6 +339,7 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
     loadOlderHistory,
     retryHistory,
     updateData,
+    updateSelfProfile,
     loadingConversationId,
     historyError: (conversationId: number) => historyErrors[conversationId] ?? null,
     hasMoreHistory: (conversationId: number) => historyAvailability[conversationId] ?? false,

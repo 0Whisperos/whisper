@@ -3,8 +3,11 @@ import { useCallback, useEffect, useRef } from "react";
 import { useChatConnection } from "../features/chat-connection/hooks/useChatConnection";
 import type { ChatBusinessServerFrame, ChatConnectionState } from "../features/chat-connection/types";
 import { AuthenticatedShell } from "../features/chat/components/AuthenticatedShell";
+import { AvatarResourceCache } from "../features/chat/avatarResourceCache";
 import { useChatData } from "../features/chat/hooks/useChatData";
 import { useChatMessaging } from "../features/chat/hooks/useChatMessaging";
+import { saveCurrentProfile } from "../features/chat/profileApi";
+import type { EditableSelfProfile } from "../features/chat/types";
 import type { AuthSession } from "../features/login/types";
 import { useFriendRequests } from "../features/chat/hooks/useFriendRequests";
 
@@ -18,6 +21,11 @@ interface AuthenticatedPageProps {
 
 export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggingOut, onLogout }: AuthenticatedPageProps) {
   const chatData = useChatData(apiBaseUrl, session);
+  const avatarResourceCacheRef = useRef<AvatarResourceCache | null>(null);
+  if (!avatarResourceCacheRef.current) {
+    avatarResourceCacheRef.current = new AvatarResourceCache();
+  }
+  const avatarResourceCache = avatarResourceCacheRef.current;
   const serverFrameHandlerRef = useRef<(frame: ChatBusinessServerFrame) => void>(() => undefined);
   const chatConnection = useChatConnection({
     session,
@@ -27,6 +35,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
   const friendRequests = useFriendRequests(apiBaseUrl, session.accessToken, chatConnection.state.status === "authenticated");
   const pendingDeliveredAcksRef = useRef(new Map<number, number>());
   const pendingReadAcksRef = useRef(new Map<number, number>());
+  useEffect(() => () => avatarResourceCache.clear(), [avatarResourceCache]);
   const sendDeliveredAck = useCallback((conversationId: number, deliveredSeq: number) => {
     if (chatConnection.state.status === "authenticated") {
       chatConnection.sendDeliveredAck(conversationId, deliveredSeq);
@@ -93,7 +102,20 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
 
   function handleLogout() {
     chatConnection.close();
+    avatarResourceCache.clear();
     onLogout();
+  }
+
+  async function handleSaveProfile(profile: EditableSelfProfile) {
+    const updatedProfile = await saveCurrentProfile(apiBaseUrl, session.accessToken, {
+      nickname: profile.name,
+      signature: profile.signature,
+      avatar: profile.avatar,
+    });
+    if (profile.avatar.action === "replace" && updatedProfile.avatarObjectKey) {
+      avatarResourceCache.prime(updatedProfile.avatarObjectKey, profile.avatar.file);
+    }
+    chatData.updateSelfProfile(updatedProfile);
   }
 
   if (chatData.isLoading) {
@@ -130,6 +152,8 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
       onRefreshFriends={chatData.refreshFriends}
       apiBaseUrl={apiBaseUrl}
       accessToken={session.accessToken}
+      avatarResourceCache={avatarResourceCache}
+      onSaveProfile={handleSaveProfile}
     />
   );
 }

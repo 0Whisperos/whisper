@@ -9,6 +9,8 @@ export interface ChatProfile {
   userId: number;
   name: string;
   avatar: string;
+  /** 仅用于当前客户端会话内的本地预览；后端返回的头像对象 key 仍单独保存在 avatarObjectKey。 */
+  avatarImageUrl?: string | null;
   tone: AvatarTone;
   signature?: string;
   avatarObjectKey?: string | null;
@@ -16,6 +18,17 @@ export interface ChatProfile {
 
 export interface ChatSelfProfile extends ChatProfile {
   account: string;
+}
+
+export type EditableAvatar =
+  | { action: "keep" }
+  | { action: "replace"; file: File }
+  | { action: "remove" };
+
+export interface EditableSelfProfile {
+  name: string;
+  signature: string;
+  avatar: EditableAvatar;
 }
 
 export interface ChatSessionItem {

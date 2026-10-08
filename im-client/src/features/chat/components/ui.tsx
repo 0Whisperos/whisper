@@ -4,6 +4,7 @@ import type { AvatarTone } from "../types";
 
 export type IconName =
   | "back"
+  | "camera"
   | "check"
   | "contact"
   | "file"
@@ -33,6 +34,7 @@ export function IconSprite() {
       <symbol id="auth-icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5" /><path d="m15 15 5 5" /></symbol>
       <symbol id="auth-icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
       <symbol id="auth-icon-back" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7M7 12h12" /></symbol>
+      <symbol id="auth-icon-camera" viewBox="0 0 24 24"><path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z" /><circle cx="12" cy="13" r="3.5" /></symbol>
       <symbol id="auth-icon-voice" viewBox="0 0 24 24"><rect x="9" y="4" width="6" height="11" rx="3" /><path d="M6 12a6 6 0 0 0 12 0m-6 6v3" /></symbol>
       <symbol id="auth-icon-video" viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="2" /><path d="m15 10 5-3v10l-5-3z" /></symbol>
       <symbol id="auth-icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 11v5m0-8h.01" /></symbol>
@@ -62,6 +64,10 @@ export function IconButton({ icon, label, active, className, children, ...props 
   );
 }
 
-export function Avatar({ avatar, tone, className = "" }: { avatar: string; tone: AvatarTone; className?: string }) {
-  return <span className={`auth-person-avatar ${tone} ${className}`.trim()}>{avatar}</span>;
+export function Avatar({ avatar, tone, className = "", imageUrl }: { avatar: string; tone: AvatarTone; className?: string; imageUrl?: string | null }) {
+  return (
+    <span className={`auth-person-avatar ${tone} ${className}`.trim()}>
+      {imageUrl ? <img src={imageUrl} alt="" draggable={false} /> : avatar}
+    </span>
+  );
 }

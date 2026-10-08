@@ -1027,6 +1027,7 @@ canvas {
   width: 32px;
   height: 32px;
   border-radius: var(--auth-radius);
+  overflow: hidden;
   color: #ffffff;
   background: #556170;
   font-size: 11px;
@@ -1941,6 +1942,142 @@ canvas {
 .auth-friend-field-hint span { flex: 0 0 auto; }
 .auth-friend-dialog-error { margin: 10px 0 0; font-size: 12px; }
 .auth-friend-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 24px; }
+
+.auth-profile-edit-button {
+  flex: 0 0 auto;
+  min-height: 29px;
+  margin-left: auto;
+  padding: 4px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface-panel);
+  color: var(--auth-text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.auth-profile-edit-button:hover { background: var(--list-hover); }
+.auth-profile-edit-button:focus-visible,
+.auth-profile-avatar-change:focus-visible { outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 2px; }
+.auth-profile-editor-backdrop { z-index: 1100; }
+.auth-profile-editor { width: min(100%, 440px); }
+.auth-profile-editor form { display: grid; gap: 12px; margin-top: 13px; }
+.auth-profile-editor-avatar-wrap {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  margin: 4px auto 0;
+  border-radius: var(--auth-radius);
+}
+.auth-profile-editor-avatar-controls { display: flex; flex-direction: column; align-items: center; gap: 9px; }
+.auth-profile-editor-avatar {
+  display: grid;
+  flex: 0 0 92px;
+  width: 92px;
+  height: 92px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--auth-radius);
+  font-size: 34px;
+}
+.auth-person-avatar img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+.auth-profile-avatar-change {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border: 2px solid var(--surface-raised);
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  opacity: 0;
+  transform: scale(.9);
+  transition: opacity 140ms ease, transform 140ms ease;
+  cursor: pointer;
+}
+.auth-profile-avatar-change svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.auth-profile-editor-avatar-wrap:hover .auth-profile-avatar-change,
+.auth-profile-editor-avatar-wrap:focus-within .auth-profile-avatar-change,
+.auth-profile-avatar-change:focus-visible { opacity: 1; transform: scale(1); }
+.auth-profile-file-input { display: none; }
+.auth-profile-avatar-reset {
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface-panel);
+  color: var(--auth-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.auth-profile-avatar-reset:disabled { opacity: .5; cursor: not-allowed; }
+.auth-avatar-crop-backdrop {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(0 0 0 / 58%);
+}
+.auth-avatar-crop-dialog {
+  width: min(100%, 460px);
+  padding: 18px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--auth-radius);
+  background: var(--surface-raised);
+  color: var(--auth-text);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 28%);
+}
+.auth-avatar-crop-hint { margin: 2px 0 12px; color: var(--auth-muted); font-size: 12px; text-align: center; }
+.auth-avatar-crop-viewport {
+  position: relative;
+  max-width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  background: #17191d;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.auth-avatar-crop-viewport:active { cursor: grabbing; }
+.auth-avatar-crop-viewport img { position: absolute; max-width: none; pointer-events: none; user-select: none; }
+.auth-avatar-crop-zoom { display: flex; align-items: center; justify-content: center; gap: 20px; margin: 14px 0; }
+.auth-avatar-crop-zoom button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-panel);
+  color: var(--auth-text);
+  font-size: 22px;
+  cursor: pointer;
+}
+.auth-avatar-crop-zoom button:disabled { opacity: .45; cursor: not-allowed; }
+.auth-avatar-crop-zoom output { min-width: 58px; color: var(--auth-text); font-size: 16px; text-align: center; }
+.auth-profile-editor-field { position: relative; display: grid; gap: 7px; color: var(--auth-text); font-size: 12px; font-weight: 750; }
+.auth-profile-editor-field input {
+  width: 100%;
+  height: 42px;
+  padding: 0 66px 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface-panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+}
+.auth-profile-editor-field input:focus { outline: 2px solid color-mix(in srgb, var(--brand) 42%, transparent); outline-offset: 1px; }
+.auth-profile-editor-field input[aria-invalid="true"] { border-color: var(--danger, #c43d45); }
+.auth-profile-editor-count { position: absolute; right: 11px; bottom: 13px; color: var(--auth-muted); font-size: 10px; font-weight: 500; }
+.auth-profile-editor-description { min-height: 0; }
+.auth-profile-editor .auth-friend-dialog-error { margin: -6px 0 0; }
+.auth-profile-editor .auth-friend-dialog-actions { margin-top: 7px; }
+.auth-profile-editor-avatar.auth-person-avatar img { border-radius: inherit; }
 
 .auth-account-menu,
 .auth-detail-panel {
