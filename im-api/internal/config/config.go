@@ -2,9 +2,12 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
+	"net/url"
 	"os"
+	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -12,6 +15,7 @@ type Config struct {
 	Database      DatabaseConfig `yaml:"database"`
 	Redis         RedisConfig    `yaml:"redis"`
 	Auth          AuthConfig     `yaml:"auth"`
+	Storage       StorageConfig  `yaml:"storage"`
 	ChatRPCSecret string         `yaml:"chat_rpc_secret"`
 	CORS          CORSConfig     `yaml:"cors"`
 	Seed          SeedConfig     `yaml:"seed"`
@@ -226,6 +230,67 @@ type AuthConfig struct {
 	JWTSecret       string `yaml:"jwt_secret"`
 	AccessTokenTTL  string `yaml:"access_token_ttl"`
 	RefreshTokenTTL string `yaml:"refresh_token_ttl"`
+}
+
+type StorageConfig struct {
+	Endpoint        string `yaml:"endpoint"`
+	Region          string `yaml:"region"`
+	BucketName      string `yaml:"bucket_name"`
+	AccessKeyID     string `yaml:"access_key_id"`
+	SecretAccessKey string `yaml:"secret_access_key"`
+	ForcePathStyle  bool   `yaml:"force_path_style"`
+	ObjectPrefix    string `yaml:"object_prefix"`
+	UploadURLTTL    string `yaml:"upload_url_ttl"`
+	DownloadURLTTL  string `yaml:"download_url_ttl"`
+}
+
+func (config *StorageConfig) Validate() error {
+	endpoint, err := url.Parse(config.Endpoint)
+	if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return fmt.Errorf("storage endpoint must be an HTTP or HTTPS URL without user info, query, or fragment")
+	}
+	if config.Region == "" {
+		return fmt.Errorf("storage region is empty")
+	}
+	if config.BucketName == "" {
+		return fmt.Errorf("storage bucket name is empty")
+	}
+	if config.AccessKeyID == "" {
+		return fmt.Errorf("storage access key ID is empty")
+	}
+	if config.SecretAccessKey == "" {
+		return fmt.Errorf("storage secret access key is empty")
+	}
+	if strings.Trim(config.ObjectPrefix, "/") == "" {
+		return fmt.Errorf("storage object prefix is empty")
+	}
+	config.ObjectPrefix = strings.Trim(config.ObjectPrefix, "/") + "/"
+	if _, err := config.UploadURLDuration(); err != nil {
+		return err
+	}
+	if _, err := config.DownloadURLDuration(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (config StorageConfig) UploadURLDuration() (time.Duration, error) {
+	return parsePresignDuration("storage upload URL TTL", config.UploadURLTTL)
+}
+
+func (config StorageConfig) DownloadURLDuration() (time.Duration, error) {
+	return parsePresignDuration("storage download URL TTL", config.DownloadURLTTL)
+}
+
+func parsePresignDuration(name, value string) (time.Duration, error) {
+	duration, err := parseRequiredDuration(name, value)
+	if err != nil {
+		return 0, err
+	}
+	if duration > 7*24*time.Hour {
+		return 0, fmt.Errorf("%s must not exceed seven days", name)
+	}
+	return duration, nil
 }
 
 func (config AuthConfig) AccessTokenDuration() (time.Duration, error) {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/0Whisperos/whisper/im-server/internal/config"
@@ -10,6 +11,8 @@ import (
 	redisrepo "github.com/0Whisperos/whisper/im-server/internal/repository/redis"
 	"github.com/0Whisperos/whisper/im-server/internal/router"
 	"github.com/0Whisperos/whisper/im-server/internal/service/auth"
+	"github.com/0Whisperos/whisper/im-server/internal/service/profile"
+	"github.com/0Whisperos/whisper/im-server/internal/storage"
 )
 
 func RunServer(configPath string) error {
@@ -17,6 +20,14 @@ func RunServer(configPath string) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.Storage.Validate(); err != nil {
+		return fmt.Errorf("validate object storage configuration: %w", err)
+	}
+	objectStore, err := storage.NewS3(context.Background(), cfg.Storage)
+	if err != nil {
+		return fmt.Errorf("initialize object storage: %w", err)
+	}
+	profile.Configure(objectStore, cfg.Storage.ObjectPrefix)
 	if err := mysql.Open(cfg.Database); err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}

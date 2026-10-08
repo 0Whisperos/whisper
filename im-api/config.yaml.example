@@ -42,11 +42,29 @@ auth:
   access_token_ttl: 15m
   refresh_token_ttl: 720h
 
+storage:
+  # 示例使用本机 RustFS。此 endpoint 必须是 S3 API 地址，且 im-client 所在浏览器可以访问。
+  # 切换到阿里云 OSS 的 S3 兼容接口时，可用 https://s3.oss-{region}.aliyuncs.com，region 填 bucket 地域，force_path_style 设为 false。
+  endpoint: http://127.0.0.1:9000
+  region: us-east-1
+  bucket_name: your-private-bucket
+  access_key_id: ""
+  secret_access_key: ""
+  force_path_style: true
+  # 服务端把 pending/ 上传对象验证后复制到 committed/；建议在 Bucket 配置 Lifecycle，1 天后清理 avatars/pending/ 下遗留对象。
+  object_prefix: avatars/
+  upload_url_ttl: 10m
+  download_url_ttl: 5m
+
 chat_rpc_secret: "replace-with-the-same-private-secret-on-all-chat-nodes"
 
 cors:
+  # 这里只配置浏览器访问 im-api 的跨域规则，不会配置对象存储 Bucket 的 CORS。
+  # Bucket 还需单独允许下方客户端来源，并允许 PUT、GET 与签名请求头（至少 Content-Type；兼容服务可按需允许 x-amz-*）。
+  # 浏览器会用 OPTIONS 预检 PUT/GET；对象存储应按 CORS 规则响应预检，不要把 OPTIONS 当作 S3 AllowedMethods 项。
   allowed_origins:
     - http://127.0.0.1:1420
+    - http://127.0.0.1:8080
     - http://tauri.localhost
 
 seed:

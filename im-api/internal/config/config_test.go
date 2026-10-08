@@ -64,6 +64,17 @@ func validConfig() Config {
 			AccessTokenTTL:  "15m",
 			RefreshTokenTTL: "720h",
 		},
+		Storage: StorageConfig{
+			Endpoint:        "http://127.0.0.1:9000",
+			Region:          "us-east-1",
+			BucketName:      "whisper-test",
+			AccessKeyID:     "test-access-key",
+			SecretAccessKey: "test-secret-key",
+			ForcePathStyle:  true,
+			ObjectPrefix:    "avatars/",
+			UploadURLTTL:    "10m",
+			DownloadURLTTL:  "5m",
+		},
 		ChatRPCSecret: "development-chat-rpc-secret",
 		CORS:          CORSConfig{AllowedOrigins: []string{"http://127.0.0.1:1420"}},
 		Seed: SeedConfig{Users: []SeedUserConfig{
@@ -119,6 +130,16 @@ auth:
   jwt_secret: development-secret
   access_token_ttl: 15m
   refresh_token_ttl: 720h
+storage:
+  endpoint: http://127.0.0.1:9000
+  region: us-east-1
+  bucket_name: whisper-test
+  access_key_id: test-access-key
+  secret_access_key: test-secret-key
+  force_path_style: true
+  object_prefix: avatars/
+  upload_url_ttl: 10m
+  download_url_ttl: 5m
 chat_rpc_secret: development-chat-rpc-secret
 cors:
   allowed_origins:
@@ -150,6 +171,9 @@ seed:
 	if config.Auth.JWTSecret != "development-secret" || config.Auth.AccessTokenTTL != "15m" || config.Auth.RefreshTokenTTL != "720h" {
 		t.Errorf("Auth = %#v, want configured JWT secret and TTLs", config.Auth)
 	}
+	if config.Storage.Endpoint != "http://127.0.0.1:9000" || config.Storage.BucketName != "whisper-test" || !config.Storage.ForcePathStyle {
+		t.Errorf("Storage = %#v, want configured endpoint, bucket, and path-style setting", config.Storage)
+	}
 	if len(config.Seed.Users) != 2 || config.Seed.Users[0].Account != "00100001" || config.Seed.Users[1].Account != "00100002" {
 		t.Errorf("Seed.Users = %#v, want two configured seed users", config.Seed.Users)
 	}
@@ -169,7 +193,7 @@ func TestLoadRejectsMissingAndMalformedFiles(t *testing.T) {
 }
 
 func TestValidateServerRejectsMissingRequiredValues(t *testing.T) {
-	// 测试目标：验证启动服务所需的地址、数据库、Redis、JWT 和 CORS 配置不能为空或非法。
+	// 测试目标：验证服务、数据库、Redis、JWT 和 CORS 的基础配置不能为空或非法。
 	// 构造方法：从完整有效配置复制多个场景，并在每个场景中修改一个必需值。
 	// 输入数据：空监听地址、空数据库 host、非法数据库端口、空库名、空 Redis host、非法 Redis 端口、非法 Redis db、空 JWT secret 和空 CORS。
 	// 预期行为：每个场景的 ValidateServer 都返回非空错误。
@@ -201,6 +225,64 @@ func TestValidateServerRejectsMissingRequiredValues(t *testing.T) {
 				t.Fatal("ValidateServer returned nil error")
 			}
 		})
+	}
+}
+
+func TestStorageConfigRejectsInvalidSettings(t *testing.T) {
+	// 测试目标：验证启动 im-api 时对象存储配置必须完整，且签名 URL 有效期不超过 S3 兼容服务的上限。
+	// 构造方法：分别从有效配置复制一份 storage 配置，再修改一个存储字段。
+	// 输入数据：空 endpoint、非法 endpoint、空密钥和超过七天的上传授权有效期。
+	// 预期行为：每种非法存储配置都由 StorageConfig.Validate 返回错误。
+	testCases := []struct {
+		name   string
+		change func(*StorageConfig)
+	}{
+		// 测试目标：验证对象存储 endpoint 必填。
+		// 构造方法：清空有效配置中的 endpoint。
+		// 输入数据：endpoint 为空字符串。
+		// 预期行为：配置校验返回错误。
+		{name: "missing endpoint", change: func(config *StorageConfig) { config.Endpoint = "" }},
+		// 测试目标：验证对象存储 endpoint 仅接受 HTTP 或 HTTPS。
+		// 构造方法：把 endpoint 协议改为 FTP。
+		// 输入数据：ftp://storage.test。
+		// 预期行为：配置校验返回错误。
+		{name: "invalid endpoint scheme", change: func(config *StorageConfig) { config.Endpoint = "ftp://storage.test" }},
+		// 测试目标：验证服务端 S3 Secret Access Key 必填。
+		// 构造方法：清空有效配置中的 Secret Access Key。
+		// 输入数据：secret_access_key 为空字符串。
+		// 预期行为：配置校验返回错误。
+		{name: "missing secret access key", change: func(config *StorageConfig) { config.SecretAccessKey = "" }},
+		// 测试目标：验证 S3 预签名 URL 的有效期受服务支持的最大值约束。
+		// 构造方法：将上传 URL 有效期设为八天。
+		// 输入数据：upload_url_ttl=8d。
+		// 预期行为：配置校验返回错误。
+		{name: "upload URL TTL exceeds seven days", change: func(config *StorageConfig) { config.UploadURLTTL = "8d" }},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// 测试目标：验证当前存储配置错误被单独拒绝，不依赖数据库迁移或 seed 命令。
+			// 构造方法：复制 validConfig 中有效的 StorageConfig 并应用当前场景修改。
+			// 输入数据：子测试指定的一项无效 endpoint、凭证或授权有效期。
+			// 预期行为：StorageConfig.Validate 返回非空错误。
+			storageConfig := validConfig().Storage
+			testCase.change(&storageConfig)
+			if err := storageConfig.Validate(); err == nil {
+				t.Fatal("StorageConfig.Validate returned nil error")
+			}
+		})
+	}
+}
+
+func TestValidateServerDoesNotRequireStorageForMigrationAndSeed(t *testing.T) {
+	// 测试目标：验证共用服务配置读取仍允许迁移和 seed 命令在不配置对象存储时运行。
+	// 构造方法：从有效服务配置中清空 StorageConfig，再调用基础 ValidateServer。
+	// 输入数据：数据库、Redis、鉴权和 CORS 配置有效，StorageConfig 为空。
+	// 预期行为：基础配置校验通过；真正启动 im-api 时由 RunServer 单独校验存储配置。
+	config := validConfig()
+	config.Storage = StorageConfig{}
+	if err := config.ValidateServer(); err != nil {
+		t.Fatalf("ValidateServer returned an error without storage configuration: %v", err)
 	}
 }
 
