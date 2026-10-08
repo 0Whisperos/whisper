@@ -15,6 +15,7 @@ func New(allowedOrigins []string) *gin.Engine {
 			AllowMethods: []string{
 				http.MethodGet,
 				http.MethodPost,
+				http.MethodPut,
 				http.MethodOptions,
 			},
 			AllowHeaders: []string{

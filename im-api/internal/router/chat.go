@@ -9,6 +9,9 @@ import (
 func registerChatRoutes(group *gin.RouterGroup) {
 	chatRoutes := group.Group("", middleware.RequireAccessToken())
 	chatRoutes.GET("/me", handler.Me)
+	chatRoutes.POST("/me/avatar-upload-authorization", handler.AuthorizeAvatarUpload)
+	chatRoutes.POST("/me/avatar-download-authorization", handler.AuthorizeAvatarDownload)
+	chatRoutes.PUT("/me/profile", handler.UpdateProfile)
 	chatRoutes.GET("/friends", handler.Friends)
 	chatRoutes.GET("/users/by-account/:account", handler.SearchUserByAccount)
 	chatRoutes.GET("/friend-requests", handler.ListFriendRequests)

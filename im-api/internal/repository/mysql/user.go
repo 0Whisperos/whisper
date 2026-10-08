@@ -10,6 +10,7 @@ import (
 	"github.com/0Whisperos/whisper/im-server/internal/model/entity"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrDuplicateAccount = errors.New("account already exists")
@@ -75,6 +76,57 @@ func CreateUser(user *entity.User) error {
 	}
 
 	return nil
+}
+
+type UserProfileUpdate struct {
+	Nickname        string
+	Signature       string
+	UpdateAvatar    bool
+	AvatarObjectKey *string
+}
+
+func UpdateUserProfile(ctx context.Context, userID uint64, update UserProfileUpdate) (entity.User, *string, bool, error) {
+	if global.MysqlDB == nil {
+		return entity.User{}, nil, false, ErrNotInitialized
+	}
+
+	var updated entity.User
+	var oldAvatar *string
+	found := true
+	err := global.MysqlDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user entity.User
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", userID).First(&user).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			found = false
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("find user for profile update: %w", err)
+		}
+		if user.AvatarObjectKey != nil {
+			value := *user.AvatarObjectKey
+			oldAvatar = &value
+		}
+
+		values := map[string]any{
+			"nickname":  update.Nickname,
+			"signature": update.Signature,
+		}
+		if update.UpdateAvatar {
+			values["avatar_object_key"] = update.AvatarObjectKey
+		}
+		if err := tx.Model(&user).Updates(values).Error; err != nil {
+			return fmt.Errorf("save user profile: %w", err)
+		}
+		if err := tx.Where("id = ?", userID).First(&updated).Error; err != nil {
+			return fmt.Errorf("reload user profile: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return entity.User{}, nil, false, err
+	}
+	return updated, oldAvatar, found, nil
 }
 
 func isDuplicateKeyError(err error) bool {
