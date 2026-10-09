@@ -1717,7 +1717,7 @@ canvas {
 }
 
 .auth-system-contact-copy strong {
-  color: var(--text);
+  color: var(--auth-text);
   font-size: 14px;
   font-weight: 750;
 }
@@ -1913,6 +1913,10 @@ canvas {
 .auth-friend-dialog-close { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--auth-muted); font-size: 24px; line-height: 1; cursor: pointer; }
 .auth-friend-dialog-close:hover { background: var(--list-hover); color: var(--text); }
 .auth-friend-dialog-close:disabled { opacity: .55; cursor: default; }
+.auth-profile-editor .auth-friend-dialog-close { flex-basis: 40px; width: 40px; height: 40px; padding: 0; place-items: center; color: #000; }
+.auth-shell[data-auth-theme="dark"] .auth-profile-editor .auth-friend-dialog-close { color: #fff; }
+.auth-profile-editor .auth-friend-dialog-close:hover:not(:disabled) { background: #C42B1C; color: #fff; }
+.auth-profile-editor .auth-friend-dialog-close svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
 .auth-friend-dialog-intro { margin: 11px 0 24px; color: var(--auth-muted); font-size: 12px; }
 .auth-friend-field-label { display: block; margin: 0 0 8px; color: var(--text); font-size: 12px; font-weight: 800; }
 .auth-friend-search-line { display: flex; align-items: center; gap: 9px; }
@@ -1948,15 +1952,16 @@ canvas {
   min-height: 29px;
   margin-left: auto;
   padding: 4px 11px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--brand);
   border-radius: 7px;
-  background: var(--surface-panel);
-  color: var(--auth-text);
+  background: var(--brand);
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
-.auth-profile-edit-button:hover { background: var(--list-hover); }
+.auth-shell .auth-profile-edit-button { color: #FFFFFF; }
+.auth-profile-edit-button:hover { filter: brightness(1.08); }
 .auth-profile-edit-button:focus-visible,
 .auth-profile-avatar-change:focus-visible { outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 2px; }
 .auth-profile-editor-backdrop { z-index: 1100; }
@@ -2067,13 +2072,17 @@ canvas {
   border: 1px solid var(--border-strong);
   border-radius: 9px;
   background: var(--surface-panel);
-  color: var(--text);
+  color: var(--auth-text);
   font-size: 13px;
   font-weight: 400;
 }
 .auth-profile-editor-field input:focus { outline: 2px solid color-mix(in srgb, var(--brand) 42%, transparent); outline-offset: 1px; }
 .auth-profile-editor-field input[aria-invalid="true"] { border-color: var(--danger, #c43d45); }
 .auth-profile-editor-count { position: absolute; right: 11px; bottom: 13px; color: var(--auth-muted); font-size: 10px; font-weight: 500; }
+.auth-shell[data-auth-theme="dark"] .auth-system-contact-copy strong,
+.auth-shell[data-auth-theme="dark"] .auth-profile-editor-field,
+.auth-shell[data-auth-theme="dark"] .auth-profile-editor-field input,
+.auth-shell[data-auth-theme="dark"] .auth-profile-editor-count { color: #fff; }
 .auth-profile-editor-description { min-height: 0; }
 .auth-profile-editor .auth-friend-dialog-error { margin: -6px 0 0; }
 .auth-profile-editor .auth-friend-dialog-actions { margin-top: 7px; }

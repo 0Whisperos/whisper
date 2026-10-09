@@ -6,6 +6,7 @@ export type IconName =
   | "back"
   | "camera"
   | "check"
+  | "close"
   | "contact"
   | "file"
   | "info"
@@ -42,6 +43,7 @@ export function IconSprite() {
       <symbol id="auth-icon-cut" viewBox="0 0 24 24"><path d="m4 4 16 16M4 20 20 4M5 8h5m4 8h5" /></symbol>
       <symbol id="auth-icon-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h5" /></symbol>
       <symbol id="auth-icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10" /></symbol>
+      <symbol id="auth-icon-close" viewBox="0 0 24 24"><path d="M5 5 19 19M19 5 5 19" /></symbol>
     </svg>
   );
 }

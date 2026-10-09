@@ -515,9 +515,9 @@ describe("AuthenticatedShell", () => {
   });
 
   it("opens the profile editor with current values and applies saved text to the running profile", async () => {
-    // 测试目标：验证账号菜单可以打开资料编辑器，且保存昵称和个签只更新当前运行界面。
+    // 测试目标：验证账号菜单可以打开资料编辑器，且保存昵称和个性签名只更新当前运行界面。
     // 构造方法：渲染已登录工作台，从账号菜单进入编辑器，修改两个文本字段后保存。
-    // 输入数据：昵称“新昵称”和个签“专注当下”。
+    // 输入数据：昵称“新昵称”和个性签名“专注当下”。
     // 预期行为：编辑器初值与当前资料一致；保存后导航栏和账号菜单显示新昵称，其他账号资料保持不变。
     const user = userEvent.setup();
     renderShell();
@@ -528,7 +528,8 @@ describe("AuthenticatedShell", () => {
 
     const dialog = screen.getByRole("dialog", { name: "编辑资料" });
     const nickname = within(dialog).getByRole("textbox", { name: /昵称/ });
-    const signature = within(dialog).getByRole("textbox", { name: /个签/ });
+    const signature = within(dialog).getByRole("textbox", { name: /个性签名/ });
+    expect(signature).toHaveAttribute("placeholder", "编辑个性签名，展示我的独特态度");
     expect(nickname).toHaveValue(chatMockData.self.name);
     expect(signature).toHaveValue(chatMockData.self.signature ?? "");
     expect(within(dialog).getByRole("button", { name: "更换头像" })).toBeInTheDocument();
@@ -546,7 +547,35 @@ describe("AuthenticatedShell", () => {
     await user.click(screen.getByRole("button", { name: "编辑" }));
     const reopenedEditor = screen.getByRole("dialog", { name: "编辑资料" });
     expect(within(reopenedEditor).getByRole("textbox", { name: /昵称/ })).toHaveValue("新昵称");
-    expect(within(reopenedEditor).getByRole("textbox", { name: /个签/ })).toHaveValue("专注当下");
+    expect(within(reopenedEditor).getByRole("textbox", { name: /个性签名/ })).toHaveValue("专注当下");
+  });
+
+  it("discards profile text edits when the cancel button is clicked", async () => {
+    // 测试目标：验证点击资料编辑器底部的取消按钮会丢弃未保存文字且不调用保存回调。
+    // 构造方法：打开账号菜单中的资料编辑器，修改昵称和个性签名后点击取消，再重新打开编辑器。
+    // 输入数据：临时昵称“未保存昵称”和临时个性签名“未保存签名”。
+    // 预期行为：编辑器关闭且保存回调未调用；重新打开后仍显示原有资料。
+    const onSaveProfile = vi.fn(async () => undefined);
+    const user = userEvent.setup();
+    renderShell({ onSaveProfile });
+    const accountTrigger = screen.getAllByRole("button", { name: "账号与设置" })[0];
+
+    await user.click(accountTrigger);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑资料" });
+    await user.clear(within(dialog).getByRole("textbox", { name: /昵称/ }));
+    await user.type(within(dialog).getByRole("textbox", { name: /昵称/ }), "未保存昵称");
+    await user.clear(within(dialog).getByRole("textbox", { name: /个性签名/ }));
+    await user.type(within(dialog).getByRole("textbox", { name: /个性签名/ }), "未保存签名");
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("dialog", { name: "编辑资料" })).not.toBeInTheDocument();
+    expect(onSaveProfile).not.toHaveBeenCalled();
+    await user.click(accountTrigger);
+    await user.click(screen.getByRole("button", { name: "编辑" }));
+    const reopenedEditor = screen.getByRole("dialog", { name: "编辑资料" });
+    expect(within(reopenedEditor).getByRole("textbox", { name: /昵称/ })).toHaveValue(chatMockData.self.name);
+    expect(within(reopenedEditor).getByRole("textbox", { name: /个性签名/ })).toHaveValue(chatMockData.self.signature ?? "");
   });
 
   it("submits the reset avatar with the profile form", async () => {
@@ -570,7 +599,7 @@ describe("AuthenticatedShell", () => {
   });
 
   it("blocks invalid profile fields and unsupported image extensions with clear errors", async () => {
-    // 测试目标：验证空昵称、超长 Unicode 昵称、超长个签、GIF 和未知文件后缀均不能保存。
+    // 测试目标：验证空昵称、超长 Unicode 昵称、超长个性签名、GIF 和未知文件后缀均不能保存。
     // 构造方法：打开编辑器，依次提交无效文本并上传非图片扩展名文件。
     // 输入数据：空白昵称、16 个 emoji、81 个签名字符、portrait.gif 和 notes.txt。
     // 预期行为：每种无效输入都显示明确错误，编辑器保持打开且不会保存。
@@ -580,7 +609,7 @@ describe("AuthenticatedShell", () => {
     await user.click(screen.getByRole("button", { name: "编辑" }));
     const dialog = screen.getByRole("dialog", { name: "编辑资料" });
     const nickname = within(dialog).getByRole("textbox", { name: /昵称/ });
-    const signature = within(dialog).getByRole("textbox", { name: /个签/ });
+    const signature = within(dialog).getByRole("textbox", { name: /个性签名/ });
     const save = within(dialog).getByRole("button", { name: "保存" });
 
     await user.clear(nickname);

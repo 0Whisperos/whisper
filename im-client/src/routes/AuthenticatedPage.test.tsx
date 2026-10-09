@@ -232,9 +232,9 @@ describe("AuthenticatedPage", () => {
   });
 
   it("updates text-only profile data without priming an avatar resource", async () => {
-    // 测试目标：验证页面层纯昵称和个签保存成功后只更新 useChatData 的当前用户资料。
+    // 测试目标：验证页面层纯昵称和个性签名保存成功后只更新 useChatData 的当前用户资料。
     // 构造方法：mock 资料保存响应，打开编辑器修改两个文本字段并提交，同时监视头像缓存 prime。
-    // 输入数据：昵称“页面昵称”、个签“页面个签”、头像操作 keep。
+    // 输入数据：昵称“页面昵称”、个性签名“页面个签”、头像操作 keep。
     // 预期行为：saveCurrentProfile 收到纯文字输入，updateSelfProfile 收到响应，prime 不执行。
     const updatedProfile = profileDto({ nickname: "页面昵称", signature: "页面个签" });
     saveCurrentProfileMock.mockResolvedValueOnce(updatedProfile);
@@ -244,7 +244,7 @@ describe("AuthenticatedPage", () => {
     await openProfileEditor(user);
     const dialog = screen.getByRole("dialog", { name: "编辑资料" });
     const nickname = within(dialog).getByRole("textbox", { name: /昵称/ });
-    const signature = within(dialog).getByRole("textbox", { name: /个签/ });
+    const signature = within(dialog).getByRole("textbox", { name: /个性签名/ });
     await user.clear(nickname);
     await user.type(nickname, "页面昵称");
     await user.clear(signature);

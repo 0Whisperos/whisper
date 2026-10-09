@@ -164,7 +164,7 @@ export function ProfileEditor({ self, onSave, onCancel }: ProfileEditorProps) {
       >
         <header className="auth-friend-dialog-head">
           <h2 id="auth-profile-editor-title">编辑资料</h2>
-          <button className="auth-friend-dialog-close" type="button" aria-label="关闭编辑资料" onClick={onCancel} disabled={isSaving}>×</button>
+          <button className="auth-friend-dialog-close" type="button" aria-label="关闭编辑资料" onClick={onCancel} disabled={isSaving}><Icon name="close" /></button>
         </header>
 
         <form onSubmit={handleSubmit} noValidate>
@@ -231,11 +231,11 @@ export function ProfileEditor({ self, onSave, onCancel }: ProfileEditorProps) {
           {nicknameError ? <p id="auth-profile-nickname-error" className="auth-friend-dialog-error" role="alert">{nicknameError}</p> : <span id="auth-profile-nickname-error" className="auth-profile-editor-description" />}
 
           <label className="auth-profile-editor-field">
-            <span>个签</span>
+            <span>个性签名</span>
             <input
               type="text"
               value={signature}
-              placeholder="编辑个签，展示我的独特态度"
+              placeholder="编辑个性签名，展示我的独特态度"
               aria-invalid={Boolean(signatureError)}
               aria-describedby="auth-profile-signature-count auth-profile-signature-error"
               onChange={(event) => {
