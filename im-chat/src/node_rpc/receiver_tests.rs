@@ -1,4 +1,5 @@
 use super::*;
+use super::super::protocol::FriendRequestStatus;
 use crate::connection::ActiveConnection;
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
