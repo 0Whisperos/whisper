@@ -217,6 +217,74 @@ describe("AuthenticatedShell", () => {
     expect(screen.queryByText("发送仅作界面预览")).not.toBeInTheDocument();
   });
 
+  it("shows the Enter hint and sends trimmed text when Enter is pressed", async () => {
+    // 测试目标：验证发送按钮提示 Enter 快捷键，且按 Enter 会发送裁剪后的草稿。
+    // 构造方法：渲染可发送的工作台，在输入框填入带首尾空格的文本后按 Enter。
+    // 输入数据：当前会话 10002 的文本“  回车发送  ”。
+    // 预期行为：按钮 title 为“发送(Enter)”，回调收到裁剪文本，接受后输入框清空。
+    const user = userEvent.setup();
+    const onSendText = vi.fn(() => true);
+    renderShell({ canSendMessages: true, onSendText });
+    const input = screen.getByLabelText("输入消息");
+
+    expect(screen.getByRole("button", { name: "发送消息" })).toHaveAttribute("title", "发送(Enter)");
+    await user.type(input, "  回车发送  ");
+    await user.keyboard("{Enter}");
+
+    expect(onSendText).toHaveBeenCalledWith(10002, "回车发送");
+    expect(input).toHaveValue("");
+  });
+
+  it("inserts a newline with Shift+Enter without sending", async () => {
+    // 测试目标：验证 Shift+Enter 在编辑栏插入换行而不触发消息发送。
+    // 构造方法：渲染可发送的工作台，输入一段文字后按 Shift+Enter。
+    // 输入数据：当前会话草稿“第一行”。
+    // 预期行为：输入框内容变为“第一行\n”，发送回调未调用。
+    const user = userEvent.setup();
+    const onSendText = vi.fn(() => true);
+    renderShell({ canSendMessages: true, onSendText });
+    const input = screen.getByLabelText("输入消息");
+
+    await user.type(input, "第一行");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+
+    expect(input).toHaveValue("第一行\n");
+    expect(onSendText).not.toHaveBeenCalled();
+  });
+
+  it("does not send while the input method is composing text", () => {
+    // 测试目标：验证输入法组合候选词期间按 Enter 不会发送消息。
+    // 构造方法：渲染可发送的工作台，输入组合文本并派发 isComposing=true 的 Enter 按键事件。
+    // 输入数据：当前会话草稿“拼音”，键盘事件 key=Enter 且 isComposing=true。
+    // 预期行为：草稿保持不变，发送回调未调用。
+    const onSendText = vi.fn(() => true);
+    renderShell({ canSendMessages: true, onSendText });
+    const input = screen.getByLabelText("输入消息");
+    fireEvent.change(input, { target: { value: "拼音" } });
+
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter", isComposing: true });
+
+    expect(input).toHaveValue("拼音");
+    expect(onSendText).not.toHaveBeenCalled();
+  });
+
+  it("does not send an empty draft when Enter is pressed", async () => {
+    // 测试目标：验证空草稿按 Enter 不会调用发送回调。
+    // 构造方法：渲染已认证且可发送的工作台，不输入内容，直接在编辑栏按 Enter。
+    // 输入数据：当前会话空草稿。
+    // 预期行为：发送回调未调用，输入框仍为空。
+    const user = userEvent.setup();
+    const onSendText = vi.fn(() => true);
+    renderShell({ canSendMessages: true, onSendText });
+    const input = screen.getByLabelText("输入消息");
+
+    await user.click(input);
+    await user.keyboard("{Enter}");
+
+    expect(onSendText).not.toHaveBeenCalled();
+    expect(input).toHaveValue("");
+  });
+
   it("keeps sending disabled while the chat connection is not authenticated", async () => {
     // 测试目标：验证未认证连接不会暴露可用的发送操作，即使当前草稿包含正文。
     // 构造方法：渲染未传入连接发送权限的工作台，在输入框中填写文本。
@@ -226,7 +294,9 @@ describe("AuthenticatedShell", () => {
     const onSendText = vi.fn(() => true);
     renderShell({ onSendText });
 
-    await user.type(screen.getByLabelText("输入消息"), "等待连接");
+    const input = screen.getByLabelText("输入消息");
+    await user.type(input, "等待连接");
+    await user.keyboard("{Enter}");
 
     expect(screen.getByRole("button", { name: "发送消息" })).toBeDisabled();
     expect(onSendText).not.toHaveBeenCalled();

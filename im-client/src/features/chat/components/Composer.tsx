@@ -10,6 +10,10 @@ interface ComposerProps {
 }
 
 export function Composer({ draft, canSend, statusMessage, onChangeDraft, onToolPreview, onSendText }: ComposerProps) {
+  const sendDraft = () => {
+    if (canSend && draft.trim()) onSendText(draft.trim());
+  };
+
   return (
     <footer className="auth-composer">
       <div className="auth-composer-actions">
@@ -25,6 +29,11 @@ export function Composer({ draft, canSend, statusMessage, onChangeDraft, onToolP
           placeholder="输入消息"
           value={draft}
           onChange={(event) => onChangeDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            sendDraft();
+          }}
         />
       </label>
       <output className="auth-interaction-status" aria-live="polite">{statusMessage}</output>
@@ -32,9 +41,9 @@ export function Composer({ draft, canSend, statusMessage, onChangeDraft, onToolP
         className={`auth-send-button ${canSend ? "ready" : ""}`}
         type="button"
         aria-label="发送消息"
-        title="发送消息"
+        title="发送(Enter)"
         disabled={!canSend}
-        onClick={() => onSendText(draft.trim())}
+        onClick={sendDraft}
       >
         发送
       </button>
