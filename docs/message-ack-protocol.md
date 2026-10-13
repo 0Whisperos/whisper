@@ -2,6 +2,8 @@
 
 本文档定义 WebSocket 上的客户端心跳、消息发送、服务端确认、实时推送、送达回执和已读回执协议。本文档只描述线协议和语义边界；Redis 路由与在线状态见 `docs/redis-routing-presence.md`，MySQL 表结构见 `docs/database-schema.md`。
 
+文字与图片组成同一条消息的完整上传、发送、下载和接口扩展设计见 [聊天图片消息流程](chat-image-message-flow.md)。
+
 ## 总体原则
 
 - 业务消息只能在 WebSocket 认证成功后处理。认证握手本身不在本文档主体中定义。
