@@ -135,7 +135,7 @@ func ListMessages(conversationID uint64, beforeSeq, fromSeq *uint64, limit int) 
 	}
 
 	query := global.MysqlDB.WithContext(context.Background()).
-		Where("conversation_id = ? AND message_type = ?", conversationID, "text").
+		Where("conversation_id = ?", conversationID).
 		Limit(limit + 1)
 	if fromSeq != nil {
 		query = query.Where("conversation_seq >= ?", *fromSeq).Order("conversation_seq ASC")
