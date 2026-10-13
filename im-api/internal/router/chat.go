@@ -8,6 +8,9 @@ import (
 
 func registerChatRoutes(group *gin.RouterGroup) {
 	chatRoutes := group.Group("", middleware.RequireAccessToken())
+	chatRoutes.POST("/attachments/upload-authorizations", handler.AuthorizeAttachmentUploads)
+	chatRoutes.POST("/attachments/upload-completions", handler.CompleteAttachmentUploads)
+	chatRoutes.POST("/conversations/:conversation_id/attachments/download-authorizations", handler.AuthorizeAttachmentDownloads)
 	chatRoutes.GET("/me", handler.Me)
 	chatRoutes.POST("/me/avatar-upload-authorization", handler.AuthorizeAvatarUpload)
 	chatRoutes.POST("/me/avatar-download-authorization", handler.AuthorizeAvatarDownload)

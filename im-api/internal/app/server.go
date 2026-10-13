@@ -10,6 +10,7 @@ import (
 	"github.com/0Whisperos/whisper/im-server/internal/repository/mysql"
 	redisrepo "github.com/0Whisperos/whisper/im-server/internal/repository/redis"
 	"github.com/0Whisperos/whisper/im-server/internal/router"
+	"github.com/0Whisperos/whisper/im-server/internal/service/attachments"
 	"github.com/0Whisperos/whisper/im-server/internal/service/auth"
 	"github.com/0Whisperos/whisper/im-server/internal/service/profile"
 	"github.com/0Whisperos/whisper/im-server/internal/storage"
@@ -28,6 +29,7 @@ func RunServer(configPath string) error {
 		return fmt.Errorf("initialize object storage: %w", err)
 	}
 	profile.Configure(objectStore, cfg.Storage.ObjectPrefix)
+	attachments.Configure(objectStore, cfg.Storage.ObjectPrefix)
 	if err := mysql.Open(cfg.Database); err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
