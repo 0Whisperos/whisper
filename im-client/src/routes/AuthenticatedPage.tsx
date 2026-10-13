@@ -4,6 +4,7 @@ import { useChatConnection } from "../features/chat-connection/hooks/useChatConn
 import type { ChatBusinessServerFrame, ChatConnectionState } from "../features/chat-connection/types";
 import { AuthenticatedShell } from "../features/chat/components/AuthenticatedShell";
 import { AvatarResourceCache } from "../features/chat/avatarResourceCache";
+import { AttachmentResourceCache } from "../features/chat/attachmentResourceCache";
 import { useChatData } from "../features/chat/hooks/useChatData";
 import { useChatMessaging } from "../features/chat/hooks/useChatMessaging";
 import { saveCurrentProfile } from "../features/chat/profileApi";
@@ -26,6 +27,9 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     avatarResourceCacheRef.current = new AvatarResourceCache();
   }
   const avatarResourceCache = avatarResourceCacheRef.current;
+  const attachmentResourceCacheRef = useRef<AttachmentResourceCache | null>(null);
+  if (!attachmentResourceCacheRef.current) attachmentResourceCacheRef.current = new AttachmentResourceCache();
+  const attachmentResourceCache = attachmentResourceCacheRef.current;
   const serverFrameHandlerRef = useRef<(frame: ChatBusinessServerFrame) => void>(() => undefined);
   const chatConnection = useChatConnection({
     session,
@@ -35,7 +39,10 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
   const friendRequests = useFriendRequests(apiBaseUrl, session.accessToken, chatConnection.state.status === "authenticated");
   const pendingDeliveredAcksRef = useRef(new Map<number, number>());
   const pendingReadAcksRef = useRef(new Map<number, number>());
-  useEffect(() => () => avatarResourceCache.clear(), [avatarResourceCache]);
+  useEffect(() => () => {
+    avatarResourceCache.clear();
+    attachmentResourceCache.clear();
+  }, [attachmentResourceCache, avatarResourceCache]);
   const sendDeliveredAck = useCallback((conversationId: number, deliveredSeq: number) => {
     if (chatConnection.state.status === "authenticated") {
       chatConnection.sendDeliveredAck(conversationId, deliveredSeq);
@@ -109,6 +116,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
   function handleLogout() {
     chatConnection.close();
     avatarResourceCache.clear();
+    attachmentResourceCache.clear();
     onLogout();
   }
 
@@ -160,6 +168,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
       apiBaseUrl={apiBaseUrl}
       accessToken={session.accessToken}
       avatarResourceCache={avatarResourceCache}
+      attachmentResourceCache={attachmentResourceCache}
       onSaveProfile={handleSaveProfile}
     />
   );

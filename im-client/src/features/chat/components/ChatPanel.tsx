@@ -6,7 +6,8 @@ import { formatHoverMessageTime, isCompactMessage } from "../hooks/messageTimeli
 import { Avatar, Icon, IconButton } from "./ui";
 import { Composer } from "./Composer";
 import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
-import { downloadAuthorizationRefreshDelay, fetchSignedImage, requestDownloadAuthorizations } from "../attachmentsApi";
+import { AttachmentResourceCache, attachmentResourceKey } from "../attachmentResourceCache";
+import type { AttachmentResource } from "../attachmentResourceCache";
 
 const MESSAGE_LIST_BOTTOM_THRESHOLD = 32;
 const EMPTY_DRAFT_BLOCKS: ChatDraftBlock[] = [{ type: "text", id: "text-0", text: "" }];
@@ -37,6 +38,8 @@ interface ChatPanelProps {
   onSendRich?: () => void;
   apiBaseUrl?: string;
   accessToken?: string;
+  userId?: number;
+  attachmentResourceCache?: AttachmentResourceCache;
 }
 
 export function ChatPanel({
@@ -59,7 +62,7 @@ export function ChatPanel({
   onRetryMessage,
   onReadThrough,
   draftBlocks = EMPTY_DRAFT_BLOCKS, onChangeDraftBlocks = () => undefined, onPickFiles = () => [],
-  onSendRich = () => undefined, apiBaseUrl = "", accessToken = "",
+  onSendRich = () => undefined, apiBaseUrl = "", accessToken = "", userId = self.userId, attachmentResourceCache,
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
   const [hoveredMessageKey, setHoveredMessageKey] = useState<string | null>(null);
@@ -75,60 +78,80 @@ export function ChatPanel({
       ? message.content.blocks.filter((block) => block.type === "image").map((block) => block.attachment_id)
       : []
   ))).sort(), [conversation.messages]);
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
-  const [imageRefresh, setImageRefresh] = useState(0);
+  const fallbackAttachmentCacheRef = useRef<AttachmentResourceCache | null>(null);
+  if (!fallbackAttachmentCacheRef.current) fallbackAttachmentCacheRef.current = new AttachmentResourceCache();
+  const resolvedAttachmentCache = attachmentResourceCache ?? fallbackAttachmentCacheRef.current;
+  const [imageResources, setImageResources] = useState<Record<string, AttachmentResource>>({});
+  const [imageFailures, setImageFailures] = useState<Record<string, boolean>>({});
+  const imageContext = { apiBaseUrl, accessToken, userId, conversationId: conversation.conversationId };
+  const imageContextKey = JSON.stringify([apiBaseUrl.replace(/\/+$/, ""), accessToken, userId, conversation.conversationId]);
+  const currentImageContextRef = useRef(imageContextKey);
+  currentImageContextRef.current = imageContextKey;
   useEffect(() => {
     let cancelled = false;
-    const objectUrls: string[] = [];
-    if (attachmentIds.length === 0) { setImageUrls({}); return; }
-    let refreshTimeout: number | null = null;
-    const scheduleRefresh = (delay: number) => {
-      if (refreshTimeout !== null) window.clearTimeout(refreshTimeout);
-      refreshTimeout = window.setTimeout(() => { if (!cancelled) setImageRefresh((value) => value + 1); }, delay);
-    };
-    void (async () => {
-      try {
-        const pairs: Array<readonly [string, string]> = [];
-        let earliestExpiry = Number.POSITIVE_INFINITY;
-        for (let offset = 0; offset < attachmentIds.length; offset += 10) {
-          const batch = attachmentIds.slice(offset, offset + 10);
-          let auths = await requestDownloadAuthorizations(apiBaseUrl, accessToken, conversation.conversationId, batch);
-          let downloaded: Array<readonly [string, Blob]>;
-          try {
-            downloaded = await Promise.all(auths.map(async (auth) => [auth.attachment_id, await fetchSignedImage(auth.download_url)] as const));
-          } catch {
-            auths = await requestDownloadAuthorizations(apiBaseUrl, accessToken, conversation.conversationId, batch);
-            downloaded = await Promise.all(auths.map(async (auth) => [auth.attachment_id, await fetchSignedImage(auth.download_url)] as const));
+    const imageKeys = attachmentIds.map((id) => attachmentResourceKey(imageContext, id));
+    setImageResources((current) => Object.fromEntries(Object.entries(current).filter(([key]) => imageKeys.includes(key))));
+    setImageFailures((current) => Object.fromEntries(Object.entries(current).filter(([key]) => imageKeys.includes(key))));
+    if (attachmentIds.length === 0 || !apiBaseUrl || !accessToken) return () => { cancelled = true; };
+    void resolvedAttachmentCache.loadMany(imageContext, attachmentIds)
+      .then((results) => {
+        if (cancelled || currentImageContextRef.current !== imageContextKey) return;
+        setImageResources((current) => {
+          const next = { ...current };
+          for (const result of results) if (result.resource) next[attachmentResourceKey(imageContext, result.attachmentId)] = result.resource;
+          return next;
+        });
+        setImageFailures((current) => {
+          const next = { ...current };
+          for (const result of results) {
+            const key = attachmentResourceKey(imageContext, result.attachmentId);
+            if (result.error) next[key] = true;
+            else if (result.resource) delete next[key];
           }
-          for (const auth of auths) {
-            const expiry = Date.parse(auth.expires_at);
-            if (!Number.isNaN(expiry)) earliestExpiry = Math.min(earliestExpiry, expiry);
-          }
-          for (const [id, blob] of downloaded) {
-            const url = URL.createObjectURL(blob);
-            objectUrls.push(url);
-            pairs.push([id, url]);
-          }
-        }
-        if (!cancelled) {
-          setImageUrls(Object.fromEntries(pairs));
-          scheduleRefresh(Number.isFinite(earliestExpiry)
-            ? downloadAuthorizationRefreshDelay(new Date(earliestExpiry).toISOString())
-            : 60_000);
-        }
-      } catch {
-        if (!cancelled) {
-          setImageUrls({});
-          scheduleRefresh(10_000);
-        }
-      }
-    })();
+          return next;
+        });
+      });
     return () => {
       cancelled = true;
-      if (refreshTimeout !== null) clearTimeout(refreshTimeout);
-      if (typeof URL.revokeObjectURL === "function") objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [accessToken, apiBaseUrl, attachmentIds, conversation.conversationId, imageRefresh]);
+  }, [accessToken, apiBaseUrl, attachmentIds, conversation.conversationId, resolvedAttachmentCache, userId]);
+  const retryImage = (attachmentId: string) => {
+    const contextKey = imageContextKey;
+    const resourceKey = attachmentResourceKey(imageContext, attachmentId);
+    setImageFailures((current) => ({ ...current, [resourceKey]: false }));
+    void resolvedAttachmentCache.retry(imageContext, attachmentId)
+      .then((resource) => {
+        if (currentImageContextRef.current === contextKey) setImageResources((current) => ({ ...current, [resourceKey]: resource }));
+      })
+      .catch(() => {
+        if (currentImageContextRef.current === contextKey) {
+          setImageResources((current) => {
+            const next = { ...current };
+            delete next[resourceKey];
+            return next;
+          });
+          setImageFailures((current) => ({ ...current, [resourceKey]: true }));
+        }
+      });
+  };
+  const recoverImage = (attachmentId: string) => {
+    const contextKey = imageContextKey;
+    const resourceKey = attachmentResourceKey(imageContext, attachmentId);
+    void resolvedAttachmentCache.recoverOnce(imageContext, attachmentId)
+      .then((resource) => {
+        if (currentImageContextRef.current === contextKey) setImageResources((current) => ({ ...current, [resourceKey]: resource }));
+      })
+      .catch(() => {
+        if (currentImageContextRef.current === contextKey) {
+          setImageResources((current) => {
+            const next = { ...current };
+            delete next[resourceKey];
+            return next;
+          });
+          setImageFailures((current) => ({ ...current, [resourceKey]: true }));
+        }
+      });
+  };
   const updateBottomState = useCallback((list: HTMLElement) => {
     const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop <= MESSAGE_LIST_BOTTOM_THRESHOLD;
     isAtBottomRef.current = atBottom;
@@ -335,15 +358,23 @@ export function ChatPanel({
                               if (block.type === "text") {
                                 return <p className="auth-rich-message-text" key={`text-${blockIndex}`}>{block.text}</p>;
                               }
-                              const imageUrl = block.previewUrl ?? imageUrls[block.attachment_id];
+                              const localPreview = message.localStatus === "accepted" ? undefined : block.previewUrl;
+                              const imageKey = attachmentResourceKey(imageContext, block.attachment_id);
+                              const image = imageResources[imageKey];
+                              const imageFailed = imageFailures[imageKey];
+                              const imageUrl = localPreview ?? image?.src;
                               return imageUrl
                                 ? <img key={block.attachment_id} className="auth-message-image" alt="聊天图片" src={imageUrl}
                                   onLoad={keepBottomAfterLayoutChange}
                                   onError={() => {
-                                    setImageRefresh((value) => value + 1);
+                                    if (!localPreview && !imageFailed) recoverImage(block.attachment_id);
                                     keepBottomAfterLayoutChange();
                                   }} />
-                                : <span key={block.attachment_id} className="auth-message-image-placeholder" role="img" aria-label="图片加载中" />;
+                                : imageFailed
+                                  ? <span key={block.attachment_id} className="auth-message-image-error" role="group" aria-label="图片加载失败">
+                                    <span>图片加载失败</span><button type="button" onClick={() => retryImage(block.attachment_id)}>重试图片</button>
+                                  </span>
+                                  : <span key={block.attachment_id} className="auth-message-image-placeholder" role="img" aria-label="图片加载中" />;
                             })}
                           </div>
                         </div>

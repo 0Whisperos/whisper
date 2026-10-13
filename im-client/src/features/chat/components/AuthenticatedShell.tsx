@@ -9,6 +9,7 @@ import { useThemeMode } from "../hooks/useThemeMode";
 import { useAvatarObjectUrl } from "../hooks/useAvatarObjectUrl";
 import type { useFriendRequests } from "../hooks/useFriendRequests";
 import { AvatarResourceCache } from "../avatarResourceCache";
+import { AttachmentResourceCache } from "../attachmentResourceCache";
 import type { EditableSelfProfile } from "../types";
 import { AccountMenu } from "./AccountMenu";
 import { BottomNav } from "./BottomNav";
@@ -44,6 +45,7 @@ interface AuthenticatedShellProps {
   apiBaseUrl?: string;
   accessToken?: string;
   avatarResourceCache?: AvatarResourceCache;
+  attachmentResourceCache?: AttachmentResourceCache;
   onSaveProfile: (profile: EditableSelfProfile) => Promise<void>;
 }
 
@@ -69,6 +71,7 @@ export function AuthenticatedShell({
   apiBaseUrl = "",
   accessToken = "",
   avatarResourceCache,
+  attachmentResourceCache,
   onSaveProfile,
 }: AuthenticatedShellProps) {
   const workspace = useChatWorkspace(data);
@@ -365,6 +368,8 @@ export function AuthenticatedShell({
             onPickFiles={handlePickImages}
             apiBaseUrl={apiBaseUrl}
             accessToken={accessToken}
+            userId={data.self.userId}
+            attachmentResourceCache={attachmentResourceCache}
             onRetryMessage={onRetryMessage}
             onReadThrough={onReadAck}
           />

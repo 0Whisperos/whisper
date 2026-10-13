@@ -114,6 +114,8 @@ function chatPanelElement(conversation: ChatConversation, onReadThrough = vi.fn(
       onSendText={vi.fn()}
       onRetryMessage={vi.fn()}
       onReadThrough={onReadThrough}
+      apiBaseUrl="https://api.test"
+      accessToken="test-token"
     />
   );
 }
@@ -408,7 +410,12 @@ describe("ChatPanel read visibility", () => {
     // 输入数据：会话 42 的 seq=9 含两张图片；列表高度依次为 200、300、400，clientHeight=100，失败后用户滚至 50。
     // 预期行为：贴底时尺寸变为 300 或图片失败均保持在底部；用户上滑后尺寸变为 400，scrollTop 仍为 50。
     vi.stubGlobal("ResizeObserver", TestResizeObserver as unknown as typeof ResizeObserver);
-    const downloadAuth = vi.spyOn(attachmentsApi, "requestDownloadAuthorizations").mockResolvedValue([]);
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:chat-image") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    const downloadAuth = vi.spyOn(attachmentsApi, "requestDownloadAuthorizations").mockImplementation(async (_url, _token, _conversation, ids) => ids.map((attachment_id) => ({
+      attachment_id, download_url: `https://cdn.test/${attachment_id}`, expires_at: "later", content_type: "image/png", size_bytes: 12,
+    })));
+    vi.spyOn(attachmentsApi, "fetchSignedImage").mockResolvedValue(new Blob(["image"], { type: "image/png" }));
     const richMessage: ChatMessage = {
       ...createPeerMessage(9),
       messageType: "rich",
@@ -421,6 +428,7 @@ describe("ChatPanel read visibility", () => {
     const { container } = renderChatPanel(createConversation([richMessage]));
     const list = container.querySelector<HTMLElement>(".auth-message-list")!;
     await waitFor(() => expect(downloadAuth).toHaveBeenCalled());
+    await waitFor(() => expect(container.querySelector(".auth-message-image")).not.toBeNull());
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -654,5 +662,34 @@ describe("ChatPanel attachment authorization", () => {
 
     await waitFor(() => expect(downloadAuth).toHaveBeenCalledWith("https://api.test", "token", 42, ["attached-image"]));
     expect(downloadAuth).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), 42, expect.arrayContaining(["uploaded-image"]));
+  });
+
+  it("shows a retry control when an image fails both its initial load and automatic recovery", async () => {
+    // 测试目标：验证图片初次显示后解码失败且一次自动恢复也失败时，界面展示可操作的失败提示。
+    // 构造方法：渲染一条正式图片消息，让首次签名图片下载成功、自动恢复下载失败，再触发 img error。
+    // 输入数据：附件 broken-image；第一次 fetchSignedImage 返回 PNG Blob，恢复请求抛出网络错误。
+    // 预期行为：自动恢复失败后移除已损坏的 img，显示“图片加载失败”和“重试图片”按钮。
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:broken-image") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(attachmentsApi, "requestDownloadAuthorizations").mockImplementation(async (_url, _token, _conversation, ids) => ids.map((attachment_id) => ({
+      attachment_id, download_url: `https://cdn.test/${attachment_id}`, expires_at: "later", content_type: "image/png", size_bytes: 12,
+    })));
+    vi.spyOn(attachmentsApi, "fetchSignedImage")
+      .mockResolvedValueOnce(new Blob(["image"], { type: "image/png" }))
+      .mockRejectedValueOnce(new Error("download_failed"));
+    const message: ChatMessage = {
+      ...createMessage(),
+      messageId: "message-broken-image",
+      messageType: "rich",
+      content: { blocks: [{ type: "image", attachment_id: "broken-image" }] },
+    };
+    const { container } = renderChatPanel(createConversation([message]));
+
+    const image = await screen.findByRole("img", { name: "聊天图片" });
+    fireEvent.error(image);
+
+    expect(await screen.findByRole("group", { name: "图片加载失败" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试图片" })).toBeInTheDocument();
+    expect(container.querySelector(".auth-message-image")).toBeNull();
   });
 });

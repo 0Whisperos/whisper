@@ -1,3 +1,4 @@
+mod attachment_cache;
 mod commands;
 mod config;
 mod credentials;
@@ -9,8 +10,12 @@ pub fn run() {
             commands::auth::load_saved_refresh_token,
             commands::auth::save_refresh_token,
             commands::auth::delete_refresh_token,
-            commands::config::load_client_config
+            commands::config::load_client_config,
+            commands::attachments::lookup_chat_image_cache,
+            commands::attachments::download_chat_images,
+            commands::attachments::invalidate_chat_image_cache
         ])
+        .manage(attachment_cache::AttachmentCache::new())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

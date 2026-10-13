@@ -1,5 +1,7 @@
 # 发送消息的理解
 
+相关专项文档：[聊天图片消息流程](chat-image-message-flow.md)、[聊天图片本地磁盘缓存方案（待实施）](chat-image-disk-cache.md)。
+
 如果采用 CDC Outbox 策略，客户端发送消息时先生成 `client_message_id`，用于服务端识别同一次发送请求并保证幂等。`im-chat` 收到消息后，先基于 WebSocket 连接上下文确认发送者身份并校验消息格式；随后在同一个 MySQL 事务中完成会话成员校验、幂等处理、会话序号分配、消息落库和 Outbox 事件写入。
 
 `conversation_seq` 是每条消息在单个会话内的递增序号，应写入 `messages` 表。`conversations` 表可以保存 `last_seq`，用于在事务中分配下一条消息的 `conversation_seq`。分配时不能简单地先查最大值再加一，而应在事务内锁定对应会话行，递增 `last_seq`，再写入消息，避免同一会话并发发送时分配出重复序号。
