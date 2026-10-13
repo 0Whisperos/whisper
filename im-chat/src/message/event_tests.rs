@@ -130,3 +130,27 @@ fn accepts_text_limit_and_rejects_zero_conversation() {
     event.message.conversation_id = 0;
     assert!(event.validate().is_err());
 }
+
+#[test]
+fn accepts_rich_event_without_reordering_blocks_or_exposing_storage_keys() {
+    // 测试目标：验证 Kafka/outbox 事件接受 rich blocks，保留编辑顺序并只携带稳定附件 ID。
+    // 构造方法：将合法事件改为含图片、文字、图片的 rich 消息后序列化并校验。
+    // 输入数据：两个附件 UUID 和位于其间的文本块。
+    // 预期行为：事件校验成功，round trip 后 blocks 顺序不变且内容不含 object_key。
+    let mut event = event();
+    event.message.message_type = "rich".to_owned();
+    event.message.content = json!({ "blocks": [
+        { "type": "image", "attachment_id": "550e8400-e29b-41d4-a716-446655440002" },
+        { "type": "text", "text": "caption" },
+        { "type": "image", "attachment_id": "550e8400-e29b-41d4-a716-446655440003" }
+    ] });
+
+    event.validate().expect("rich event should be valid");
+    let value = serde_json::to_value(&event).expect("serialize rich event");
+    let decoded: MessageCreatedEvent = serde_json::from_value(value).expect("decode rich event");
+    decoded
+        .validate()
+        .expect("decoded event should remain valid");
+    assert_eq!(decoded.message.content["blocks"][1]["text"], "caption");
+    assert!(decoded.message.content.get("object_key").is_none());
+}

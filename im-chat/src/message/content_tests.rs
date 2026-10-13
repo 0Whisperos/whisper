@@ -30,6 +30,96 @@ fn validate_send_payload_accepts_and_normalizes_text_content() {
 }
 
 #[test]
+fn validate_send_payload_preserves_rich_block_order_and_hashes_attachment_ids() {
+    // 测试目标：验证 rich 内容保留文字与图片交错顺序，并把附件 ID 纳入稳定哈希。
+    // 构造方法：使用合法 UUID 作为图片块，在两段文字之间交错排列后校验。
+    // 输入数据：图片 A、文字“before”、图片 B、文字“after”的 blocks。
+    // 预期行为：规范化内容顺序与输入相同，且图片 ID 出现在规范化内容中。
+    let mut payload = valid_payload();
+    payload.message_type = super::super::RICH.to_string();
+    payload.content = json!({ "blocks": [
+        { "type": "image", "attachment_id": "550e8400-e29b-41d4-a716-446655440001" },
+        { "type": "text", "text": "before" },
+        { "type": "image", "attachment_id": "550e8400-e29b-41d4-a716-446655440002" },
+        { "type": "text", "text": "after" }
+    ] });
+
+    let validated = validate_send_payload(&payload).expect("rich payload should be valid");
+
+    assert_eq!(validated.message_type, super::super::RICH);
+    assert_eq!(validated.content, payload.content);
+    assert_eq!(
+        validated.attachment_ids,
+        vec![
+            "550e8400-e29b-41d4-a716-446655440001",
+            "550e8400-e29b-41d4-a716-446655440002",
+        ]
+    );
+    assert_eq!(validated.content_hash, content_hash(&payload.content));
+}
+
+#[test]
+fn validate_send_payload_accepts_image_only_rich_message() {
+    // 测试目标：验证允许不含文字、只包含图片的 rich 消息。
+    // 构造方法：构造一个包含单个合法图片 UUID 的 rich blocks 数组。
+    // 输入数据：一个 image block。
+    // 预期行为：校验成功并返回一项附件 ID。
+    let mut payload = valid_payload();
+    payload.message_type = super::super::RICH.to_string();
+    payload.content = json!({ "blocks": [
+        { "type": "image", "attachment_id": "550e8400-e29b-41d4-a716-446655440001" }
+    ] });
+
+    let validated = validate_send_payload(&payload).expect("image-only rich message should pass");
+
+    assert_eq!(validated.attachment_ids.len(), 1);
+}
+
+#[test]
+fn validate_send_payload_rejects_rich_content_without_visible_content() {
+    // 测试目标：验证空 blocks 或仅含空白文字的 rich 消息被拒绝。
+    // 构造方法：分别校验空数组和空白 text block 两种无有效内容场景。
+    // 输入数据：{ "blocks": [] } 与一个 text="  " 的 blocks。
+    // 预期行为：两种输入都返回 InvalidMessage。
+    let mut payload = valid_payload();
+    payload.message_type = super::super::RICH.to_string();
+    for content in [
+        json!({ "blocks": [] }),
+        json!({ "blocks": [{ "type": "text", "text": "  " }] }),
+    ] {
+        payload.content = content;
+        assert_eq!(
+            validate_send_payload(&payload).expect_err("empty rich content should fail"),
+            ContentValidationError::InvalidMessage
+        );
+    }
+}
+
+#[test]
+fn validate_send_payload_rejects_rich_limits_and_unknown_fields() {
+    // 测试目标：验证 rich 消息遵守文字长度、图片数量和严格字段限制。
+    // 构造方法：依次提供超长文字、11 张图及带未知字段的 block。
+    // 输入数据：文字 4097 字符、11 个合法图片 block、含 extra 字段的图片 block。
+    // 预期行为：每种输入均返回 InvalidMessage。
+    let image_id = "550e8400-e29b-41d4-a716-446655440001";
+    let mut payload = valid_payload();
+    payload.message_type = super::super::RICH.to_string();
+    let oversized_text =
+        json!({ "blocks": [{ "type": "text", "text": "a".repeat(MAX_TEXT_MESSAGE_CHARS + 1) }] });
+    let too_many_images = json!({ "blocks": (0..=MAX_RICH_IMAGES).map(|_| json!({ "type": "image", "attachment_id": image_id })).collect::<Vec<_>>() });
+    let unknown_field =
+        json!({ "blocks": [{ "type": "image", "attachment_id": image_id, "extra": true }] });
+
+    for content in [oversized_text, too_many_images, unknown_field] {
+        payload.content = content;
+        assert_eq!(
+            validate_send_payload(&payload).expect_err("invalid rich content should fail"),
+            ContentValidationError::InvalidMessage
+        );
+    }
+}
+
+#[test]
 fn validate_send_payload_rejects_unknown_message_type() {
     // 测试目标：验证第一阶段只允许 text 消息类型。
     // 构造方法：把合法 payload 的 message_type 改为 image。

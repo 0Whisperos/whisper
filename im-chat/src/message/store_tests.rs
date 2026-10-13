@@ -243,6 +243,122 @@ async fn accept_message_rejects_non_member() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL pointing to a dedicated MySQL database"]
+async fn rich_message_attaches_uploaded_attachments_and_preserves_outbox_blocks() {
+    // 测试目标：验证 rich 消息事务将上传完成的图片附件关联，并按原顺序写入 outbox。
+    // 构造方法：建立两个 uploaded 附件，再发送包含图片、文字、图片的 rich 消息。
+    // 输入数据：同一会话的两个图片 UUID 与交错 blocks。
+    // 预期行为：消息、outbox blocks 顺序相同，两个附件状态转为 attached 且指向该消息。
+    let pool = test_pool().await;
+    ensure_schema(&pool).await;
+    let fixture = TestFixture::create(&pool, 20001, true).await;
+    let first_id = uuid::Uuid::new_v4().to_string();
+    let second_id = uuid::Uuid::new_v4().to_string();
+    insert_uploaded_attachment(&pool, &first_id, 20001, fixture.conversation_id, 100).await;
+    insert_uploaded_attachment(&pool, &second_id, 20001, fixture.conversation_id, 200).await;
+    let mut payload = valid_payload(uuid::Uuid::new_v4().to_string(), fixture.conversation_id);
+    payload.message_type = super::super::RICH.to_string();
+    payload.content = json!({ "blocks": [
+        { "type": "image", "attachment_id": first_id },
+        { "type": "text", "text": "caption" },
+        { "type": "image", "attachment_id": second_id }
+    ] });
+
+    let accepted = accept_message(&pool, 20001, payload)
+        .await
+        .expect("rich send should pass");
+
+    assert_eq!(accepted.message_type, super::super::RICH);
+    assert_eq!(accepted.content["blocks"][0]["type"], "image");
+    assert_eq!(accepted.content["blocks"][1]["text"], "caption");
+    assert_eq!(accepted.content["blocks"][2]["attachment_id"], second_id);
+    let statuses: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT status, message_id FROM attachments WHERE attachment_id IN (?, ?) ORDER BY attachment_id",
+    )
+    .bind(&first_id)
+    .bind(&second_id)
+    .fetch_all(&pool)
+    .await
+    .expect("attachment status should load");
+    assert_eq!(statuses.len(), 2);
+    assert!(
+        statuses
+            .iter()
+            .all(|(status, message_id)| status == "attached"
+                && message_id.as_deref() == Some(&accepted.message_id))
+    );
+    let outbox_payload: String = sqlx::query_scalar(
+        "SELECT CAST(payload AS CHAR) FROM outbox_events WHERE aggregateid = ? AND type = ? ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.conversation_id.to_string())
+    .bind(MESSAGE_CREATED)
+    .fetch_one(&pool)
+    .await
+    .expect("rich outbox event should load");
+    let value: serde_json::Value = serde_json::from_str(&outbox_payload).expect("outbox is JSON");
+    assert_eq!(
+        value["message"]["content"]["blocks"],
+        accepted.content["blocks"]
+    );
+    fixture.cleanup(&pool).await;
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a dedicated MySQL database"]
+async fn invalid_attachment_rolls_back_message_sequence_and_prior_attachment_updates() {
+    // 测试目标：验证附件校验失败会回滚消息、序号和此前已处理附件的关联状态。
+    // 构造方法：按有效附件后无效附件顺序插入 blocks，第二个附件绑定到其他会话。
+    // 输入数据：两个 uploaded 附件，其中第二个会话 ID 与目标会话不同。
+    // 预期行为：返回 AttachmentForbidden，消息/outbox 不存在，序号不变，附件仍为 uploaded。
+    let pool = test_pool().await;
+    ensure_schema(&pool).await;
+    let fixture = TestFixture::create(&pool, 20001, true).await;
+    let first_id = uuid::Uuid::new_v4().to_string();
+    let second_id = uuid::Uuid::new_v4().to_string();
+    insert_uploaded_attachment(&pool, &first_id, 20001, fixture.conversation_id, 100).await;
+    insert_uploaded_attachment(&pool, &second_id, 20001, fixture.conversation_id + 1, 100).await;
+    let mut payload = valid_payload(uuid::Uuid::new_v4().to_string(), fixture.conversation_id);
+    payload.message_type = super::super::RICH.to_string();
+    payload.content = json!({ "blocks": [
+        { "type": "image", "attachment_id": first_id },
+        { "type": "image", "attachment_id": second_id }
+    ] });
+
+    let error = accept_message(&pool, 20001, payload)
+        .await
+        .expect_err("foreign attachment should fail");
+
+    assert!(matches!(error, AcceptMessageError::AttachmentForbidden));
+    let last_seq: u64 = sqlx::query_scalar("SELECT last_seq FROM conversations WHERE id = ?")
+        .bind(fixture.conversation_id)
+        .fetch_one(&pool)
+        .await
+        .expect("conversation sequence should load");
+    let message_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE conversation_id = ?")
+            .bind(fixture.conversation_id)
+            .fetch_one(&pool)
+            .await
+            .expect("message count should load");
+    let first_status: String =
+        sqlx::query_scalar("SELECT status FROM attachments WHERE attachment_id = ?")
+            .bind(&first_id)
+            .fetch_one(&pool)
+            .await
+            .expect("attachment status should load");
+    assert_eq!(last_seq, 0);
+    assert_eq!(message_count, 0);
+    assert_eq!(first_status, "uploaded");
+    sqlx::query("DELETE FROM attachments WHERE attachment_id IN (?, ?)")
+        .bind(&first_id)
+        .bind(&second_id)
+        .execute(&pool)
+        .await
+        .expect("delete rollback test attachments");
+    fixture.cleanup(&pool).await;
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a dedicated MySQL database"]
 async fn concurrent_same_key_requests_both_miss_then_recover_the_committed_message() {
     // 测试目标：验证两个请求都完成首次幂等未命中后，唯一键冲突方回滚并恢复同一已提交消息。
     // 构造方法：启用双请求 barrier，在独立数据库连接上并发发送完全相同的 payload。
@@ -370,6 +486,53 @@ async fn ensure_schema(pool: &MySqlPool) {
     .execute(pool)
     .await
     .expect("create outbox_events table");
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS attachments (
+            attachment_id CHAR(36) PRIMARY KEY,
+            uploader_user_id BIGINT UNSIGNED NOT NULL,
+            conversation_id BIGINT UNSIGNED NOT NULL,
+            object_key VARCHAR(1024) NOT NULL,
+            file_name VARCHAR(255) NOT NULL,
+            content_type VARCHAR(128) NOT NULL,
+            size_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            status VARCHAR(16) NOT NULL,
+            message_id CHAR(36) NULL,
+            expires_at DATETIME(6) NOT NULL,
+            created_at DATETIME(6) NOT NULL,
+            updated_at DATETIME(6) NOT NULL,
+            INDEX idx_attachments_message (message_id)
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("create attachments table");
+}
+
+async fn insert_uploaded_attachment(
+    pool: &MySqlPool,
+    attachment_id: &str,
+    uploader_user_id: u64,
+    conversation_id: u64,
+    size_bytes: u64,
+) {
+    let now = to_database_datetime(OffsetDateTime::now_utc());
+    sqlx::query(
+        "INSERT INTO attachments \
+         (attachment_id, uploader_user_id, conversation_id, object_key, file_name, content_type, \
+          size_bytes, status, message_id, expires_at, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, 'image.png', 'image/png', ?, 'uploaded', NULL, ?, ?, ?)",
+    )
+    .bind(attachment_id)
+    .bind(uploader_user_id)
+    .bind(conversation_id)
+    .bind(format!("test/{attachment_id}"))
+    .bind(size_bytes)
+    .bind(now)
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("insert uploaded attachment");
 }
 
 struct TestFixture {
@@ -409,6 +572,11 @@ impl TestFixture {
 
     async fn cleanup(self, pool: &MySqlPool) {
         let conversation_id = self.conversation_id;
+        sqlx::query("DELETE FROM attachments WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .execute(pool)
+            .await
+            .expect("delete test attachments");
         sqlx::query("DELETE FROM outbox_events WHERE aggregateid = ?")
             .bind(conversation_id.to_string())
             .execute(pool)

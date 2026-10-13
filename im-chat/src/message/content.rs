@@ -1,10 +1,11 @@
-use super::{SendMessagePayload, TEXT};
+use super::{RICH, SendMessagePayload, TEXT};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 pub(super) const MAX_TEXT_MESSAGE_CHARS: usize = 4096;
+pub(super) const MAX_RICH_IMAGES: usize = 10;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum ContentValidationError {
@@ -16,12 +17,28 @@ pub(super) struct ValidatedMessage {
     pub(super) message_type: String,
     pub(super) content: serde_json::Value,
     pub(super) content_hash: String,
+    pub(super) attachment_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TextPayload {
     text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RichPayload {
+    blocks: Vec<RichBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", deny_unknown_fields)]
+enum RichBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image { attachment_id: String },
 }
 
 pub(super) fn validate_send_payload(
@@ -33,8 +50,56 @@ pub(super) fn validate_send_payload(
 
     match payload.message_type.as_str() {
         TEXT => validate_text_content(payload.content.clone()),
+        RICH => validate_rich_content(payload.content.clone()),
         _ => Err(ContentValidationError::InvalidMessage),
     }
+}
+
+fn validate_rich_content(
+    content: serde_json::Value,
+) -> Result<ValidatedMessage, ContentValidationError> {
+    let content = serde_json::from_value::<RichPayload>(content)
+        .map_err(|_| ContentValidationError::InvalidMessage)?;
+    let mut text_chars = 0;
+    let mut image_count = 0;
+    let mut has_content = false;
+    let mut attachment_ids = Vec::new();
+    let mut seen_attachment_ids = std::collections::HashSet::new();
+    let mut normalized_blocks = Vec::with_capacity(content.blocks.len());
+    for block in content.blocks {
+        match block {
+            RichBlock::Text { text } => {
+                text_chars += text.chars().count();
+                has_content |= !text.trim().is_empty();
+                normalized_blocks.push(serde_json::json!({ "type": "text", "text": text }));
+            }
+            RichBlock::Image { attachment_id } => {
+                if attachment_id.len() != 36 || uuid::Uuid::parse_str(&attachment_id).is_err() {
+                    return Err(ContentValidationError::InvalidMessage);
+                }
+                if !seen_attachment_ids.insert(attachment_id.clone()) {
+                    return Err(ContentValidationError::InvalidMessage);
+                }
+                image_count += 1;
+                has_content = true;
+                attachment_ids.push(attachment_id.clone());
+                normalized_blocks
+                    .push(serde_json::json!({ "type": "image", "attachment_id": attachment_id }));
+            }
+        }
+    }
+    if !has_content || text_chars > MAX_TEXT_MESSAGE_CHARS || image_count > MAX_RICH_IMAGES {
+        return Err(ContentValidationError::InvalidMessage);
+    }
+
+    let content = serde_json::json!({ "blocks": normalized_blocks });
+    let content_hash = content_hash(&content);
+    Ok(ValidatedMessage {
+        message_type: RICH.to_string(),
+        content,
+        content_hash,
+        attachment_ids,
+    })
 }
 
 fn validate_client_message_id(client_message_id: &str) -> Result<(), ContentValidationError> {
@@ -74,6 +139,7 @@ fn validate_text_content(
         message_type: TEXT.to_string(),
         content,
         content_hash,
+        attachment_ids: Vec::new(),
     })
 }
 

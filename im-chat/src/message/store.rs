@@ -1,8 +1,9 @@
 use super::content::{self, ValidatedMessage};
 use super::event::MessageCreatedEvent;
 use super::{
-    AcceptedMessage, CONVERSATION_NOT_FOUND, DUPLICATE_CLIENT_MESSAGE_CONFLICT, INTERNAL_ERROR,
-    INVALID_MESSAGE, NOT_CONVERSATION_MEMBER, SendMessagePayload,
+    ATTACHMENT_FORBIDDEN, ATTACHMENT_NOT_READY, AcceptedMessage, CONVERSATION_NOT_FOUND,
+    DUPLICATE_CLIENT_MESSAGE_CONFLICT, INTERNAL_ERROR, INVALID_MESSAGE, NOT_CONVERSATION_MEMBER,
+    SendMessagePayload,
 };
 use crate::db_time::{from_database_datetime, to_database_datetime, to_storage_offset};
 use sqlx::mysql::{MySqlQueryResult, MySqlRow};
@@ -12,6 +13,8 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 
 const DIRECT_CONVERSATION: &str = "direct";
 const ACTIVE_MEMBER: &str = "active";
+const MAX_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
 
 #[cfg(test)]
 static IDEMPOTENCY_MISS_BARRIER: std::sync::Mutex<
@@ -28,6 +31,12 @@ pub(super) enum AcceptMessageError {
 
     #[error("not a conversation member")]
     NotConversationMember,
+
+    #[error("attachment is not ready")]
+    AttachmentNotReady,
+
+    #[error("attachment is unavailable for this sender or conversation")]
+    AttachmentForbidden,
 
     #[error("duplicate client message conflict")]
     DuplicateClientMessageConflict,
@@ -53,6 +62,11 @@ impl AcceptMessageError {
             Self::NotConversationMember => (
                 NOT_CONVERSATION_MEMBER,
                 "current user is not an active member of the conversation",
+            ),
+            Self::AttachmentNotReady => (ATTACHMENT_NOT_READY, "attachment is not ready"),
+            Self::AttachmentForbidden => (
+                ATTACHMENT_FORBIDDEN,
+                "attachment is unavailable for this sender or conversation",
             ),
             Self::DuplicateClientMessageConflict => (
                 DUPLICATE_CLIENT_MESSAGE_CONFLICT,
@@ -118,6 +132,7 @@ pub(super) async fn accept_message(
         return Err(AcceptMessageError::InternalSql { source: error });
     }
 
+    associate_attachments(&mut tx, &message, &validated.attachment_ids, created_at).await?;
     insert_outbox_event(&mut tx, &message, now, created_at).await?;
     tx.commit().await?;
     Ok(message)
@@ -346,6 +361,67 @@ async fn wait_at_idempotency_miss_barrier(client_message_id: &str) {
     if let Some(barrier) = barrier {
         barrier.wait().await;
     }
+}
+
+async fn associate_attachments(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    message: &AcceptedMessage,
+    attachment_ids: &[String],
+    updated_at: PrimitiveDateTime,
+) -> Result<(), AcceptMessageError> {
+    if attachment_ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut total_bytes = 0_u64;
+    for attachment_id in attachment_ids {
+        let row = sqlx::query(
+            "SELECT uploader_user_id, conversation_id, size_bytes, status \
+             FROM attachments WHERE attachment_id = ? FOR UPDATE",
+        )
+        .bind(attachment_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        let Some(row) = row else {
+            return Err(AcceptMessageError::AttachmentForbidden);
+        };
+        let uploader_user_id: u64 = row.try_get("uploader_user_id")?;
+        let conversation_id: u64 = row.try_get("conversation_id")?;
+        if uploader_user_id != message.sender_user_id || conversation_id != message.conversation_id
+        {
+            return Err(AcceptMessageError::AttachmentForbidden);
+        }
+        let status: String = row.try_get("status")?;
+        if status != "uploaded" {
+            return Err(AcceptMessageError::AttachmentNotReady);
+        }
+        let size_bytes: u64 = row.try_get("size_bytes")?;
+        if size_bytes > MAX_ATTACHMENT_BYTES {
+            return Err(AcceptMessageError::AttachmentNotReady);
+        }
+        total_bytes = total_bytes.saturating_add(size_bytes);
+        if total_bytes > MAX_TOTAL_ATTACHMENT_BYTES {
+            return Err(AcceptMessageError::AttachmentNotReady);
+        }
+    }
+
+    for attachment_id in attachment_ids {
+        let result = sqlx::query(
+            "UPDATE attachments SET status = 'attached', message_id = ?, updated_at = ? \
+             WHERE attachment_id = ? AND uploader_user_id = ? AND conversation_id = ? AND status = 'uploaded'",
+        )
+        .bind(&message.message_id)
+        .bind(updated_at)
+        .bind(attachment_id)
+        .bind(message.sender_user_id)
+        .bind(message.conversation_id)
+        .execute(&mut **tx)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(AcceptMessageError::AttachmentNotReady);
+        }
+    }
+    Ok(())
 }
 
 fn is_idempotency_duplicate_key_error(error: &sqlx::Error) -> bool {

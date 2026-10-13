@@ -12,9 +12,12 @@ const SEND_MESSAGE_REJECTED: &str = "send_message_rejected";
 pub(crate) const INVALID_MESSAGE: &str = "invalid_message";
 pub(crate) const CONVERSATION_NOT_FOUND: &str = "conversation_not_found";
 pub(crate) const NOT_CONVERSATION_MEMBER: &str = "not_conversation_member";
+pub(crate) const ATTACHMENT_NOT_READY: &str = "attachment_not_ready";
+pub(crate) const ATTACHMENT_FORBIDDEN: &str = "attachment_forbidden";
 pub(crate) const DUPLICATE_CLIENT_MESSAGE_CONFLICT: &str = "duplicate_client_message_conflict";
 pub(crate) const INTERNAL_ERROR: &str = "internal_error";
 pub(crate) const TEXT: &str = "text";
+pub(crate) const RICH: &str = "rich";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
