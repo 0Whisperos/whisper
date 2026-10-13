@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { connectChatWebSocket, type ChatConnectionController } from "../api";
-import type { ChatBusinessServerFrame, ChatConnectionState, ChatSendTextMessageInput, WebSocketFactory } from "../types";
+import type { ChatBusinessServerFrame, ChatConnectionState, ChatSendRichMessageInput, ChatSendTextMessageInput, WebSocketFactory } from "../types";
 import type { AuthSession } from "../../login/types";
 
 const TOKEN_REFRESH_LEAD_TIME_MS = 60_000;
@@ -134,6 +134,10 @@ export function useChatConnection({
         throw new Error("chat connection is not available");
       }
       controllerRef.current.sendTextMessage(input);
+    },
+    sendRichMessage: (input: ChatSendRichMessageInput) => {
+      if (!controllerRef.current) throw new Error("chat connection is not available");
+      controllerRef.current.sendRichMessage(input);
     },
     sendDeliveredAck,
     sendReadAck,

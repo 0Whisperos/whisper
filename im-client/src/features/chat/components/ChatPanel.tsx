@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { ChatApiError } from "../api";
 import type { ChatConversation, ChatSelfProfile } from "../types";
 import { formatHoverMessageTime, isCompactMessage } from "../hooks/messageTimeline";
 import { Avatar, Icon, IconButton } from "./ui";
 import { Composer } from "./Composer";
+import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
+import { downloadAuthorizationRefreshDelay, fetchSignedImage, requestDownloadAuthorizations } from "../attachmentsApi";
 
 const MESSAGE_LIST_BOTTOM_THRESHOLD = 32;
+const EMPTY_DRAFT_BLOCKS: ChatDraftBlock[] = [{ type: "text", id: "text-0", text: "" }];
 
 interface ChatPanelProps {
   conversation: ChatConversation;
@@ -24,10 +27,16 @@ interface ChatPanelProps {
   onReturnToSessions: () => void;
   onOpenDetail: (trigger: HTMLButtonElement) => void;
   onToolPreview: (name: string) => void;
-  onChangeDraft: (value: string) => void;
+  onChangeDraft?: (value: string) => void;
   onSendText: (text: string) => void;
   onRetryMessage: (clientMessageId: string) => void;
   onReadThrough?: (conversationId: number, readSeq: number) => void;
+  draftBlocks?: ChatDraftBlock[];
+  onChangeDraftBlocks?: (blocks: ChatDraftBlock[]) => void;
+  onPickFiles?: (files: File[]) => DraftImageBlock[];
+  onSendRich?: () => void;
+  apiBaseUrl?: string;
+  accessToken?: string;
 }
 
 export function ChatPanel({
@@ -46,23 +55,104 @@ export function ChatPanel({
   onReturnToSessions,
   onOpenDetail,
   onToolPreview,
-  onChangeDraft,
   onSendText,
   onRetryMessage,
   onReadThrough,
+  draftBlocks = EMPTY_DRAFT_BLOCKS, onChangeDraftBlocks = () => undefined, onPickFiles = () => [],
+  onSendRich = () => undefined, apiBaseUrl = "", accessToken = "",
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
   const [hoveredMessageKey, setHoveredMessageKey] = useState<string | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const isAtBottomRef = useRef(true);
+  const shouldStickToBottomRef = useRef(true);
   const previousConversationRef = useRef<number | null>(null);
   const previousLatestMessageKeyRef = useRef<string | null>(null);
+  const previousHistoryLoadingRef = useRef(isHistoryLoading);
   const unreadCount = unreadIncomingCount(conversation, self.userId);
+  const attachmentIds = useMemo(() => Array.from(new Set(conversation.messages.flatMap((message) =>
+    message.messageId !== null && message.localStatus === "accepted" && "blocks" in message.content
+      ? message.content.blocks.filter((block) => block.type === "image").map((block) => block.attachment_id)
+      : []
+  ))).sort(), [conversation.messages]);
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  const [imageRefresh, setImageRefresh] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const objectUrls: string[] = [];
+    if (attachmentIds.length === 0) { setImageUrls({}); return; }
+    let refreshTimeout: number | null = null;
+    const scheduleRefresh = (delay: number) => {
+      if (refreshTimeout !== null) window.clearTimeout(refreshTimeout);
+      refreshTimeout = window.setTimeout(() => { if (!cancelled) setImageRefresh((value) => value + 1); }, delay);
+    };
+    void (async () => {
+      try {
+        const pairs: Array<readonly [string, string]> = [];
+        let earliestExpiry = Number.POSITIVE_INFINITY;
+        for (let offset = 0; offset < attachmentIds.length; offset += 10) {
+          const batch = attachmentIds.slice(offset, offset + 10);
+          let auths = await requestDownloadAuthorizations(apiBaseUrl, accessToken, conversation.conversationId, batch);
+          let downloaded: Array<readonly [string, Blob]>;
+          try {
+            downloaded = await Promise.all(auths.map(async (auth) => [auth.attachment_id, await fetchSignedImage(auth.download_url)] as const));
+          } catch {
+            auths = await requestDownloadAuthorizations(apiBaseUrl, accessToken, conversation.conversationId, batch);
+            downloaded = await Promise.all(auths.map(async (auth) => [auth.attachment_id, await fetchSignedImage(auth.download_url)] as const));
+          }
+          for (const auth of auths) {
+            const expiry = Date.parse(auth.expires_at);
+            if (!Number.isNaN(expiry)) earliestExpiry = Math.min(earliestExpiry, expiry);
+          }
+          for (const [id, blob] of downloaded) {
+            const url = URL.createObjectURL(blob);
+            objectUrls.push(url);
+            pairs.push([id, url]);
+          }
+        }
+        if (!cancelled) {
+          setImageUrls(Object.fromEntries(pairs));
+          scheduleRefresh(Number.isFinite(earliestExpiry)
+            ? downloadAuthorizationRefreshDelay(new Date(earliestExpiry).toISOString())
+            : 60_000);
+        }
+      } catch {
+        if (!cancelled) {
+          setImageUrls({});
+          scheduleRefresh(10_000);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (refreshTimeout !== null) clearTimeout(refreshTimeout);
+      if (typeof URL.revokeObjectURL === "function") objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [accessToken, apiBaseUrl, attachmentIds, conversation.conversationId, imageRefresh]);
   const updateBottomState = useCallback((list: HTMLElement) => {
     const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop <= MESSAGE_LIST_BOTTOM_THRESHOLD;
     isAtBottomRef.current = atBottom;
+    shouldStickToBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
   }, []);
+  const keepBottomAfterLayoutChange = useCallback(() => {
+    const list = messageListRef.current;
+    if (!list || !shouldStickToBottomRef.current) {
+      return;
+    }
+    list.scrollTop = list.scrollHeight;
+    updateBottomState(list);
+  }, [updateBottomState]);
+
+  useEffect(() => {
+    const list = messageListRef.current;
+    if (!list || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() => keepBottomAfterLayoutChange());
+    list.querySelectorAll<HTMLElement>(".auth-message-group").forEach((group) => observer.observe(group));
+    return () => observer.disconnect();
+  }, [conversation.conversationId, conversation.messages, keepBottomAfterLayoutChange]);
   const pendingScrollAnchorRef = useRef<{
     conversationId: number;
     messageKey: string | null;
@@ -107,21 +197,30 @@ export function ChatPanel({
     const latestMessageKey = latestMessage?.localKey ?? null;
     const isConversationChange = previousConversationRef.current !== conversation.conversationId;
     const isNewLatestMessage = previousLatestMessageKeyRef.current !== latestMessageKey;
+    const hasJustFinishedLoadingHistory = previousHistoryLoadingRef.current && !isHistoryLoading;
 
     previousConversationRef.current = conversation.conversationId;
     previousLatestMessageKeyRef.current = latestMessageKey;
+    previousHistoryLoadingRef.current = isHistoryLoading;
 
     if (!list) {
       return;
     }
-    if (isConversationChange || (isNewLatestMessage && latestMessage?.senderUserId === self.userId)) {
+    if (isConversationChange) {
+      shouldStickToBottomRef.current = true;
+      list.scrollTop = list.scrollHeight;
+      updateBottomState(list);
+    } else if (hasJustFinishedLoadingHistory && shouldStickToBottomRef.current) {
+      list.scrollTop = list.scrollHeight;
+      updateBottomState(list);
+    } else if (isNewLatestMessage && latestMessage?.senderUserId === self.userId) {
       list.scrollTop = list.scrollHeight;
       updateBottomState(list);
     } else if (isNewLatestMessage && isAtBottomRef.current) {
       list.scrollTop = list.scrollHeight;
       updateBottomState(list);
     }
-  }, [conversation.conversationId, conversation.messages, self.userId, updateBottomState]);
+  }, [conversation.conversationId, conversation.messages, isHistoryLoading, self.userId, updateBottomState]);
 
   useEffect(() => {
     const list = messageListRef.current;
@@ -229,7 +328,26 @@ export function ChatPanel({
                           {hoverTime}
                         </time>
                       ) : null}
-                      <p className="auth-message-bubble">{message.content.text}</p>
+                      {"text" in message.content ? <p className="auth-message-bubble">{message.content.text}</p> : (
+                        <div className="auth-message-bubble auth-rich-message-bubble" role="group" aria-label="富文本消息">
+                          <div className="auth-rich-message-blocks">
+                            {message.content.blocks.map((block, blockIndex) => {
+                              if (block.type === "text") {
+                                return <p className="auth-rich-message-text" key={`text-${blockIndex}`}>{block.text}</p>;
+                              }
+                              const imageUrl = block.previewUrl ?? imageUrls[block.attachment_id];
+                              return imageUrl
+                                ? <img key={block.attachment_id} className="auth-message-image" alt="聊天图片" src={imageUrl}
+                                  onLoad={keepBottomAfterLayoutChange}
+                                  onError={() => {
+                                    setImageRefresh((value) => value + 1);
+                                    keepBottomAfterLayoutChange();
+                                  }} />
+                                : <span key={block.attachment_id} className="auth-message-image-placeholder" role="img" aria-label="图片加载中" />;
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   {message.receipt ? (
@@ -284,12 +402,15 @@ export function ChatPanel({
         </div>
       ) : null}
       <Composer
+        key={conversation.conversationId}
         draft={draft}
         canSend={canSend}
         statusMessage={statusMessage}
-        onChangeDraft={onChangeDraft}
         onToolPreview={onToolPreview}
-        onSendText={onSendText}
+        blocks={draftBlocks}
+        onChangeBlocks={onChangeDraftBlocks}
+        onPickFiles={onPickFiles}
+        onSendText={(text) => draftBlocks.some((block) => block.type === "image") ? onSendRich() : onSendText(text)}
       />
     </section>
   );

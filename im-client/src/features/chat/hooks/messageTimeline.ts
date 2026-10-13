@@ -16,8 +16,8 @@ export interface ServerTextMessage {
   conversation_seq: number;
   sender_user_id: number;
   client_message_id: string;
-  message_type: "text";
-  content: { text: string };
+  message_type: "text" | "rich";
+  content: ChatMessage["content"];
   created_at: string;
 }
 
@@ -210,7 +210,7 @@ function toOfficialMessage(incoming: ServerTextMessage, local?: ChatMessage): Ch
     conversationSeq: incoming.conversation_seq,
     senderUserId: incoming.sender_user_id,
     clientMessageId: incoming.client_message_id,
-    messageType: "text",
+    messageType: incoming.message_type,
     content: incoming.content,
     createdAt: incoming.created_at,
     clientSentAt: local?.clientSentAt ?? incoming.created_at,
@@ -234,7 +234,7 @@ function replaceConversationMessages(data: ChatData, conversationId: number, uns
     sessions: data.sessions.map((session) => session.conversationId === conversationId
       ? {
         ...session,
-        preview: lastMessage?.content.text ?? "暂无消息",
+        preview: messagePreview(lastMessage) ?? "暂无消息",
         time: lastMessage ? formatMessageTime(lastMessage.createdAt ?? lastMessage.clientSentAt) : "",
       }
       : session),
@@ -243,6 +243,29 @@ function replaceConversationMessages(data: ChatData, conversationId: number, uns
       [conversationId]: { ...conversation, messages },
     },
   };
+}
+
+export function insertPendingRichMessage(data: ChatData, input: {
+  conversationId: number; senderUserId: number; clientMessageId: string;
+  blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>;
+  clientSentAt: string;
+}): ChatData {
+  const conversation = data.conversations[input.conversationId];
+  if (!conversation || conversation.messages.some((message) => message.clientMessageId === input.clientMessageId)) return data;
+  const message: ChatMessage = {
+    localKey: `local:${input.clientMessageId}`, messageId: null, conversationId: input.conversationId,
+    conversationSeq: null, senderUserId: input.senderUserId, clientMessageId: input.clientMessageId,
+    messageType: "rich", content: { blocks: input.blocks }, createdAt: null, clientSentAt: input.clientSentAt,
+    localStatus: "sending", displayTime: formatMessageTime(input.clientSentAt), showTime: true, showAvatar: true,
+  };
+  return replaceConversationMessages(data, input.conversationId, [...conversation.messages, message]);
+}
+
+function messagePreview(message: ChatMessage | undefined): string | undefined {
+  if (!message) return undefined;
+  if ("text" in message.content) return message.content.text;
+  const first = message.content.blocks.find((block) => block.type === "text");
+  return first?.type === "text" ? first.text : "[图片]";
 }
 
 function getMessageTimestamp(message: ChatMessage): string {

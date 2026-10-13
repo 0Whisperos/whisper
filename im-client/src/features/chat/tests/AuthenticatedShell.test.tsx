@@ -209,11 +209,11 @@ describe("AuthenticatedShell", () => {
     expect(send).toBeDisabled();
     await user.clear(input);
     await user.type(input, "  测试发送  ");
-    expect(send).toBeEnabled();
+    expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled();
     await user.click(send);
 
     expect(onSendText).toHaveBeenCalledWith(10002, "测试发送");
-    expect(input).toHaveValue("");
+    expect(input).toHaveTextContent("");
     expect(screen.queryByText("发送仅作界面预览")).not.toBeInTheDocument();
   });
 
@@ -232,7 +232,7 @@ describe("AuthenticatedShell", () => {
     await user.keyboard("{Enter}");
 
     expect(onSendText).toHaveBeenCalledWith(10002, "回车发送");
-    expect(input).toHaveValue("");
+    expect(input).toHaveTextContent("");
   });
 
   it("inserts a newline with Shift+Enter without sending", async () => {
@@ -248,23 +248,25 @@ describe("AuthenticatedShell", () => {
     await user.type(input, "第一行");
     await user.keyboard("{Shift>}{Enter}{/Shift}");
 
-    expect(input).toHaveValue("第一行\n");
+    expect(input).toHaveTextContent("第一行");
+    expect(input.querySelector("br")).toBeInTheDocument();
     expect(onSendText).not.toHaveBeenCalled();
   });
 
-  it("does not send while the input method is composing text", () => {
+  it("does not send while the input method is composing text", async () => {
     // 测试目标：验证输入法组合候选词期间按 Enter 不会发送消息。
     // 构造方法：渲染可发送的工作台，输入组合文本并派发 isComposing=true 的 Enter 按键事件。
     // 输入数据：当前会话草稿“拼音”，键盘事件 key=Enter 且 isComposing=true。
     // 预期行为：草稿保持不变，发送回调未调用。
     const onSendText = vi.fn(() => true);
+    const user = userEvent.setup();
     renderShell({ canSendMessages: true, onSendText });
     const input = screen.getByLabelText("输入消息");
-    fireEvent.change(input, { target: { value: "拼音" } });
-
+    await user.type(input, "拼音");
+    fireEvent.compositionStart(input);
     fireEvent.keyDown(input, { key: "Enter", code: "Enter", isComposing: true });
 
-    expect(input).toHaveValue("拼音");
+    expect(input).toHaveTextContent("拼音");
     expect(onSendText).not.toHaveBeenCalled();
   });
 
@@ -282,7 +284,7 @@ describe("AuthenticatedShell", () => {
     await user.keyboard("{Enter}");
 
     expect(onSendText).not.toHaveBeenCalled();
-    expect(input).toHaveValue("");
+    expect(input).toHaveTextContent("");
   });
 
   it("keeps sending disabled while the chat connection is not authenticated", async () => {
@@ -398,14 +400,14 @@ describe("AuthenticatedShell", () => {
 
     await user.type(input, "   ");
     await user.click(screen.getByRole("button", { name: /周然 收到，明天同步/ }));
-    await user.type(input, "同步草稿");
+    await user.type(screen.getByLabelText("输入消息"), "同步草稿");
     await user.click(screen.getByRole("button", { name: /林晓 晚饭回家吃吗/ }));
 
-    expect(input).toHaveValue("   ");
+    expect(screen.getByLabelText("输入消息").textContent).toBe("   ");
     expect(send).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /周然 收到，明天同步/ }));
-    expect(input).toHaveValue("同步草稿");
-    expect(send).toBeEnabled();
+    expect(screen.getByLabelText("输入消息")).toHaveTextContent("同步草稿");
+    expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled();
   });
 
   it("shows preview feedback for tools without filtering mock sessions", async () => {

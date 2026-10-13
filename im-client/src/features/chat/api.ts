@@ -217,8 +217,8 @@ function isMessage(value: unknown): value is {
   conversation_seq: number;
   sender_user_id: number;
   client_message_id: string;
-  message_type: "text";
-  content: { text: string };
+  message_type: "text" | "rich";
+  content: { text: string } | { blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }> };
   created_at: string;
 } {
   return typeof value === "object"
@@ -228,13 +228,21 @@ function isMessage(value: unknown): value is {
     && "conversation_seq" in value && typeof value.conversation_seq === "number"
     && "sender_user_id" in value && typeof value.sender_user_id === "number"
     && "client_message_id" in value && typeof value.client_message_id === "string"
-    && "message_type" in value && value.message_type === "text"
-    && "content" in value && isTextContent(value.content)
+    && "message_type" in value && (value.message_type === "text" || value.message_type === "rich")
+    && "content" in value && (value.message_type === "text" ? isTextContent(value.content) : isRichContent(value.content))
     && "created_at" in value && typeof value.created_at === "string";
 }
 
 function isTextContent(value: unknown): value is { text: string } {
   return typeof value === "object" && value !== null && "text" in value && typeof value.text === "string";
+}
+
+function isRichContent(value: unknown): value is { blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }> } {
+  return typeof value === "object" && value !== null && "blocks" in value && Array.isArray(value.blocks)
+    && value.blocks.length > 0 && value.blocks.every((block: unknown) => typeof block === "object" && block !== null
+      && "type" in block && (block.type === "text"
+        ? "text" in block && typeof block.text === "string"
+        : block.type === "image" && "attachment_id" in block && typeof block.attachment_id === "string"));
 }
 
 function joinApiPath(apiBaseUrl: string): string {

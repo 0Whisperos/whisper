@@ -19,6 +19,8 @@ import { FunctionRail } from "./FunctionRail";
 import { IconSprite } from "./ui";
 import { ProfileEditor } from "./ProfileEditor";
 import { SessionPanel } from "./SessionPanel";
+import { confirmUploads, requestUploadAuthorizations, uploadSignedFile } from "../attachmentsApi";
+import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
 
 interface AuthenticatedShellProps {
   data: ChatData;
@@ -27,6 +29,7 @@ interface AuthenticatedShellProps {
   isLoggingOut: boolean;
   onLogout: () => void;
   onSendText?: (conversationId: number, text: string) => boolean | void;
+  onSendRich?: (conversationId: number, blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>) => string | null | boolean | void;
   onRetryMessage?: (clientMessageId: string) => void;
   loadConversationHistory?: (conversationId: number) => Promise<number | null>;
   loadOlderConversationHistory?: (conversationId: number) => Promise<number | null>;
@@ -51,6 +54,7 @@ export function AuthenticatedShell({
   isLoggingOut,
   onLogout,
   onSendText = () => false,
+  onSendRich = () => false,
   onRetryMessage = () => undefined,
   loadConversationHistory,
   loadOlderConversationHistory,
@@ -89,6 +93,7 @@ export function AuthenticatedShell({
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [attachmentStatus, setAttachmentStatus] = useState("");
   const desktopAccountTriggerRef = useRef<HTMLButtonElement | null>(null);
   const mobileAccountTriggerRef = useRef<HTMLButtonElement | null>(null);
   const lastAccountTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -220,6 +225,93 @@ export function AuthenticatedShell({
     }
   };
 
+  const handleSendEditor = async () => {
+    const conversationId = workspace.activeConversationId;
+    const blocks = drafts.blocks;
+    const textLength = [...blocks.filter((block) => block.type === "text").map((block) => block.text).join("")].length;
+    if (textLength > 4096) {
+      setAttachmentStatus("消息文字不能超过 4096 个字符");
+      return;
+    }
+    const images = blocks.filter((block): block is DraftImageBlock => block.type === "image");
+    if (images.length === 0) {
+      handleSendText(blocks.filter((block) => block.type === "text").map((block) => block.text).join("").trim());
+      return;
+    }
+    try {
+      setAttachmentStatus("正在上传图片…");
+      let nextBlocks: ChatDraftBlock[] = [...blocks];
+      let pending = images.filter((image) => !image.uploaded);
+      const needsAuthorization = pending.filter((image) => !image.attachmentId || !image.uploadUrl
+        || Date.parse(image.uploadExpiresAt ?? "") <= Date.now());
+      if (needsAuthorization.length > 0) {
+        const authorizations = await requestUploadAuthorizations(apiBaseUrl, accessToken, conversationId, needsAuthorization.map((image) => ({
+          file_name: image.file.name,
+          content_type: image.file.type,
+          size_bytes: image.file.size,
+        })));
+        nextBlocks = nextBlocks.map((block) => {
+          if (block.type !== "image") return block;
+          const index = needsAuthorization.findIndex((item) => item.localId === block.localId);
+          if (index < 0) return block;
+          const auth = authorizations[index];
+          return { ...block, attachmentId: auth.attachment_id, uploadUrl: auth.upload_url, uploadHeaders: auth.headers, uploadExpiresAt: auth.expires_at };
+        });
+        drafts.setBlocks(nextBlocks);
+        pending = nextBlocks.filter((block): block is DraftImageBlock => block.type === "image" && !block.uploaded);
+      }
+      const successfulPuts: DraftImageBlock[] = [];
+      const putResults = await Promise.allSettled(pending.map(async (image) => {
+        const auth = { attachment_id: image.attachmentId!, upload_url: image.uploadUrl!, method: "PUT" as const, headers: image.uploadHeaders ?? {}, expires_at: image.uploadExpiresAt ?? "" };
+        await uploadSignedFile(auth, image.file);
+        successfulPuts.push(image);
+      }));
+      if (successfulPuts.length > 0) {
+        const completions = await confirmUploads(apiBaseUrl, accessToken, successfulPuts.map((image) => image.attachmentId!));
+        const ready = new Set(completions.filter((result) => result.status === "uploaded").map((result) => result.attachment_id));
+        nextBlocks = nextBlocks.map((block) => block.type === "image" ? { ...block, uploaded: ready.has(block.attachmentId ?? "") } : block);
+        drafts.setBlocks(nextBlocks);
+      }
+      const hasPutFailure = putResults.some((result) => result.status === "rejected");
+      const allReady = nextBlocks.filter((block): block is DraftImageBlock => block.type === "image").every((block) => block.uploaded);
+      if (hasPutFailure || !allReady) throw new Error("图片上传未完成，请重试");
+      const richBlocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }> = [];
+      for (const block of nextBlocks) {
+        if (block.type === "text") {
+          if (block.text) richBlocks.push({ type: "text", text: block.text });
+        } else {
+          // Draft URLs are revoked when the accepted draft is cleared; the message bubble loads its own authorized URL.
+          richBlocks.push({ type: "image", attachment_id: block.attachmentId! });
+        }
+      }
+      const accepted = onSendRich(conversationId, richBlocks);
+      if (accepted !== false && accepted !== null) drafts.clear();
+      setAttachmentStatus("");
+    } catch (error) {
+      setAttachmentStatus(error instanceof Error ? error.message : "图片上传失败，请重试");
+    }
+  };
+
+  const handlePickImages = (files: File[]): DraftImageBlock[] => {
+    const currentImages = drafts.blocks.filter((block): block is DraftImageBlock => block.type === "image");
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+    if (currentImages.length + files.length > 10) {
+      setAttachmentStatus("每条消息最多发送 10 张图片");
+      return [];
+    }
+    if (files.some((file) => !allowedTypes.has(file.type))) {
+      setAttachmentStatus("仅支持 JPEG、PNG 或 WebP 图片");
+      return [];
+    }
+    if (files.some((file) => file.size > 20 * 1024 * 1024)
+      || [...currentImages.map((image) => image.file), ...files].reduce((sum, file) => sum + file.size, 0) > 50 * 1024 * 1024) {
+      setAttachmentStatus("单张图片不能超过 20 MiB，消息图片总量不能超过 50 MiB");
+      return [];
+    }
+    setAttachmentStatus("");
+    return drafts.createImageBlocks(files);
+  };
+
   return (
     <main
       className="auth-shell"
@@ -256,7 +348,7 @@ export function AuthenticatedShell({
             connectionLabel={connectionLabel}
             draft={drafts.draft}
             canSend={drafts.canSend && canSendMessages}
-            statusMessage={workspace.statusMessages.chat}
+            statusMessage={attachmentStatus || workspace.statusMessages.chat}
             isHistoryLoading={loadingConversationId === workspace.activeConversationId}
             historyError={getConversationHistoryError(workspace.activeConversationId)}
             hasMoreHistory={hasMoreConversationHistory(workspace.activeConversationId)}
@@ -266,8 +358,13 @@ export function AuthenticatedShell({
             onReturnToSessions={workspace.returnToSessions}
             onOpenDetail={openDetailPanel}
             onToolPreview={(name) => showToolPreview(name, "chat")}
-            onChangeDraft={drafts.setDraft}
+            onChangeDraftBlocks={drafts.setBlocks}
             onSendText={handleSendText}
+            onSendRich={handleSendEditor}
+            draftBlocks={drafts.blocks}
+            onPickFiles={handlePickImages}
+            apiBaseUrl={apiBaseUrl}
+            accessToken={accessToken}
             onRetryMessage={onRetryMessage}
             onReadThrough={onReadAck}
           />

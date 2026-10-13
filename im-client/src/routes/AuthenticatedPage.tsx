@@ -77,6 +77,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     data: chatData.data,
     updateData: chatData.updateData,
     sendTextMessage: chatConnection.sendTextMessage,
+    sendRichMessage: chatConnection.sendRichMessage,
     sendDeliveredAck,
     sendReadAck,
     reloadHistory: chatData.retryHistory,
@@ -94,6 +95,11 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
 
   function handleSendText(conversationId: number, text: string): boolean {
     return messaging.send(conversationId, text);
+  }
+
+  function handleSendRich(conversationId: number, blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>): string | null {
+    if (chatConnection.state.status !== "authenticated") return null;
+    return messaging.sendRich(conversationId, blocks);
   }
 
   function handleRetryMessage(clientMessageId: string) {
@@ -139,6 +145,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
       isLoggingOut={isLoggingOut}
       onLogout={handleLogout}
       onSendText={handleSendText}
+      onSendRich={handleSendRich}
       onRetryMessage={handleRetryMessage}
       loadConversationHistory={chatData.loadHistory}
       loadOlderConversationHistory={chatData.loadOlderHistory}

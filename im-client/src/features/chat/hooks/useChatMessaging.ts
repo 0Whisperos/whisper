@@ -7,7 +7,9 @@ import type {
   ChatServerAcceptedFrame,
 } from "../../chat-connection/types";
 import type { ChatData } from "../types";
+import type { ChatSendRichMessageInput } from "../../chat-connection/types";
 import {
+  insertPendingRichMessage,
   insertPendingTextMessage,
   markMessageFailed,
   markMessageSending,
@@ -25,6 +27,7 @@ interface UseChatMessagingOptions {
   data: ChatData | null;
   updateData: (updater: (current: ChatData | null) => ChatData | null) => void;
   sendTextMessage: (input: SendTextMessageInput) => void;
+  sendRichMessage?: (input: ChatSendRichMessageInput) => void;
   clientMessageIdFactory?: () => string;
   now?: () => Date;
   acknowledgementTimeoutMs?: number;
@@ -39,6 +42,7 @@ export function useChatMessaging({
   data,
   updateData,
   sendTextMessage,
+  sendRichMessage,
   clientMessageIdFactory = createClientMessageId,
   now = () => new Date(),
   acknowledgementTimeoutMs = DEFAULT_ACKNOWLEDGEMENT_TIMEOUT_MS,
@@ -97,6 +101,26 @@ export function useChatMessaging({
     return true;
   }, [clearAcknowledgementTimer, clientMessageIdFactory, now, sendTextMessage, startAcknowledgementTimer, updateData]);
 
+  const sendRich = useCallback((conversationId: number, blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>): string | null => {
+    if (!blocks.some((block) => block.type === "image" || (block.type === "text" && block.text.trim()))
+      || !dataRef.current?.conversations[conversationId] || !sendRichMessage) return null;
+    const clientMessageId = clientMessageIdFactory();
+    const clientSentAt = now().toISOString();
+    updateData((latest) => latest ? insertPendingRichMessage(latest, {
+      conversationId, senderUserId: latest.self.userId, clientMessageId, blocks, clientSentAt,
+    }) : latest);
+    startAcknowledgementTimer(clientMessageId);
+    try {
+      sendRichMessage({ clientMessageId, conversationId, blocks: blocks.map((block) => block.type === "image"
+        ? { type: "image" as const, attachment_id: block.attachment_id } : block), clientSentAt });
+    }
+    catch {
+      clearAcknowledgementTimer(clientMessageId);
+      updateData((latest) => latest ? markMessageFailed(latest, clientMessageId, "send_failed") : latest);
+    }
+    return clientMessageId;
+  }, [clearAcknowledgementTimer, clientMessageIdFactory, now, sendRichMessage, startAcknowledgementTimer, updateData]);
+
   const retry = useCallback((clientMessageId: string): boolean => {
     const current = dataRef.current;
     const message = current && Object.values(current.conversations)
@@ -112,7 +136,16 @@ export function useChatMessaging({
     updateData((latest) => latest ? markMessageSending(latest, clientMessageId) : latest);
     startAcknowledgementTimer(clientMessageId);
     try {
-      sendTextMessage({
+      if (message.messageType === "rich" && "blocks" in message.content && sendRichMessage) {
+        sendRichMessage({
+          clientMessageId: message.clientMessageId,
+          conversationId: message.conversationId,
+          blocks: message.content.blocks.map((block) => block.type === "image"
+            ? { type: "image" as const, attachment_id: block.attachment_id }
+            : block),
+          clientSentAt: message.clientSentAt,
+        });
+      } else if (message.messageType === "text" && "text" in message.content) sendTextMessage({
         clientMessageId: message.clientMessageId,
         conversationId: message.conversationId,
         text: message.content.text,
@@ -123,7 +156,7 @@ export function useChatMessaging({
       updateData((latest) => latest ? markMessageFailed(latest, clientMessageId, "send_failed") : latest);
     }
     return true;
-  }, [clearAcknowledgementTimer, sendTextMessage, startAcknowledgementTimer, updateData]);
+  }, [clearAcknowledgementTimer, sendRichMessage, sendTextMessage, startAcknowledgementTimer, updateData]);
 
   const handleServerAccepted = useCallback((frame: ChatServerAcceptedFrame) => {
     if (dataRef.current?.self.userId !== frame.payload.message.sender_user_id) {
@@ -291,6 +324,7 @@ export function useChatMessaging({
 
   return {
     send,
+    sendRich,
     retry,
     handleServerAccepted,
     handleSendMessageRejected,

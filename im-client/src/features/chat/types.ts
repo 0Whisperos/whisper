@@ -51,6 +51,12 @@ export interface TextMessageContent {
   text: string;
 }
 
+export type ChatContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; attachment_id: string; previewUrl?: string };
+
+export type ChatMessageContent = TextMessageContent | { blocks: ChatContentBlock[] };
+
 export interface ChatMessage {
   /** Stable client-side key. Pending messages keep this value after acknowledgement. */
   localKey: string;
@@ -59,8 +65,8 @@ export interface ChatMessage {
   conversationSeq: number | null;
   senderUserId: number;
   clientMessageId: string;
-  messageType: "text";
-  content: TextMessageContent;
+  messageType: "text" | "rich";
+  content: ChatMessageContent;
   createdAt: string | null;
   clientSentAt: string;
   localStatus: "sending" | "accepted" | "failed";
@@ -163,8 +169,8 @@ export interface ChatMessageDto {
   conversationSeq: number;
   senderUserId: number;
   clientMessageId: string;
-  messageType: "text";
-  content: TextMessageContent;
+  messageType: "text" | "rich";
+  content: ChatMessageContent;
   createdAt: string;
 }
 

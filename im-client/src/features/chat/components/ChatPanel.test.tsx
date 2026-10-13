@@ -1,12 +1,28 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatConversation, ChatMessage, ChatSelfProfile } from "../types";
 import { formatHoverMessageTime } from "../hooks/messageTimeline";
 import { ChatPanel } from "./ChatPanel";
+import * as attachmentsApi from "../attachmentsApi";
 
 let intersectionCallback: IntersectionObserverCallback | null = null;
+
+class TestResizeObserver implements ResizeObserver {
+  static instances: TestResizeObserver[] = [];
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    TestResizeObserver.instances.push(this);
+  }
+
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  trigger() {
+    this.callback([], this);
+  }
+}
 
 class TestIntersectionObserver implements IntersectionObserver {
   readonly root = null;
@@ -76,7 +92,7 @@ function renderChatPanel(
   return render(chatPanelElement(conversation, onReadThrough));
 }
 
-function chatPanelElement(conversation: ChatConversation, onReadThrough = vi.fn()) {
+function chatPanelElement(conversation: ChatConversation, onReadThrough = vi.fn(), isHistoryLoading = false) {
   return (
     <ChatPanel
       conversation={conversation}
@@ -85,7 +101,7 @@ function chatPanelElement(conversation: ChatConversation, onReadThrough = vi.fn(
       draft=""
       canSend={false}
       statusMessage=""
-      isHistoryLoading={false}
+      isHistoryLoading={isHistoryLoading}
       historyError={null}
       hasMoreHistory={false}
       onLoadOlderHistory={vi.fn()}
@@ -113,8 +129,10 @@ function setListScrollMetrics(list: HTMLElement, messageHeight = 100, clientHeig
 describe("ChatPanel read visibility", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     intersectionCallback = null;
+    TestResizeObserver.instances = [];
   });
 
   it("reports the highest visible conversation sequence", () => {
@@ -367,6 +385,107 @@ describe("ChatPanel read visibility", () => {
     expect(screen.getByText("我发出的消息")).toBeInTheDocument();
   });
 
+  it("scrolls to the latest message when initial history finishes even if the latest message is unchanged", () => {
+    // 测试目标：验证首屏已有缓存消息时，即使历史请求只补充旧页且最新消息 key 未变化，历史加载完成仍会贴底。
+    // 构造方法：以 isHistoryLoading=true 渲染序号 9 的已有消息，设置列表尺寸后仅把加载状态切换为 false。
+    // 输入数据：会话 42 已有最新消息 seq=9，scrollHeight=100、clientHeight=40，初始位置在列表顶部。
+    // 预期行为：历史加载完成后 scrollTop 被定位到最新消息的底部。
+    const conversation = createConversation([createPeerMessage(9)]);
+    const { container, rerender } = render(chatPanelElement(conversation, vi.fn(), true));
+    const list = container.querySelector<HTMLElement>(".auth-message-list")!;
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 100 });
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 40 });
+    list.scrollTop = 0;
+
+    rerender(chatPanelElement(conversation, vi.fn(), false));
+
+    expect(list.scrollTop).toBe(100);
+  });
+
+  it("keeps the latest image layout at bottom but preserves a position the user scrolled to", async () => {
+    // 测试目标：验证多图布局变化或图片失败时仅在用户仍贴底的情况下继续滚动到底部。
+    // 构造方法：安装 ResizeObserver 替身渲染含两张图片的 rich 消息，模拟图片增高、加载失败及用户上滑后的再次增高。
+    // 输入数据：会话 42 的 seq=9 含两张图片；列表高度依次为 200、300、400，clientHeight=100，失败后用户滚至 50。
+    // 预期行为：贴底时尺寸变为 300 或图片失败均保持在底部；用户上滑后尺寸变为 400，scrollTop 仍为 50。
+    vi.stubGlobal("ResizeObserver", TestResizeObserver as unknown as typeof ResizeObserver);
+    const downloadAuth = vi.spyOn(attachmentsApi, "requestDownloadAuthorizations").mockResolvedValue([]);
+    const richMessage: ChatMessage = {
+      ...createPeerMessage(9),
+      messageType: "rich",
+      content: { blocks: [
+        { type: "text", text: "图片说明" },
+        { type: "image", attachment_id: "image-one", previewUrl: "blob:image-one" },
+        { type: "image", attachment_id: "image-two", previewUrl: "blob:image-two" },
+      ] },
+    };
+    const { container } = renderChatPanel(createConversation([richMessage]));
+    const list = container.querySelector<HTMLElement>(".auth-message-list")!;
+    await waitFor(() => expect(downloadAuth).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    let contentHeight = 200;
+    Object.defineProperty(list, "scrollHeight", { configurable: true, get: () => contentHeight });
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 100 });
+    list.scrollTop = 200;
+    fireEvent.scroll(list);
+
+    contentHeight = 300;
+    act(() => TestResizeObserver.instances.forEach((observer) => observer.trigger()));
+    expect(list.scrollTop).toBe(300);
+
+    fireEvent.error(container.querySelector<HTMLImageElement>(".auth-message-image")!);
+    await waitFor(() => expect(downloadAuth).toHaveBeenCalledTimes(2));
+    expect(list.scrollTop).toBe(300);
+
+    list.scrollTop = 50;
+    fireEvent.scroll(list);
+    contentHeight = 400;
+    act(() => TestResizeObserver.instances.forEach((observer) => observer.trigger()));
+    expect(list.scrollTop).toBe(50);
+  });
+
+  it("renders ordered rich blocks inside one shared message bubble", async () => {
+    // 测试目标：验证富文本消息中的文字和图片按 block 顺序共享同一个气泡容器。
+    // 构造方法：替身下载授权请求后渲染 text/image/text/image 四个连续 block 的已接受消息。
+    // 输入数据：文字“图片前”“图片间”“图片后”与两张图片按此顺序排列。
+    // 预期行为：一个可访问的富文本消息组包含全部文字和图片占位，子块顺序不变且不存在嵌套文字气泡。
+    vi.spyOn(attachmentsApi, "requestDownloadAuthorizations").mockResolvedValue([]);
+    const richMessage: ChatMessage = {
+      ...createPeerMessage(9),
+      messageType: "rich",
+      content: { blocks: [
+        { type: "text", text: "图片前" },
+        { type: "image", attachment_id: "image-one" },
+        { type: "text", text: "图片间" },
+        { type: "image", attachment_id: "image-two" },
+        { type: "text", text: "图片后" },
+      ] },
+    };
+    render(<ChatPanel {...{
+      conversation: createConversation([richMessage]), self: testSelf, connectionLabel: "在线", draft: "", canSend: false,
+      statusMessage: "", isHistoryLoading: false, historyError: null, hasMoreHistory: false,
+      onLoadOlderHistory: vi.fn(), onRetryHistory: vi.fn(), isDetailOpen: false, onReturnToSessions: vi.fn(),
+      onOpenDetail: vi.fn(), onToolPreview: vi.fn(), onChangeDraft: vi.fn(), onSendText: vi.fn(), onRetryMessage: vi.fn(),
+      apiBaseUrl: "https://api.test", accessToken: "token",
+    }} />);
+
+    const bubble = screen.getByRole("group", { name: "富文本消息" });
+    const textNodes = [within(bubble).getByText("图片前"), within(bubble).getByText("图片间"), within(bubble).getByText("图片后")];
+    const imageNodes = within(bubble).getAllByRole("img", { name: "图片加载中" });
+    const blockNodes = Array.from(bubble.querySelector(".auth-rich-message-blocks")!.children);
+
+    await waitFor(() => expect(attachmentsApi.requestDownloadAuthorizations).toHaveBeenCalledWith(
+      "https://api.test", "token", 42, ["image-one", "image-two"],
+    ));
+    expect(bubble).toHaveClass("auth-message-bubble", "auth-rich-message-bubble");
+    expect(textNodes.every((node) => bubble.contains(node))).toBe(true);
+    expect(imageNodes).toHaveLength(2);
+    expect(blockNodes.map((node) => node.tagName.toLowerCase())).toEqual(["p", "span", "p", "span", "p"]);
+    expect(bubble.querySelectorAll(".auth-message-bubble")).toHaveLength(0);
+  });
+
   it("shows contextual time above group starts and side times for compact messages", async () => {
     // 测试目标：验证组首完整时间位于气泡上方，组内后续时间分别位于左右气泡外侧且不覆盖前条消息。
     // 构造方法：渲染对方和自己的短间隔消息组，悬浮各组首与后续气泡，再移出当前消息。
@@ -494,5 +613,46 @@ describe("ChatPanel read visibility", () => {
     await user.hover(selfFirstBubble!);
     expect(screen.getByText(selfFirstTimestamp)).toHaveClass("auth-message-hover-time");
     expect(screen.queryByText(selfSecondTimestamp)).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatPanel attachment authorization", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("requests downloads only for accepted messages and excludes optimistic local images", async () => {
+    // 测试目标：验证本地 sending 消息的 uploaded 附件不会进入下载授权批次，避免未关联附件导致整批拒绝。
+    // 构造方法：渲染一条服务端 accepted rich 图片消息和一条带本地预览的 sending rich 图片消息，并替身下载授权 API。
+    // 输入数据：正式附件 ID 为 attached-image，本地待发附件 ID 为 uploaded-image。
+    // 预期行为：下载授权只收到正式消息的 attached-image，不请求 uploaded-image。
+    const downloadAuth = vi.spyOn(attachmentsApi, "requestDownloadAuthorizations").mockResolvedValue([]);
+    const official: ChatMessage = {
+      ...createMessage(),
+      messageId: "message-rich",
+      messageType: "rich",
+      content: { blocks: [{ type: "image", attachment_id: "attached-image" }] },
+    };
+    const optimistic: ChatMessage = {
+      ...createMessage(),
+      localKey: "local:pending-rich",
+      messageId: null,
+      clientMessageId: "pending-rich",
+      conversationSeq: null,
+      messageType: "rich",
+      localStatus: "sending",
+      content: { blocks: [{ type: "image", attachment_id: "uploaded-image", previewUrl: "blob:local-preview" }] },
+    };
+    render(<ChatPanel {...{
+      conversation: createConversation([official, optimistic]), self: testSelf, connectionLabel: "在线", draft: "", canSend: false,
+      statusMessage: "", isHistoryLoading: false, historyError: null, hasMoreHistory: false,
+      onLoadOlderHistory: vi.fn(), onRetryHistory: vi.fn(), isDetailOpen: false, onReturnToSessions: vi.fn(),
+      onOpenDetail: vi.fn(), onToolPreview: vi.fn(), onChangeDraft: vi.fn(), onSendText: vi.fn(), onRetryMessage: vi.fn(),
+      apiBaseUrl: "https://api.test", accessToken: "token",
+    }} />);
+
+    await waitFor(() => expect(downloadAuth).toHaveBeenCalledWith("https://api.test", "token", 42, ["attached-image"]));
+    expect(downloadAuth).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), 42, expect.arrayContaining(["uploaded-image"]));
   });
 });

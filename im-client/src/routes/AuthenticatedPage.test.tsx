@@ -194,7 +194,7 @@ describe("AuthenticatedPage", () => {
       conversationId: 10002,
       text: "页面接线",
     }));
-    expect(input).toHaveValue("");
+    expect(input.textContent).toBe("");
   });
 
   it("shows auth_failed using the stable error code", () => {

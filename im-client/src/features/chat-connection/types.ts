@@ -77,10 +77,8 @@ export interface ChatTextMessage {
   conversation_seq: number;
   sender_user_id: number;
   client_message_id: string;
-  message_type: "text";
-  content: {
-    text: string;
-  };
+  message_type: "text" | "rich";
+  content: { text: string } | { blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }> };
   created_at: string;
 }
 
@@ -90,10 +88,8 @@ export interface ChatSendMessageFrame {
   payload: {
     client_message_id: string;
     conversation_id: number;
-    message_type: "text";
-    content: {
-      text: string;
-    };
+    message_type: "text" | "rich";
+    content: { text: string } | { blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }> };
     client_sent_at: string;
   };
 }
@@ -189,6 +185,13 @@ export interface ChatSendTextMessageInput {
   clientMessageId: string;
   conversationId: number;
   text: string;
+  clientSentAt: string;
+}
+
+export interface ChatSendRichMessageInput {
+  clientMessageId: string;
+  conversationId: number;
+  blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }>;
   clientSentAt: string;
 }
 

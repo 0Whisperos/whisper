@@ -15,4 +15,13 @@ export default defineConfig({
     globals: true,
     setupFiles: "./src/test/setup.ts",
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("/node_modules/@tiptap/") || id.includes("/node_modules/prosemirror-")) return "rich-editor";
+        },
+      },
+    },
+  },
 });

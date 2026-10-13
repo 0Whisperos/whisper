@@ -18,6 +18,7 @@ import type {
   ChatServerFrame,
   ChatServerAcceptedFrame,
   ChatTextMessage,
+  ChatSendRichMessageInput,
   ChatWebSocket,
 } from "./types";
 
@@ -26,6 +27,7 @@ const HEARTBEAT_INTERVAL_MS = 10_000;
 export interface ChatConnectionController {
   close: () => void;
   sendTextMessage: (input: ChatSendTextMessageInput) => void;
+  sendRichMessage: (input: ChatSendRichMessageInput) => void;
   sendDeliveredAck: (conversationId: number, deliveredSeq: number) => void;
   sendReadAck: (conversationId: number, readSeq: number) => void;
 }
@@ -128,6 +130,20 @@ export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnec
           conversation_id: input.conversationId,
           message_type: "text",
           content: { text: input.text },
+          client_sent_at: input.clientSentAt,
+        },
+      };
+      socket.send(JSON.stringify(frame));
+    },
+    sendRichMessage: (input) => {
+      if (!completedAuth || socket.readyState !== WebSocket.OPEN) throw new Error("chat connection is not authenticated");
+      const frame: ChatSendMessageFrame = {
+        type: "send_message", request_id: createRequestId(),
+        payload: {
+          client_message_id: input.clientMessageId,
+          conversation_id: input.conversationId,
+          message_type: "rich",
+          content: { blocks: input.blocks },
           client_sent_at: input.clientSentAt,
         },
       };
@@ -328,7 +344,7 @@ function isHeartbeatOkFrame(value: unknown): value is ChatServerFrame {
 function isServerAcceptedFrame(value: unknown): value is ChatServerAcceptedFrame {
   const isValid = hasFrameEnvelope(value, "server_accepted", true)
     && hasStringProperty(value.payload, "client_message_id")
-    && hasTextMessageProperty(value.payload, "message");
+    && hasMessageProperty(value.payload, "message");
   if (!isValid) {
     return false;
   }
@@ -346,7 +362,7 @@ function isSendMessageRejectedFrame(value: unknown): value is ChatSendMessageRej
 function isMessageCreatedFrame(value: unknown): value is ChatMessageCreatedFrame {
   return hasFrameEnvelope(value, "message_created", false)
     && hasStringProperty(value.payload, "event_id")
-    && hasTextMessageProperty(value.payload, "message");
+    && hasMessageProperty(value.payload, "message");
 }
 
 function hasFrameEnvelope(value: unknown, type: string, requiresRequestId: boolean): value is {
@@ -372,7 +388,7 @@ function hasNumberProperty(value: object, property: string): boolean {
   return property in value && typeof (value as Record<string, unknown>)[property] === "number";
 }
 
-function hasTextMessageProperty(value: object, property: string): boolean {
+function hasMessageProperty(value: object, property: string): boolean {
   if (!(property in value)) {
     return false;
   }
@@ -388,12 +404,20 @@ function isTextMessage(value: unknown): value is ChatTextMessage {
     && hasNumberProperty(value, "sender_user_id")
     && hasStringProperty(value, "client_message_id")
     && "message_type" in value
-    && value.message_type === "text"
+    && (value.message_type === "text" || value.message_type === "rich")
     && "content" in value
     && typeof value.content === "object"
     && value.content !== null
-    && hasStringProperty(value.content, "text")
+    && (value.message_type === "text" ? hasStringProperty(value.content, "text") : isRichContent(value.content))
     && hasStringProperty(value, "created_at");
+}
+
+function isRichContent(value: object): boolean {
+  if (!("blocks" in value) || !Array.isArray(value.blocks) || value.blocks.length === 0) return false;
+  return value.blocks.every((block: unknown) => typeof block === "object" && block !== null
+    && "type" in block && (block.type === "text"
+      ? "text" in block && typeof block.text === "string"
+      : block.type === "image" && "attachment_id" in block && typeof block.attachment_id === "string"));
 }
 
 function isChatAuthErrorCode(value: unknown): boolean {

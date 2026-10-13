@@ -11,6 +11,7 @@ import type { ChatData } from "../types";
 import { useChatMessaging } from "./useChatMessaging";
 
 const sentMessages: Array<{ clientMessageId: string; conversationId: number; text: string; clientSentAt: string }> = [];
+const sentRichMessages: Array<{ clientMessageId: string; conversationId: number; blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }>; clientSentAt: string }> = [];
 
 function createData(): ChatData {
   return {
@@ -73,6 +74,7 @@ function rejectedFrame(clientMessageId: string): ChatSendMessageRejectedFrame {
 
 function renderMessaging(options: {
   send?: (input: { clientMessageId: string; conversationId: number; text: string; clientSentAt: string }) => void;
+  sendRich?: (input: { clientMessageId: string; conversationId: number; blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }>; clientSentAt: string }) => void;
   initialData?: ChatData;
   sendDeliveredAck?: (conversationId: number, deliveredSeq: number) => void;
   sendReadAck?: (conversationId: number, readSeq: number) => void;
@@ -83,6 +85,7 @@ function renderMessaging(options: {
       data,
       updateData: (updater) => setData((current) => updater(current) ?? current),
       sendTextMessage: options.send ?? ((input) => { sentMessages.push(input); }),
+      sendRichMessage: options.sendRich ?? ((input) => { sentRichMessages.push(input); }),
       clientMessageIdFactory: () => "client-7",
       now: () => new Date("2026-08-30T08:00:00.000Z"),
       sendDeliveredAck: options.sendDeliveredAck,
@@ -95,6 +98,7 @@ function renderMessaging(options: {
 describe("useChatMessaging", () => {
   beforeEach(() => {
     sentMessages.length = 0;
+    sentRichMessages.length = 0;
     vi.useFakeTimers();
   });
 
@@ -115,6 +119,22 @@ describe("useChatMessaging", () => {
     expect(message).toMatchObject({ localKey: "local:client-7", clientMessageId: "client-7", messageId: null, localStatus: "sending", content: { text: "你好" } });
     expect(sentMessages).toEqual([{ clientMessageId: "client-7", conversationId: 42, text: "你好", clientSentAt: "2026-08-30T08:00:00.000Z" }]);
     expect(result.current.data.sessions[0]).toMatchObject({ preview: "你好" });
+  });
+
+  it("sends image-only rich messages with the stable ordered attachment block", () => {
+    // 测试目标：验证图片单发被作为 rich 消息发送，并在本地乐观时间线保留图片块。
+    // 构造方法：挂载消息 hook，注入可观察的 rich transport，再发送一张已上传图片。
+    // 输入数据：会话 42、附件 ID attachment-1 和本地预览 URL。
+    // 预期行为：创建 sending 状态的 rich 气泡并发送相同附件 ID，transport 内容不包含仅供本地显示的预览 URL。
+    const { result } = renderMessaging();
+    act(() => {
+      expect(result.current.messaging.sendRich(42, [{ type: "image", attachment_id: "attachment-1", previewUrl: "blob:local" }]))
+        .toBe("client-7");
+    });
+    expect(result.current.data.conversations[42].messages[0]).toMatchObject({
+      messageType: "rich", localStatus: "sending", content: { blocks: [{ type: "image", attachment_id: "attachment-1", previewUrl: "blob:local" }] },
+    });
+    expect(sentRichMessages[0].blocks).toEqual([{ type: "image", attachment_id: "attachment-1" }]);
   });
 
   it("merges server acceptance into the existing local bubble", () => {
@@ -256,7 +276,7 @@ describe("useChatMessaging", () => {
     // 预期行为：只有两条气泡且按 7、9 排序，会话预览仍是最新序号的文本。
     const { result } = renderMessaging();
     const newest = createdFrame("other-9", 9, 20002);
-    newest.payload.message.content.text = "最新消息";
+    newest.payload.message.content = { text: "最新消息" };
     act(() => { result.current.messaging.handleServerFrame(newest); });
     act(() => { result.current.messaging.handleServerFrame(createdFrame("other-7", 7, 20002)); });
     act(() => { result.current.messaging.handleServerFrame(newest); });
