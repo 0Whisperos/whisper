@@ -15,6 +15,26 @@ fn valid_payload(client_message_id: String, conversation_id: u64) -> SendMessage
 }
 
 #[test]
+fn duplicate_key_classifier_requires_the_idempotency_index() {
+    // 测试目标：验证只有 messages 幂等唯一键冲突才进入并发恢复分支。
+    // 构造方法：分别传入幂等索引、其他唯一索引和非唯一性 SQLSTATE 错误信息。
+    // 输入数据：SQLSTATE 23000 与三种不同的数据库错误消息。
+    // 预期行为：仅 uk_messages_sender_client_msg 被分类为幂等重复。
+    assert!(is_idempotency_duplicate_key_details(
+        Some("23000"),
+        "Duplicate entry for key 'uk_messages_sender_client_msg'"
+    ));
+    assert!(!is_idempotency_duplicate_key_details(
+        Some("23000"),
+        "Duplicate entry for key 'uk_messages_message_id'"
+    ));
+    assert!(!is_idempotency_duplicate_key_details(
+        Some("23000"),
+        "foreign key constraint failed"
+    ));
+}
+
+#[test]
 fn maps_internal_errors_to_internal_error_reject() {
     // 测试目标：验证内部 SQL 错误不会泄露底层数据库细节到 WebSocket 协议。
     // 构造方法：直接把 RowNotFound 包装成模块内部错误并映射为 reject payload。
@@ -221,10 +241,68 @@ async fn accept_message_rejects_non_member() {
     fixture.cleanup(&pool).await;
 }
 
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to a dedicated MySQL database"]
+async fn concurrent_same_key_requests_both_miss_then_recover_the_committed_message() {
+    // 测试目标：验证两个请求都完成首次幂等未命中后，唯一键冲突方回滚并恢复同一已提交消息。
+    // 构造方法：启用双请求 barrier，在独立数据库连接上并发发送完全相同的 payload。
+    // 输入数据：相同 sender、client_message_id、会话和文本内容。
+    // 预期行为：两次返回同一消息和序号，仅一条 message、一个 outbox，last_seq 仅增加一次。
+    let pool = test_pool().await;
+    ensure_schema(&pool).await;
+    let fixture = TestFixture::create(&pool, 20001, true).await;
+    let client_message_id = uuid::Uuid::new_v4().to_string();
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    *IDEMPOTENCY_MISS_BARRIER.lock().expect("barrier lock") =
+        Some((client_message_id.clone(), barrier));
+    let payload_a = valid_payload(client_message_id.clone(), fixture.conversation_id);
+    let payload_b = valid_payload(client_message_id.clone(), fixture.conversation_id);
+    let pool_a = pool.clone();
+    let pool_b = pool.clone();
+    let request_a = tokio::spawn(async move { accept_message(&pool_a, 20001, payload_a).await });
+    let request_b = tokio::spawn(async move { accept_message(&pool_b, 20001, payload_b).await });
+    let first = request_a
+        .await
+        .expect("request A task should finish")
+        .expect("request A should pass");
+    let second = request_b
+        .await
+        .expect("request B task should finish")
+        .expect("request B should recover");
+    *IDEMPOTENCY_MISS_BARRIER.lock().expect("barrier lock") = None;
+
+    assert_eq!(first.message_id, second.message_id);
+    assert_eq!(first.conversation_seq, second.conversation_seq);
+    let message_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM messages WHERE sender_user_id = ? AND client_message_id = ?",
+    )
+    .bind(20001_u64)
+    .bind(client_message_id)
+    .fetch_one(&pool)
+    .await
+    .expect("message count should load");
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM outbox_events WHERE aggregateid = ? AND type = ?")
+            .bind(fixture.conversation_id.to_string())
+            .bind(MESSAGE_CREATED)
+            .fetch_one(&pool)
+            .await
+            .expect("outbox count should load");
+    let last_seq: u64 = sqlx::query_scalar("SELECT last_seq FROM conversations WHERE id = ?")
+        .bind(fixture.conversation_id)
+        .fetch_one(&pool)
+        .await
+        .expect("conversation sequence should load");
+    assert_eq!(message_count, 1);
+    assert_eq!(outbox_count, 1);
+    assert_eq!(last_seq, 1);
+    fixture.cleanup(&pool).await;
+}
+
 async fn test_pool() -> MySqlPool {
     let database_url = env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     MySqlPoolOptions::new()
-        .max_connections(1)
+        .max_connections(5)
         .connect(&database_url)
         .await
         .expect("TEST_DATABASE_URL should connect")

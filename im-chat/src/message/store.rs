@@ -13,6 +13,11 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 const DIRECT_CONVERSATION: &str = "direct";
 const ACTIVE_MEMBER: &str = "active";
 
+#[cfg(test)]
+static IDEMPOTENCY_MISS_BARRIER: std::sync::Mutex<
+    Option<(String, std::sync::Arc<tokio::sync::Barrier>)>,
+> = std::sync::Mutex::new(None);
+
 #[derive(Debug, thiserror::Error)]
 pub(super) enum AcceptMessageError {
     #[error("invalid message")]
@@ -85,6 +90,9 @@ pub(super) async fn accept_message(
         return Ok(accepted);
     }
 
+    #[cfg(test)]
+    wait_at_idempotency_miss_barrier(&payload.client_message_id).await;
+
     let now = OffsetDateTime::now_utc();
     let created_at = to_database_datetime(now);
     let conversation_seq =
@@ -103,8 +111,8 @@ pub(super) async fn accept_message(
     let insert_result =
         insert_message(&mut tx, &message, &validated.content_hash, created_at).await;
     if let Err(error) = insert_result {
-        if is_duplicate_key_error(&error) {
-            let _ = tx.rollback().await;
+        if is_idempotency_duplicate_key_error(&error) {
+            tx.rollback().await?;
             return accept_concurrent_duplicate(pool, sender_user_id, payload, validated).await;
         }
         return Err(AcceptMessageError::InternalSql { source: error });
@@ -327,11 +335,28 @@ fn format_protocol_time(time: OffsetDateTime) -> String {
         .expect("message timestamps should format as RFC3339")
 }
 
-fn is_duplicate_key_error(error: &sqlx::Error) -> bool {
-    error
-        .as_database_error()
-        .and_then(|database_error| database_error.code())
-        .is_some_and(|code| code.as_ref() == "23000")
+#[cfg(test)]
+async fn wait_at_idempotency_miss_barrier(client_message_id: &str) {
+    let barrier = IDEMPOTENCY_MISS_BARRIER
+        .lock()
+        .expect("idempotency barrier lock should not be poisoned")
+        .as_ref()
+        .filter(|(barrier_client_message_id, _)| barrier_client_message_id == client_message_id)
+        .map(|(_, barrier)| barrier.clone());
+    if let Some(barrier) = barrier {
+        barrier.wait().await;
+    }
+}
+
+fn is_idempotency_duplicate_key_error(error: &sqlx::Error) -> bool {
+    let Some(database_error) = error.as_database_error() else {
+        return false;
+    };
+    is_idempotency_duplicate_key_details(database_error.code().as_deref(), database_error.message())
+}
+
+fn is_idempotency_duplicate_key_details(code: Option<&str>, message: &str) -> bool {
+    code == Some("23000") && message.contains("uk_messages_sender_client_msg")
 }
 
 #[cfg(test)]
