@@ -9,7 +9,7 @@ func TestMigrationModelsMatchDatabaseSchemaPlan(t *testing.T) {
 	// 测试目标：验证数据库迁移实体清单与文档规划一致，并排除旧 sessions 表。
 	// 构造方法：读取 migrationModels 返回的实体，逐个取得显式 TableName。
 	// 输入数据：当前 mysql package 暴露给 AutoMigrate 的实体清单。
-	// 预期行为：迁移表包含用户、双向好友、好友申请、会话、成员、消息、outbox 和游标表。
+	// 预期行为：迁移表包含用户、好友关系、会话、消息、附件、outbox 和游标表。
 	var got []string
 	for _, model := range migrationModels() {
 		tableNamer, ok := model.(interface{ TableName() string })
@@ -26,6 +26,7 @@ func TestMigrationModelsMatchDatabaseSchemaPlan(t *testing.T) {
 		"conversations",
 		"conversation_members",
 		"messages",
+		"attachments",
 		"outbox_events",
 		"conversation_member_cursors",
 	}

@@ -31,6 +31,7 @@ func migrationModels() []interface{} {
 		&entity.Conversation{},
 		&entity.ConversationMember{},
 		&entity.Message{},
+		&entity.Attachment{},
 		&entity.OutboxEvent{},
 		&entity.ConversationMemberCursor{},
 	}

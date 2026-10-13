@@ -49,6 +49,51 @@ func TestS3StorePresignsPathStyleUploadWithoutNetworkRequest(t *testing.T) {
 	}
 }
 
+func TestS3StoreStatObjectReadsMetadataWithoutReadingBody(t *testing.T) {
+	// 测试目标：验证附件完成校验通过 S3 HEAD 获取实际对象大小而不下载图片正文。
+	// 构造方法：启动 httptest endpoint，记录请求方法，并让 HEAD 响应返回 Content-Length 元数据。
+	// 输入数据：对象 key=attachments/42/uuid，S3 HEAD 响应 Content-Length=1234。
+	// 预期行为：StatObject 返回 1234 字节元数据，且发出的请求为 HEAD。
+	methods := make(chan string, 1)
+	endpoint := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		methods <- request.Method
+		response.Header().Set("Content-Length", "1234")
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer endpoint.Close()
+	store, err := NewS3(context.Background(), config.StorageConfig{Endpoint: endpoint.URL, Region: "us-east-1", BucketName: "whisper-test", AccessKeyID: "test-access-key", SecretAccessKey: "test-secret-key", ForcePathStyle: true, UploadURLTTL: "10m", DownloadURLTTL: "5m"})
+	if err != nil {
+		t.Fatalf("NewS3 returned an error: %v", err)
+	}
+	metadata, err := store.StatObject(context.Background(), "attachments/42/uuid")
+	if err != nil {
+		t.Fatalf("StatObject returned an error: %v", err)
+	}
+	if metadata.Size != 1234 || <-methods != http.MethodHead {
+		t.Fatalf("metadata=%#v, request method mismatch", metadata)
+	}
+}
+
+func TestS3StoreStatObjectMapsMissingObjectToLocalSentinel(t *testing.T) {
+	// 测试目标：验证 HEAD 检查找不到上传对象时返回存储包稳定的 ErrObjectNotFound。
+	// 构造方法：启动 httptest endpoint，对 HEAD 返回包含 NoSuchKey 的 S3 404 错误。
+	// 输入数据：对象 key=attachments/missing 和 HTTP 404 NoSuchKey 响应。
+	// 预期行为：StatObject 的错误可由 errors.Is(err, ErrObjectNotFound) 识别。
+	endpoint := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNotFound)
+		_, _ = response.Write([]byte(`<Error><Code>NoSuchKey</Code><Message>missing</Message></Error>`))
+	}))
+	defer endpoint.Close()
+	store, err := NewS3(context.Background(), config.StorageConfig{Endpoint: endpoint.URL, Region: "us-east-1", BucketName: "whisper-test", AccessKeyID: "test-access-key", SecretAccessKey: "test-secret-key", ForcePathStyle: true, UploadURLTTL: "10m", DownloadURLTTL: "5m"})
+	if err != nil {
+		t.Fatalf("NewS3 returned an error: %v", err)
+	}
+	_, err = store.StatObject(context.Background(), "attachments/missing")
+	if !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("StatObject error=%v, want ErrObjectNotFound", err)
+	}
+}
+
 func TestS3StoreWriteObjectAvoidsStreamingChecksumTrailer(t *testing.T) {
 	// 测试目标：验证写入 S3 兼容存储时，不发送 OSS 不支持的流式校验和 trailer。
 	// 构造方法：启动 httptest S3 endpoint，使用正式 S3Store 配置调用 WriteObject，并记录收到的 HTTP 请求。

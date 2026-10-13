@@ -40,6 +40,11 @@ func (store *fakeStore) PresignGet(_ context.Context, key string) (storage.Presi
 	return store.getRequest, nil
 }
 
+func (store *fakeStore) StatObject(_ context.Context, key string) (storage.ObjectMetadata, error) {
+	store.readKey = key
+	return storage.ObjectMetadata{Size: store.object.Size}, store.readErr
+}
+
 func (store *fakeStore) ReadObject(_ context.Context, key string, _ int64) (storage.Object, error) {
 	store.readKey = key
 	return store.object, store.readErr

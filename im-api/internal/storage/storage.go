@@ -20,9 +20,14 @@ type Object struct {
 	Data []byte
 }
 
+type ObjectMetadata struct {
+	Size int64
+}
+
 type Store interface {
 	PresignPut(context.Context, string, string) (PresignedRequest, error)
 	PresignGet(context.Context, string) (PresignedRequest, error)
+	StatObject(context.Context, string) (ObjectMetadata, error)
 	ReadObject(context.Context, string, int64) (Object, error)
 	WriteObject(context.Context, string, []byte, string) error
 	DeleteObject(context.Context, string) error

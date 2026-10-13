@@ -120,6 +120,18 @@ func (store *S3Store) ReadObject(ctx context.Context, key string, maxBytes int64
 	return Object{Size: size, Data: data}, nil
 }
 
+// StatObject reads object metadata without downloading its body.
+func (store *S3Store) StatObject(ctx context.Context, key string) (ObjectMetadata, error) {
+	result, err := store.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(store.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return ObjectMetadata{}, mapS3Error(ctx, "stat S3 object", err)
+	}
+	return ObjectMetadata{Size: aws.ToInt64(result.ContentLength)}, nil
+}
+
 func (store *S3Store) WriteObject(ctx context.Context, key string, data []byte, contentType string) error {
 	_, err := store.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(store.bucket),
