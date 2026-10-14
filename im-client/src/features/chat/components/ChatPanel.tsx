@@ -8,6 +8,7 @@ import { Composer } from "./Composer";
 import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
 import { AttachmentResourceCache, attachmentResourceKey } from "../attachmentResourceCache";
 import type { AttachmentResource } from "../attachmentResourceCache";
+import { richMessageDisplayBlocks } from "./richMessageLayout";
 
 const MESSAGE_LIST_BOTTOM_THRESHOLD = 32;
 const EMPTY_DRAFT_BLOCKS: ChatDraftBlock[] = [{ type: "text", id: "text-0", text: "" }];
@@ -354,7 +355,7 @@ export function ChatPanel({
                       {"text" in message.content ? <p className="auth-message-bubble">{message.content.text}</p> : (
                         <div className="auth-message-bubble auth-rich-message-bubble" role="group" aria-label="富文本消息">
                           <div className="auth-rich-message-blocks">
-                            {message.content.blocks.map((block, blockIndex) => {
+                            {richMessageDisplayBlocks(message.content.blocks).map((block, blockIndex) => {
                               if (block.type === "text") {
                                 return <p className="auth-rich-message-text" key={`text-${blockIndex}`}>{block.text}</p>;
                               }

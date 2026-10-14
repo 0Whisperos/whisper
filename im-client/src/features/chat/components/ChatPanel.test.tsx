@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ChatConversation, ChatMessage, ChatSelfProfile } from "../types";
+import type { ChatContentBlock, ChatConversation, ChatMessage, ChatSelfProfile } from "../types";
 import { formatHoverMessageTime } from "../hooks/messageTimeline";
 import { ChatPanel } from "./ChatPanel";
 import * as attachmentsApi from "../attachmentsApi";
@@ -621,6 +621,68 @@ describe("ChatPanel read visibility", () => {
     await user.hover(selfFirstBubble!);
     expect(screen.getByText(selfFirstTimestamp)).toHaveClass("auth-message-hover-time");
     expect(screen.queryByText(selfSecondTimestamp)).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatPanel image boundary spacing", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const image: ChatContentBlock = { type: "image", attachment_id: "spacing-image", previewUrl: "blob:spacing-image" };
+  const secondImage: ChatContentBlock = { type: "image", attachment_id: "spacing-image-2", previewUrl: "blob:spacing-image-2" };
+  const text = (value: string): ChatContentBlock => ({ type: "text", text: value });
+  const cases: { name: string; blocks: ChatContentBlock[]; expectedText: string[] }[] = [
+    { name: "consumes one LF after an image", blocks: [image, text("\n下方文字")], expectedText: ["下方文字"] },
+    { name: "consumes CRLF as one line break", blocks: [image, text("\r\n下方文字")], expectedText: ["下方文字"] },
+    { name: "consumes one CR after an image", blocks: [image, text("\r下方文字")], expectedText: ["下方文字"] },
+    { name: "preserves an additional LF", blocks: [image, text("\n\n下方文字")], expectedText: ["\n下方文字"] },
+    { name: "preserves an additional CRLF", blocks: [image, text("\r\n\r\n下方文字")], expectedText: ["\r\n下方文字"] },
+    { name: "preserves text without a leading line break", blocks: [image, text("下方文字")], expectedText: ["下方文字"] },
+    { name: "preserves indentation after the consumed line break", blocks: [image, text("\n \t下方文字")], expectedText: [" \t下方文字"] },
+    { name: "preserves remaining whitespace after the consumed line break", blocks: [image, text("\n \t")], expectedText: [" \t"] },
+    { name: "does not trim whitespace preceding a line break", blocks: [image, text(" \n下方文字")], expectedText: [" \n下方文字"] },
+    { name: "omits a trailing paragraph emptied by consumption", blocks: [image, text("\n")], expectedText: [] },
+    { name: "omits an empty paragraph between images", blocks: [image, text("\r\n"), secondImage], expectedText: [] },
+    { name: "does not consume a second text block after omitting the first", blocks: [image, text("\n"), text("\n下方文字")], expectedText: ["\n下方文字"] },
+    { name: "preserves ordinary text and line breaks before images", blocks: [text("\n上方文字\n"), image, text("\n下方文字\n"), text("\n独立段落")], expectedText: ["\n上方文字\n", "下方文字\n", "\n独立段落"] },
+  ];
+
+  it.each(cases)("$name", ({ blocks, expectedText }) => {
+    // 测试目标：验证图片后只消费一次紧邻换行，额外空行、缩进及原始邻接关系保持不变。
+    // 构造方法：按表内 blocks 构造带本地图片预览的 rich 消息，渲染 ChatPanel，再读取富文本中的段落及图片。
+    // 输入数据：各行明确给出 LF/CRLF/CR、无换行、连续换行、空白文字或多图片的具体 blocks。
+    // 预期行为：段落文本严格等于该行 expectedText；仅消费后为空的段落消失，所有图片及原始消息内容均保留。
+    const originalBlocks = structuredClone(blocks);
+    const message: ChatMessage = {
+      ...createMessage(),
+      messageType: "rich",
+      localStatus: "sending",
+      content: { blocks },
+    };
+
+    renderChatPanel(createConversation([message]));
+
+    const bubble = screen.getByRole("group", { name: "富文本消息" });
+    const paragraphs = within(bubble).queryAllByRole("paragraph");
+    expect(paragraphs.map((paragraph) => paragraph.textContent)).toEqual(expectedText);
+    expect(within(bubble).getAllByRole("img", { name: "聊天图片" })).toHaveLength(blocks.filter((block) => block.type === "image").length);
+    expect(message.content).toEqual({ blocks: originalBlocks });
+  });
+
+  it("preserves line breaks and indentation in plain text messages", () => {
+    // 测试目标：验证图片边界适配不会修改普通文字消息中的换行或缩进。
+    // 构造方法：渲染一条 messageType=text 的消息，按原始文本查找可见消息段落。
+    // 输入数据：文本为前置 LF、两个空格缩进、中间两个 LF 和末尾 LF。
+    // 预期行为：显示文本与输入逐字符一致，消息数据也不发生变化。
+    const originalText = "\n  普通文字\n\n后续文字\n";
+    const message = { ...createMessage(), content: { text: originalText } };
+
+    renderChatPanel(createConversation([message]));
+
+    expect(screen.getByText("普通文字 后续文字").textContent).toBe(originalText);
+    expect(message.content.text).toBe(originalText);
   });
 });
 
