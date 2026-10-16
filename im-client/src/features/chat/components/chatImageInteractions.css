@@ -1,0 +1,3 @@
+.auth-message-image.is-interactive { cursor: zoom-in; }
+.auth-message-image.is-interactive:focus-visible { outline: 2px solid var(--focus, #4285f4); outline-offset: 2px; }
+.auth-chat-interaction-error { margin: 0; padding: 6px 14px; color: var(--danger, #dc4444); }
