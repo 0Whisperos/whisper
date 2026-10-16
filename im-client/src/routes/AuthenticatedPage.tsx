@@ -11,6 +11,8 @@ import { saveCurrentProfile } from "../features/chat/profileApi";
 import type { EditableSelfProfile } from "../features/chat/types";
 import type { AuthSession } from "../features/login/types";
 import { useFriendRequests } from "../features/chat/hooks/useFriendRequests";
+import { imageViewerCoordinator } from "../features/image-viewer/coordinator";
+import { useImageViewerLifecycle } from "./useImageViewerLifecycle";
 
 interface AuthenticatedPageProps {
   apiBaseUrl: string;
@@ -30,6 +32,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
   const attachmentResourceCacheRef = useRef<AttachmentResourceCache | null>(null);
   if (!attachmentResourceCacheRef.current) attachmentResourceCacheRef.current = new AttachmentResourceCache();
   const attachmentResourceCache = attachmentResourceCacheRef.current;
+  useImageViewerLifecycle(apiBaseUrl, session.userId, chatData.data?.conversations, session.accessToken, attachmentResourceCache);
   const serverFrameHandlerRef = useRef<(frame: ChatBusinessServerFrame) => void>(() => undefined);
   const chatConnection = useChatConnection({
     session,
@@ -117,7 +120,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     chatConnection.close();
     avatarResourceCache.clear();
     attachmentResourceCache.clear();
-    onLogout();
+    void imageViewerCoordinator.close().catch(() => undefined).then(onLogout);
   }
 
   async function handleSaveProfile(profile: EditableSelfProfile) {

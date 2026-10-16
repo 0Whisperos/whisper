@@ -1,0 +1,8 @@
+.image-viewer { --border-soft: #555; --conversation-surface: #303030; --auth-text: #eee; --bubble-other: #484848; display: flex; flex-direction: column; height: 100vh; width: 100vw; background: #252525; color: #eeeeee; overflow: hidden; }
+.image-viewer-stage { position: relative; flex: 1 1 0; min-height: 0; overflow: auto; padding: 20px; }
+.image-viewer-center { min-width: 100%; min-height: 100%; width: max-content; height: max-content; display: flex; justify-content: center; align-items: center; }
+.image-viewer-image-box { position: relative; flex: none; }
+.image-viewer-image-box img { position: absolute; top: 50%; left: 50%; max-width: none; max-height: none; transform-origin: center; user-select: none; }
+.image-viewer-loading { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.image-viewer-feedback { padding: 8px 16px; background: #6e3030; }
+.image-viewer-empty { flex: 1; display: grid; place-items: center; }

@@ -4,12 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { CloseRequestedEvent, CloseRequestedHandler } from "./shared/tauri/appWindow";
 
-const { destroyAppWindowMock, listenAppCloseRequestedMock, loadClientConfigMock, useAuthSessionMock } = vi.hoisted(() => ({
+const { destroyAppWindowMock, listenAppCloseRequestedMock, loadClientConfigMock, useAuthSessionMock, closeViewerMock } = vi.hoisted(() => ({
   destroyAppWindowMock: vi.fn(),
   listenAppCloseRequestedMock: vi.fn(),
   loadClientConfigMock: vi.fn(),
   useAuthSessionMock: vi.fn(),
+  closeViewerMock: vi.fn(),
 }));
+
+vi.mock("./features/image-viewer/coordinator", () => ({ imageViewerCoordinator: { close: closeViewerMock } }));
 
 vi.mock("./features/client-config/api", () => ({ loadClientConfig: loadClientConfigMock }));
 vi.mock("./features/login/hooks/useAuthSession", () => ({ useAuthSession: useAuthSessionMock }));
@@ -29,6 +32,7 @@ describe("App", () => {
 
   beforeEach(() => {
     closeHandlers.length = 0;
+    closeViewerMock.mockReset().mockResolvedValue(undefined);
     destroyAppWindowMock.mockReset();
     listenAppCloseRequestedMock.mockReset();
     loadClientConfigMock.mockReset();
@@ -156,6 +160,7 @@ describe("App", () => {
 
     expect(event.preventDefault).toHaveBeenCalled();
     expect(events).toEqual(["cleanup", "destroy"]);
+    expect(closeViewerMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("login users:")).not.toBeInTheDocument();
   });
 
@@ -247,6 +252,26 @@ describe("App", () => {
     });
 
     expect(cleanupBeforeAppClose).toHaveBeenCalledTimes(1);
+    expect(destroyAppWindowMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for viewer cleanup before destroying the main window even when viewer cleanup fails", async () => {
+    // 测试目标：验证主窗口等待查看器清理，且查看器失败不会阻止最终退出。
+    // 构造方法：保留查看器关闭 Promise，触发主窗口关闭，然后拒绝该 Promise。
+    // 输入数据：延迟的 window_not_found 拒绝及正常的认证清理。
+    // 预期行为：查看器清理未结束时不销毁主窗口；拒绝后仍销毁且无未处理错误。
+    let rejectViewer!: (error: Error) => void;
+    closeViewerMock.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectViewer = reject; }));
+    loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
+    render(<App />);
+    await waitFor(() => expect(closeHandlers).toHaveLength(1));
+    const closing = closeHandlers[0](closeEvent());
+    expect(closeViewerMock).toHaveBeenCalledTimes(1);
+    expect(destroyAppWindowMock).not.toHaveBeenCalled();
+    await act(async () => {
+      rejectViewer(new Error("window_not_found"));
+      await closing;
+    });
     expect(destroyAppWindowMock).toHaveBeenCalledTimes(1);
   });
 });

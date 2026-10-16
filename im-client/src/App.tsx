@@ -6,6 +6,7 @@ import { useAuthSession } from "./features/login/hooks/useAuthSession";
 import { AuthenticatedPage } from "./routes/AuthenticatedPage";
 import { LoginPage } from "./routes/LoginPage";
 import { destroyAppWindow, listenAppCloseRequested } from "./shared/tauri/appWindow";
+import { imageViewerCoordinator } from "./features/image-viewer/coordinator";
 
 export function App() {
   const [config, setConfig] = useState<ClientConfig | null>(null);
@@ -60,7 +61,7 @@ export function App() {
       }
       isDestroyingWindowRef.current = true;
       try {
-        await cleanupBeforeAppClose();
+        await Promise.allSettled([imageViewerCoordinator.close(), cleanupBeforeAppClose()]);
       } catch {
         // Window closing is best-effort cleanup; the app should still close.
       } finally {

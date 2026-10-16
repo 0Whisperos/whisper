@@ -1,0 +1,6 @@
+.image-viewer-stage.image-viewer-canvas { padding: 0; overflow: hidden; touch-action: none; user-select: none; }
+.image-viewer-canvas.is-ready { cursor: grab; }
+.image-viewer-canvas.is-dragging { cursor: grabbing; }
+.image-viewer-canvas .image-viewer-pan { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+.image-viewer-canvas .image-viewer-pan img { position: absolute; left: 0; top: 0; max-width: none; max-height: none; transform-origin: center; user-select: none; }
+.image-viewer-canvas > p[role="alert"] { margin: 24px; cursor: default; }

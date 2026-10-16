@@ -1,0 +1,51 @@
+.image-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  flex: 0 0 40px;
+  height: 40px;
+  min-height: 40px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 0 0 6px;
+  gap: 4px;
+  background: #303030;
+  color: #eeeeee;
+  box-shadow: inset 0 -1px #414141;
+  user-select: none;
+}
+.image-viewer-tool-group { display: flex; align-items: center; flex: none; gap: 2px; }
+.image-viewer-tool-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.image-viewer-tool-button svg, .image-viewer-window-control svg { width: 18px; height: 18px; pointer-events: none; }
+.image-viewer-tool-button:hover:not(:disabled), .image-viewer-window-control:hover { background: #4b4b4b; }
+.image-viewer-tool-button:disabled { opacity: .3; cursor: default; }
+.image-viewer-tool-button:focus-visible, .image-viewer-window-control:focus-visible { outline: 2px solid #80b9ff; outline-offset: -2px; }
+.image-viewer-divider { flex: 0 0 1px; width: 1px; height: 20px; margin: 0 6px; background: #505050; }
+.image-viewer-zoom { flex: 0 0 52px; width: 52px; text-align: center; font-size: 14px; line-height: 20px; }
+.image-viewer-drag-spacer { align-self: stretch; flex: 1 1 0; min-width: 8px; }
+.image-viewer-counter { flex: none; max-width: 88px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #bbbbbb; font-size: 12px; }
+.image-viewer-window-controls { display: flex; align-self: stretch; align-items: stretch; flex: none; margin-left: 4px; }
+.image-viewer-window-control { display: grid; place-items: center; flex: 0 0 46px; width: 46px; height: 40px; padding: 0; border: 0; border-radius: 0; color: inherit; background: transparent; cursor: pointer; }
+.image-viewer-window-control.is-close:hover { background: #c42b1c; color: #ffffff; }
+@media (max-width: 560px) {
+  .image-viewer-toolbar { gap: 2px; }
+  .image-viewer-tool-group { gap: 0; }
+  .image-viewer-divider { margin: 0 4px; }
+  .image-viewer-zoom { flex-basis: 48px; width: 48px; }
+  .image-viewer-drag-spacer { min-width: 4px; }
+  .image-viewer-counter { max-width: 60px; }
+  .image-viewer-window-controls { margin-left: 0; }
+  .image-viewer-window-control { flex-basis: 40px; width: 40px; }
+}
