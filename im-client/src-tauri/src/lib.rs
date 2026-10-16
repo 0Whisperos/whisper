@@ -2,9 +2,11 @@ mod attachment_cache;
 mod commands;
 mod config;
 mod credentials;
+mod platform;
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(platform::webview::context_menu_policy())
         .invoke_handler(tauri::generate_handler![
             commands::auth::list_saved_users,
             commands::auth::load_saved_refresh_token,
