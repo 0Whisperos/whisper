@@ -79,7 +79,7 @@ export function ChatPanel({
   const unreadCount = unreadIncomingCount(conversation, self.userId);
   const { imageResources, imageFailures, imageContext, resolvedAttachmentCache, retryImage, recoverImage } =
     useChatImageResources(conversation, apiBaseUrl, accessToken, userId, attachmentResourceCache);
-  const interactions = useChatImageInteractions(conversation, imageContext, resolvedAttachmentCache);
+  const interactions = useChatImageInteractions(conversation, self.userId, imageContext, resolvedAttachmentCache);
   const updateBottomState = useCallback((list: HTMLElement) => {
     const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop <= MESSAGE_LIST_BOTTOM_THRESHOLD;
     isAtBottomRef.current = atBottom;
@@ -279,8 +279,8 @@ export function ChatPanel({
                           {hoverTime}
                         </time>
                       ) : null}
-                      {"text" in message.content ? <p className="auth-message-bubble">{message.content.text}</p> : (
-                        <div className="auth-message-bubble auth-rich-message-bubble" role="group" aria-label="富文本消息">
+                      {"text" in message.content ? <p className="auth-message-bubble" onContextMenu={(event) => interactions.openMessageMenu(event, message)}>{message.content.text}</p> : (
+                        <div className="auth-message-bubble auth-rich-message-bubble" role="group" aria-label="富文本消息" onContextMenu={(event) => interactions.openMessageMenu(event, message)}>
                           <div className="auth-rich-message-blocks">
                             {richMessageDisplayBlocksWithIndexes(message.content.blocks).map(({ block, blockIndex }) => {
                               if (block.type === "text") {

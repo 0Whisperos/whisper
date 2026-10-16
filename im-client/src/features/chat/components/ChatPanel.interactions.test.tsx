@@ -55,11 +55,11 @@ describe("chat image and message interactions", () => {
     fireEvent.click(images[1]); expect(openViewer).toHaveBeenCalledTimes(1);
   });
 
-  it("opens only the two image actions after a successful load", async () => {
-    // 测试目标：验证图片加载前无菜单，加载后菜单仅提供复制与下载原图。
-    // 构造方法：先右击未加载图片，再加载图片并右击，检查菜单项。
-    // 输入数据：正式对方消息中的聊天图片，坐标(100,90)。
-    // 预期行为：未加载图片无菜单；已加载图片只有复制/下载原图，且没有消息菜单。
+  it("keeps image menus exclusive and shows the agreed message placeholders", async () => {
+    // 测试目标：验证图片右键优先且只有两项，气泡菜单的占位操作仅给出说明。
+    // 构造方法：先右击未加载图片，再加载图片并右击，随后右击文字并选择回复。
+    // 输入数据：正式对方消息中的聊天图片和文字“正文”。
+    // 预期行为：未加载图片无菜单；已加载图片只有复制/下载原图；文字菜单有复制/回复/转发，点击后提示未实现。
     render(<ChatPanel {...fixture().props} />);
     const image = (await screen.findAllByRole("img", { name: "聊天图片" }))[0];
     fireEvent.contextMenu(image); expect(screen.queryByRole("menu")).not.toBeInTheDocument();
@@ -67,18 +67,35 @@ describe("chat image and message interactions", () => {
     const imageMenu = screen.getByRole("menu", { name: "图片菜单" });
     expect(within(imageMenu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["复制", "下载原图"]);
     expect(screen.queryByRole("menu", { name: "消息菜单" })).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByText("正文"));
+    const messageMenu = screen.getByRole("menu", { name: "消息菜单" });
+    expect(within(messageMenu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["复制", "回复", "转发"]);
+    await userEvent.click(within(messageMenu).getByRole("menuitem", { name: "回复" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument(); expect(screen.getByText("该功能暂未实现")).toBeInTheDocument();
   });
 
-  it.each(["sending", "failed"] as const)("blocks preview-image actions for %s messages", async (localStatus) => {
+  it.each(["sending", "failed"] as const)("restricts %s messages to a copy placeholder and blocks preview-image actions", async (localStatus) => {
     // 测试目标：验证 sending 和 failed 各独立场景中的本地预览不获得正式附件操作。
-    // 构造方法：以当前表项状态渲染本人临时 rich 消息，加载预览图片后右击图片。
+    // 构造方法：以当前表项状态渲染本人临时 rich 消息，加载预览图片后分别右击图片与文字。
     // 输入数据：messageId=null、previewUrl=blob:preview，状态为 sending 或 failed。
-    // 预期行为：图片不启用放大或菜单，也不能打开查看器。
+    // 预期行为：图片不启用放大或菜单；文字只展示复制占位，不显示回复/转发/撤回。
     const pending: ChatMessage = { ...official, senderUserId: 1, messageId: null, conversationSeq: null, localStatus,
       content: { blocks: [{ type: "image", attachment_id: "local-image", previewUrl: "blob:preview" }, { type: "text", text: "待发" }] } };
     render(<ChatPanel {...fixture([pending]).props} />);
     const image = screen.getByRole("img", { name: "聊天图片" }); fireEvent.load(image); fireEvent.contextMenu(image);
     expect(image).not.toHaveClass("is-interactive"); expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByText("待发")); expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["复制"]);
+  });
+
+  it("offers recall only for an accepted own message and dismisses menus on conversation changes", async () => {
+    // 测试目标：验证本人正式消息具有撤回占位菜单，切换会话后清理菜单。
+    // 构造方法：渲染本人 accepted 消息右击文字，随后把 props 的会话 ID 更换。
+    // 输入数据：senderUserId=1、messageId=message-1；会话 42 切到 43。
+    // 预期行为：包含撤回菜单项，切换会话后菜单不存在。
+    const { props } = fixture([{ ...official, senderUserId: 1 }]); const { rerender } = render(<ChatPanel {...props} />);
+    fireEvent.contextMenu(screen.getByText("正文")); expect(screen.getByRole("menuitem", { name: "撤回" })).toBeInTheDocument();
+    rerender(<ChatPanel {...props} conversation={{ ...props.conversation, conversationId: 43 }} />);
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });
 
   it("copies and saves the logical image target and reports failures without a success claim", async () => {

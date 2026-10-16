@@ -15,7 +15,7 @@ interface ChatInteractionMenu {
   anchor: HTMLElement;
 }
 
-export function useChatImageInteractions(conversation: ChatConversation,
+export function useChatImageInteractions(conversation: ChatConversation, selfUserId: number,
   context: AttachmentLoadContext, cache: AttachmentResourceCache) {
   const [menu, setMenu] = useState<ChatInteractionMenu | null>(null);
   const [feedback, setFeedback] = useState("");
@@ -52,6 +52,13 @@ export function useChatImageInteractions(conversation: ChatConversation,
       }
     })().catch(() => report(errorMessage));
   };
+  const openMessageMenu = (event: MouseEvent<HTMLElement>, message: ChatMessage) => {
+    event.preventDefault(); event.stopPropagation(); setFeedback("");
+    const labels = message.messageId !== null && message.localStatus === "accepted"
+      ? ["复制", "回复", "转发", ...(message.senderUserId === selfUserId ? ["撤回"] : [])] : ["复制"];
+    setMenu({ position: { x: event.clientX, y: event.clientY }, label: "消息菜单", ownerKey: message.localKey,
+      anchor: event.currentTarget, items: labels.map((label) => ({ label, onSelect: () => report("该功能暂未实现") })) });
+  };
   const openImageMenu = (event: MouseEvent<HTMLElement>, message: ChatMessage, attachmentId: string) => {
     event.preventDefault(); event.stopPropagation(); setFeedback("");
     setMenu({ position: { x: event.clientX, y: event.clientY }, label: "图片菜单", ownerKey: message.localKey,
@@ -66,7 +73,7 @@ export function useChatImageInteractions(conversation: ChatConversation,
     void imageViewerCoordinator.open(context, conversation, `${message.messageId}:${blockIndex}`, cache)
       .catch(() => report("图片加载失败"));
   };
-  return { menu, feedback, closeMenu, openImageMenu, openImage };
+  return { menu, feedback, closeMenu, openMessageMenu, openImageMenu, openImage };
 }
 
 function isMissingCachedImage(error: unknown): boolean {
