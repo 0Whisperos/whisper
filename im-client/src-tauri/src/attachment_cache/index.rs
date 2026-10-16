@@ -46,39 +46,64 @@ pub(super) fn lookup_many(
                 continue;
             }
         };
-        let record = connection.query_row(
+        let Some(record) = validated_record(&connection, root, &key)? else {
+            output.push(CacheItemDto::miss(id.clone()));
+            continue;
+        };
+        output.push(CacheItemDto::hit(
+            id.clone(),
+            record.path.to_string_lossy().into_owned(),
+        ));
+    }
+    Ok(output)
+}
+
+pub(super) struct CachedRecord {
+    pub(super) path: PathBuf,
+    pub(super) content_type: String,
+    pub(super) size_bytes: u64,
+}
+
+pub(super) fn lookup_record(root: &Path, key: &CacheKey) -> rusqlite::Result<Option<CachedRecord>> {
+    validated_record(&open(root)?, root, key)
+}
+
+fn validated_record(
+    connection: &Connection,
+    root: &Path,
+    key: &CacheKey,
+) -> rusqlite::Result<Option<CachedRecord>> {
+    let record = connection.query_row(
             "SELECT relative_path, content_type, size_bytes FROM image_cache
              WHERE api_base_url = ?1 AND user_id = ?2 AND conversation_id = ?3 AND attachment_id = ?4",
             params![key.api_base_url, key.user_id.to_string(), key.conversation_id.to_string(), key.attachment_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?)),
         ).optional()?;
-        let Some((relative, content_type, size_bytes)) = record else {
-            output.push(CacheItemDto::miss(id.clone()));
-            continue;
-        };
-        let expected_relative =
-            key.relative_path(extension_for(&content_type).unwrap_or("invalid"));
-        let Some(path) = checked_path(root, Path::new(&relative)) else {
-            delete_key(&connection, &key)?;
-            output.push(CacheItemDto::miss(id.clone()));
-            continue;
-        };
-        let Ok(size_bytes) = u64::try_from(size_bytes) else {
-            delete_key(&connection, &key)?;
-            output.push(CacheItemDto::miss(id.clone()));
-            continue;
-        };
-        if Path::new(&relative) != expected_relative || !valid_file(root, &path, size_bytes) {
-            delete_key(&connection, &key)?;
-            output.push(CacheItemDto::miss(id.clone()));
-            continue;
-        }
-        output.push(CacheItemDto::hit(
-            id.clone(),
-            path.to_string_lossy().into_owned(),
-        ));
+    let Some((relative, content_type, size_bytes)) = record else {
+        return Ok(None);
+    };
+    let Some(extension) = extension_for(&content_type) else {
+        delete_key(connection, key)?;
+        return Ok(None);
+    };
+    let expected_relative = key.relative_path(extension);
+    let Some(path) = checked_path(root, Path::new(&relative)) else {
+        delete_key(connection, key)?;
+        return Ok(None);
+    };
+    let Ok(size_bytes) = u64::try_from(size_bytes) else {
+        delete_key(connection, key)?;
+        return Ok(None);
+    };
+    if Path::new(&relative) != expected_relative || !valid_file(root, &path, size_bytes) {
+        delete_key(connection, key)?;
+        return Ok(None);
     }
-    Ok(output)
+    Ok(Some(CachedRecord {
+        path,
+        content_type,
+        size_bytes,
+    }))
 }
 
 pub(super) fn commit(

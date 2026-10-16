@@ -1,6 +1,9 @@
 mod download;
 mod index;
 mod key;
+mod read;
+
+pub(crate) use read::CachedImage;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

@@ -1,0 +1,15 @@
+{
+  "identifier": "image-viewer",
+  "description": "The image viewer can listen for session updates and control its own window. Image operations are guarded by the active viewer session in Rust.",
+  "windows": ["image-viewer"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize"
+  ]
+}
