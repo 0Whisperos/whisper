@@ -2,6 +2,7 @@ mod attachment_cache;
 mod commands;
 mod config;
 mod credentials;
+mod image_actions;
 mod image_decode;
 mod image_error;
 mod image_viewer;
@@ -26,7 +27,9 @@ pub fn run() {
             commands::image_viewer::get_image_viewer_session,
             commands::image_viewer::update_image_viewer_session,
             commands::image_viewer::select_image_viewer_image,
-            commands::image_viewer::close_image_viewer_session
+            commands::image_viewer::close_image_viewer_session,
+            commands::clipboard::copy_chat_image,
+            commands::image_export::save_chat_image
         ])
         .manage(attachment_cache::AttachmentCache::new())
         .manage(image_viewer::ViewerStore::default())

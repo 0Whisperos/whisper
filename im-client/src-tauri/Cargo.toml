@@ -26,4 +26,6 @@ uuid = { version = "1.23.4", features = ["v4"] }
 hex = "0.4.3"
 tokio = { version = "1.52.3", features = ["sync"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+rfd = "0.15"
 percent-encoding = "2"
