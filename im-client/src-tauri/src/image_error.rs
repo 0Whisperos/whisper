@@ -12,6 +12,12 @@ pub(crate) enum ImageError {
     UnsupportedMediaType,
     #[error("clipboard_write_failed")]
     ClipboardWriteFailed,
+    #[error("clipboard_read_failed")]
+    ClipboardReadFailed,
+    #[error("clipboard_content_too_large")]
+    ClipboardContentTooLarge,
+    #[error("clipboard_empty")]
+    ClipboardEmpty,
     #[error("save_failed")]
     SaveFailed,
     #[error("viewer_session_expired")]

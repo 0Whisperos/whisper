@@ -93,12 +93,13 @@ pub(crate) fn read_target(
 }
 
 pub(crate) fn copy(image: &CachedImage) -> Result<(), ImageError> {
-    static CLIPBOARD_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
     copy_with(image, |data| {
-        // Main and viewer may copy concurrently; keep clipboard open/write/drop exclusive.
-        let _guard = CLIPBOARD_WRITE.lock().map_err(|_| ())?;
-        let mut clipboard = arboard::Clipboard::new().map_err(|_| ())?;
-        clipboard.set_image(data).map_err(|_| ())
+        crate::platform::clipboard::with_clipboard(ImageError::ClipboardWriteFailed, |clipboard| {
+            clipboard
+                .set_image(data)
+                .map_err(|_| ImageError::ClipboardWriteFailed)
+        })
+        .map_err(|_| ())
     })
 }
 

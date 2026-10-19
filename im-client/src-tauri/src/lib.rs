@@ -6,6 +6,7 @@ mod image_actions;
 mod image_decode;
 mod image_error;
 mod image_viewer;
+mod message_clipboard;
 mod platform;
 
 use tauri::Manager;
@@ -29,6 +30,8 @@ pub fn run() {
             commands::image_viewer::select_image_viewer_image,
             commands::image_viewer::close_image_viewer_session,
             commands::clipboard::copy_chat_image,
+            commands::clipboard::write_chat_message_clipboard,
+            commands::clipboard::read_chat_clipboard_html,
             commands::image_export::save_chat_image
         ])
         .manage(attachment_cache::AttachmentCache::new())
