@@ -173,6 +173,7 @@ CREATE TABLE messages (
   message_type VARCHAR(32) NOT NULL,
   content JSON NOT NULL,
   content_hash CHAR(64) NOT NULL,
+  reply_to_message_id CHAR(36) NULL DEFAULT NULL,
   created_at DATETIME(6) NOT NULL,
 
   UNIQUE KEY uk_messages_message_id (message_id),
@@ -195,7 +196,19 @@ CREATE TABLE messages (
 | `message_type` | `VARCHAR(32)` | 否 | 无 | 无 | 消息类型。第一阶段使用 `text`，后续可扩展 `image`、`file`、`audio` 等类型。 |
 | `content` | `JSON` | 否 | 无 | 无 | 消息内容。第一阶段文本消息使用类似 `{ "text": "hello" }` 的结构；后续不同 `message_type` 可以对应不同内容结构。 |
 | `content_hash` | `CHAR(64)` | 否 | 无 | 无 | 规范化消息内容的 SHA-256 十六进制摘要。用于判断同一个 `client_message_id` 是否被错误复用于不同内容。 |
+| `reply_to_message_id` | `CHAR(36)` | 是 | `NULL` | 无 | 被回复消息的正式 ID。每条消息最多引用同会话的一条消息；普通消息为空。原文、用户名和摘要不重复落库。幂等恢复除内容哈希外还比较此字段。 |
 | `created_at` | `DATETIME(6)` | 否 | 无 | 索引 `idx_messages_conversation_created` | 服务端创建正式消息的时间。它是服务端时间线时间，不使用客户端发送时间排序；系统边界输出时使用 GB/T 7408 扩展格式。 |
+
+### 回复字段迁移
+
+通过现有 `im-api migrate` 命令及 GORM `AutoMigrate` 增加 nullable 字段，已有记录保持 `NULL`，无需回填。等价的增量 DDL 为：
+
+```sql
+ALTER TABLE messages
+  ADD COLUMN reply_to_message_id CHAR(36) NULL DEFAULT NULL;
+```
+
+本次不增加回复表、摘要快照、撤回字段或反向引用索引。目标消息按已有 `message_id` 唯一索引查询；历史接口按同会话批量补齐引用目标。迁移应先于新的 im-chat、im-api 上线，全部后端节点更新后再启用客户端回复；应先在专用测试库验证，业务库迁移由部署流程执行。
 
 ## `outbox_events`
 
@@ -267,9 +280,10 @@ CREATE TABLE conversation_member_cursors (
 
 1. 根据 `conversation_id` 和 `sender_user_id` 查询 `conversation_members`，确认发送者是有效成员。
 2. 根据 `(sender_user_id, client_message_id)` 查询 `messages`，处理幂等重试或冲突。
-3. 锁定 `conversations` 对应行，递增 `last_seq`，得到新的 `conversation_seq`。
-4. 写入 `messages`。
-5. 写入 `outbox_events` 中的 `message_created` 事件。
-6. 事务提交后，再向发送方返回 `server_accepted`。
+3. 新消息如携带 `reply_to_message_id`，校验目标存在且属于同一会话；幂等命中时比较原引用 ID，无需重复创建消息。
+4. 锁定 `conversations` 对应行，递增 `last_seq`，得到新的 `conversation_seq`。
+5. 写入 `messages`。
+6. 写入 `outbox_events` 中的 `message_created` 事件；内部消息保存引用 ID，不保存引用正文。
+7. 事务提交后，再向发送方返回 `server_accepted`，响应按需附带浅层引用目标。
 
 `server_accepted` 只表示消息已经可靠写入 MySQL，不表示 Kafka 已经发布成功，也不表示接收方客户端已经收到或用户已经阅读。

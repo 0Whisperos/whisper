@@ -163,3 +163,20 @@ func ListMessages(conversationID uint64, beforeSeq, fromSeq *uint64, limit int) 
 
 	return messages, hasMore, nil
 }
+
+// FindMessagesByIDs resolves reply targets within an already authorized conversation.
+func FindMessagesByIDs(conversationID uint64, messageIDs []string) ([]entity.Message, error) {
+	if len(messageIDs) == 0 {
+		return nil, nil
+	}
+	if global.MysqlDB == nil {
+		return nil, ErrNotInitialized
+	}
+	var messages []entity.Message
+	if err := global.MysqlDB.WithContext(context.Background()).
+		Where("conversation_id = ? AND message_id IN ?", conversationID, messageIDs).
+		Find(&messages).Error; err != nil {
+		return nil, fmt.Errorf("find conversation messages by ids: %w", err)
+	}
+	return messages, nil
+}

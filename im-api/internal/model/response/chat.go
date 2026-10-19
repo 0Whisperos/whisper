@@ -34,14 +34,23 @@ type Me struct {
 }
 
 type Message struct {
-	MessageID       string          `json:"message_id"`
-	ConversationID  uint64          `json:"conversation_id"`
-	ConversationSeq uint64          `json:"conversation_seq"`
-	SenderUserID    uint64          `json:"sender_user_id"`
-	ClientMessageID string          `json:"client_message_id"`
-	MessageType     string          `json:"message_type"`
-	Content         json.RawMessage `json:"content"`
-	CreatedAt       string          `json:"created_at"`
+	MessageID        string          `json:"message_id"`
+	ConversationID   uint64          `json:"conversation_id"`
+	ConversationSeq  uint64          `json:"conversation_seq"`
+	SenderUserID     uint64          `json:"sender_user_id"`
+	ClientMessageID  string          `json:"client_message_id"`
+	MessageType      string          `json:"message_type"`
+	Content          json.RawMessage `json:"content"`
+	ReplyToMessageID *string         `json:"reply_to_message_id"`
+	ReplyTo          *ReplyMessage   `json:"reply_to"`
+	CreatedAt        string          `json:"created_at"`
+}
+
+type ReplyMessage struct {
+	MessageID    string          `json:"message_id"`
+	SenderUserID uint64          `json:"sender_user_id"`
+	MessageType  string          `json:"message_type"`
+	Content      json.RawMessage `json:"content"`
 }
 
 type MessagePage struct {

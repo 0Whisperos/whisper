@@ -69,3 +69,66 @@ func messageSequences(messages []entity.Message) []uint64 {
 	}
 	return sequences
 }
+
+func TestFindMessagesByIDsScopesReplyTargetsToConversation(t *testing.T) {
+	// 测试目标：验证批量目标查询读取页外 text/rich 原文但不泄露其他会话或不存在的消息。
+	// 构造方法：迁移临时 SQLite，插入会话 42 两条目标和会话 43 一条目标，再批量查询。
+	// 输入数据：会话 42 的 first/second、会话 43 的 private，以及 missing ID。
+	// 预期行为：只返回会话 42 两条消息，正文与数据库一致，空 ID 数组返回空结果。
+	setupFriendRequestDB(t)
+	for index, message := range []entity.Message{
+		{MessageID: "first", ConversationID: 42, ConversationSeq: 1, SenderUserID: 1, ClientMessageID: "client-1", MessageType: "text", Content: entity.JSONValue(`{"text":"原文"}`), ContentHash: "hash"},
+		{MessageID: "second", ConversationID: 42, ConversationSeq: 2, SenderUserID: 1, ClientMessageID: "client-2", MessageType: "rich", Content: entity.JSONValue(`{"blocks":[{"type":"image","attachment_id":"image"}]}`), ContentHash: "hash"},
+		{MessageID: "private", ConversationID: 43, ConversationSeq: 1, SenderUserID: 2, ClientMessageID: "client-3", MessageType: "text", Content: entity.JSONValue(`{"text":"secret"}`), ContentHash: "hash"},
+	} {
+		if err := global.MysqlDB.Create(&message).Error; err != nil {
+			t.Fatalf("insert %d: %v", index, err)
+		}
+	}
+	messages, err := FindMessagesByIDs(42, []string{"first", "second", "private", "missing", "first"})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("messages=%#v, error=%v", messages, err)
+	}
+	for _, message := range messages {
+		if message.ConversationID != 42 || len(message.Content) == 0 {
+			t.Fatalf("unexpected target %#v", message)
+		}
+	}
+	if messages, err := FindMessagesByIDs(42, nil); err != nil || len(messages) != 0 {
+		t.Fatalf("empty lookup=%#v, error=%v", messages, err)
+	}
+}
+
+func TestMessageMigrationAddsNullableReplyWithoutChangingLegacyRows(t *testing.T) {
+	// 测试目标：验证 AutoMigrate 为旧 messages 表添加可空回复列，并保留现有消息正文。
+	// 构造方法：在临时 SQLite 移除回复列模拟旧 schema，插入旧消息后重新迁移 Message。
+	// 输入数据：无 reply_to_message_id 的 legacy 消息，正文为 {"text":"old"}。
+	// 预期行为：新增列存在，旧消息可读且引用为空，随后可持久化非空引用并读回。
+	setupFriendRequestDB(t)
+	if err := global.MysqlDB.Migrator().DropColumn(&entity.Message{}, "reply_to_message_id"); err != nil {
+		t.Fatal(err)
+	}
+	if err := global.MysqlDB.Exec(`INSERT INTO messages (message_id, conversation_id, conversation_seq, sender_user_id, client_message_id, message_type, content, content_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, "legacy", 42, 1, 1, "legacy-client", "text", `{"text":"old"}`, "hash", time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := global.MysqlDB.AutoMigrate(&entity.Message{}); err != nil {
+		t.Fatal(err)
+	}
+	if !global.MysqlDB.Migrator().HasColumn(&entity.Message{}, "reply_to_message_id") {
+		t.Fatal("missing reply column")
+	}
+	var legacy entity.Message
+	if err := global.MysqlDB.Where("message_id = ?", "legacy").First(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if legacy.ReplyToMessageID != nil || string(legacy.Content) != `{"text":"old"}` {
+		t.Fatalf("legacy=%#v", legacy)
+	}
+	if err := global.MysqlDB.Model(&legacy).Update("reply_to_message_id", "target").Error; err != nil {
+		t.Fatal(err)
+	}
+	messages, _, err := ListMessages(42, nil, nil, 50)
+	if err != nil || len(messages) != 1 || messages[0].ReplyToMessageID == nil || *messages[0].ReplyToMessageID != "target" {
+		t.Fatalf("messages=%#v, error=%v", messages, err)
+	}
+}

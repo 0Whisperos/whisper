@@ -20,6 +20,7 @@ type Friend struct {
 
 type MessagePage struct {
 	Messages         []entity.Message
+	ReplyTargets     map[string]entity.Message
 	HasMore          bool
 	NextBeforeSeq    *uint64
 	NextFromSeq      *uint64
@@ -37,6 +38,7 @@ var (
 	findConversationByID       = mysql.FindConversationByID
 	isActiveConversationMember = mysql.IsActiveConversationMember
 	listMessages               = mysql.ListMessages
+	findMessagesByIDs          = mysql.FindMessagesByIDs
 	findConversationCursors    = mysql.FindConversationMemberCursors
 )
 
@@ -115,6 +117,10 @@ func ListConversationMessages(userID, conversationID uint64, beforeSeq, fromSeq 
 	if err != nil {
 		return MessagePage{}, fmt.Errorf("load conversation messages: %w", err)
 	}
+	replyTargets, err := loadReplyTargets(conversationID, messages)
+	if err != nil {
+		return MessagePage{}, fmt.Errorf("load reply targets: %w", err)
+	}
 	selfCursor, peerCursor, err := findConversationCursors(conversationID, userID)
 	if err != nil {
 		return MessagePage{}, fmt.Errorf("load conversation member cursors: %w", err)
@@ -122,6 +128,7 @@ func ListConversationMessages(userID, conversationID uint64, beforeSeq, fromSeq 
 
 	page := MessagePage{
 		Messages:         messages,
+		ReplyTargets:     replyTargets,
 		HasMore:          hasMore,
 		LastSeq:          conversation.LastSeq,
 		DeliveredSeq:     selfCursor.DeliveredSeq,

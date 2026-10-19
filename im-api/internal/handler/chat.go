@@ -83,7 +83,7 @@ func ConversationMessages(context *gin.Context) {
 		PeerReadSeq:      page.PeerReadSeq,
 	}
 	for _, message := range page.Messages {
-		result.Messages = append(result.Messages, messageResponse(message))
+		result.Messages = append(result.Messages, messageResponse(message, page.ReplyTargets))
 	}
 	context.JSON(http.StatusOK, result)
 }
@@ -125,12 +125,12 @@ func profileResponse(user entity.User) response.UserProfile {
 	return response.NewUserProfile(user.ID, user.Account, user.Nickname, user.Signature, user.AvatarObjectKey)
 }
 
-func messageResponse(message entity.Message) response.Message {
+func messageResponse(message entity.Message, replyTargets map[string]entity.Message) response.Message {
 	content := json.RawMessage(message.Content)
 	if len(content) == 0 {
 		content = json.RawMessage(`{}`)
 	}
-	return response.NewMessage(
+	result := response.NewMessage(
 		message.MessageID,
 		message.ConversationID,
 		message.ConversationSeq,
@@ -140,4 +140,16 @@ func messageResponse(message entity.Message) response.Message {
 		content,
 		message.CreatedAt,
 	)
+	result.ReplyToMessageID = message.ReplyToMessageID
+	if message.ReplyToMessageID != nil {
+		if target, ok := replyTargets[*message.ReplyToMessageID]; ok && target.ConversationID == message.ConversationID {
+			result.ReplyTo = &response.ReplyMessage{
+				MessageID:    target.MessageID,
+				SenderUserID: target.SenderUserID,
+				MessageType:  target.MessageType,
+				Content:      json.RawMessage(target.Content),
+			}
+		}
+	}
+	return result
 }
