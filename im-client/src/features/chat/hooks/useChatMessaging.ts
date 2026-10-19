@@ -7,6 +7,7 @@ import type {
   ChatServerAcceptedFrame,
 } from "../../chat-connection/types";
 import type { ChatData, ChatReplyTarget } from "../types";
+import type { ForwardMessageBody } from "../messageForwarding";
 import type { ChatSendRichMessageInput } from "../../chat-connection/types";
 import { usePendingImagePreviews } from "./usePendingImagePreviews";
 import {
@@ -79,11 +80,11 @@ export function useChatMessaging({
     timersRef.current.clear();
   }, []);
 
-  const send = useCallback((conversationId: number, rawText: string, replyTo?: ChatReplyTarget | null): boolean => {
-    const text = rawText.trim();
+  const sendTextTracked = useCallback((conversationId: number, rawText: string, replyTo?: ChatReplyTarget | null, preserveWhitespace = false): string | null => {
+    const text = preserveWhitespace ? rawText : rawText.trim();
     const current = dataRef.current;
-    if (!text || !current?.conversations[conversationId]) {
-      return false;
+    if (!text.trim() || !current?.conversations[conversationId]) {
+      return null;
     }
     const clientMessageId = clientMessageIdFactory();
     const clientSentAt = now().toISOString();
@@ -103,8 +104,12 @@ export function useChatMessaging({
       clearAcknowledgementTimer(clientMessageId);
       updateData((latest) => latest ? markMessageFailed(latest, clientMessageId, "send_failed") : latest);
     }
-    return true;
+    return clientMessageId;
   }, [clearAcknowledgementTimer, clientMessageIdFactory, now, sendTextMessage, startAcknowledgementTimer, updateData]);
+
+  const send = useCallback((conversationId: number, rawText: string, replyTo?: ChatReplyTarget | null): boolean => (
+    sendTextTracked(conversationId, rawText, replyTo) !== null
+  ), [sendTextTracked]);
 
   const sendRich = useCallback((conversationId: number, blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>, replyTo?: ChatReplyTarget | null): string | null => {
     if (!blocks.some((block) => block.type === "image" || (block.type === "text" && block.text.trim()))
@@ -127,6 +132,19 @@ export function useChatMessaging({
     }
     return clientMessageId;
   }, [clearAcknowledgementTimer, clientMessageIdFactory, now, retainPreviews, sendRichMessage, startAcknowledgementTimer, updateData]);
+
+  const forward = useCallback((conversationId: number, body: ForwardMessageBody): string | null => {
+    if (dataRef.current?.conversations[conversationId]?.type !== "direct") return null;
+    if (body.messageType === "text" && "text" in body.content) {
+      return sendTextTracked(conversationId, body.content.text, null, true);
+    }
+    if (body.messageType === "rich" && "blocks" in body.content) {
+      return sendRich(conversationId, body.content.blocks.map((block) => block.type === "text"
+        ? { type: "text", text: block.text }
+        : { type: "image", attachment_id: block.attachment_id }));
+    }
+    return null;
+  }, [sendRich, sendTextTracked]);
 
   const retry = useCallback((clientMessageId: string): boolean => {
     const current = dataRef.current;
@@ -334,6 +352,7 @@ export function useChatMessaging({
   return {
     send,
     sendRich,
+    forward,
     retry,
     handleServerAccepted,
     handleSendMessageRejected,

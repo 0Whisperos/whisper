@@ -9,6 +9,7 @@ import { useChatData } from "../features/chat/hooks/useChatData";
 import { useChatMessaging } from "../features/chat/hooks/useChatMessaging";
 import { saveCurrentProfile } from "../features/chat/profileApi";
 import type { ChatContentBlock, ChatReplyTarget, EditableSelfProfile } from "../features/chat/types";
+import type { ForwardMessageBody } from "../features/chat/messageForwarding";
 import type { AuthSession } from "../features/login/types";
 import { useFriendRequests } from "../features/chat/hooks/useFriendRequests";
 import { imageViewerCoordinator } from "../features/image-viewer/coordinator";
@@ -114,7 +115,13 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
   }
 
   function handleRetryMessage(clientMessageId: string) {
+    if (!canSendMessages || isLoggingOut) return;
     messaging.retry(clientMessageId);
+  }
+
+  function handleForwardMessage(conversationId: number, body: ForwardMessageBody): string | null {
+    if (!canSendMessages || isLoggingOut) return null;
+    return messaging.forward(conversationId, body);
   }
 
   function handleLogout() {
@@ -153,11 +160,12 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     <AuthenticatedShell
       data={chatData.data}
       connectionLabel={describeChatConnection(chatConnection.state)}
-      canSendMessages={canSendMessages}
+      canSendMessages={canSendMessages && !isLoggingOut}
       isLoggingOut={isLoggingOut}
       onLogout={handleLogout}
       onSendText={handleSendText}
       onSendRich={handleSendRich}
+      onForwardMessage={handleForwardMessage}
       onRetryMessage={handleRetryMessage}
       loadConversationHistory={chatData.loadHistory}
       loadOlderConversationHistory={chatData.loadOlderHistory}

@@ -20,6 +20,10 @@ import { FunctionRail } from "./FunctionRail";
 import { IconSprite } from "./ui";
 import { ProfileEditor } from "./ProfileEditor";
 import { SessionPanel } from "./SessionPanel";
+import { ForwardMessageDialog } from "./ForwardMessageDialog";
+import { buildForwardTargets } from "../forwardTargets";
+import { useMessageForwarding } from "../hooks/useMessageForwarding";
+import type { ForwardMessageBody } from "../messageForwarding";
 
 interface AuthenticatedShellProps {
   data: ChatData;
@@ -30,6 +34,7 @@ interface AuthenticatedShellProps {
   onSendText?: (conversationId: number, text: string, replyTo?: ChatReplyTarget | null) => boolean | void;
   onSendRich?: (conversationId: number, blocks: ChatContentBlock[], replyTo?: ChatReplyTarget | null) => string | null | boolean | void;
   onRetryMessage?: (clientMessageId: string) => void;
+  onForwardMessage?: (conversationId: number, body: ForwardMessageBody) => string | null;
   loadConversationHistory?: (conversationId: number) => Promise<number | null>;
   loadOlderConversationHistory?: (conversationId: number) => Promise<number | null>;
   hasMoreConversationHistory?: (conversationId: number) => boolean;
@@ -56,6 +61,7 @@ export function AuthenticatedShell({
   onSendText = () => false,
   onSendRich = () => false,
   onRetryMessage = () => undefined,
+  onForwardMessage = () => null,
   loadConversationHistory,
   loadOlderConversationHistory,
   hasMoreConversationHistory = () => false,
@@ -73,6 +79,9 @@ export function AuthenticatedShell({
   onSaveProfile,
 }: AuthenticatedShellProps) {
   const workspace = useChatWorkspace(data);
+  const forwarding = useMessageForwarding({ data, apiBaseUrl, accessToken, canSendMessages,
+    sendMessage: onForwardMessage, retryMessage: onRetryMessage });
+  const forwardRestoreFocusRef = useRef<(() => void) | null>(null);
   const composer = useChatComposer({ conversationId: workspace.activeConversationId, apiBaseUrl, accessToken,
     userId: data.self.userId, canSendMessages, onSendText, onSendRich });
   const { drafts } = composer;
@@ -261,6 +270,10 @@ export function AuthenticatedShell({
             clipboardContextKey={composer.clipboardContextKey}
             replyTo={drafts.replyTo}
             onSelectReply={drafts.setReply}
+            onForwardMessage={(message, restoreFocus) => {
+              forwardRestoreFocusRef.current = restoreFocus;
+              forwarding.open(message);
+            }}
             isHistoryLoading={loadingConversationId === workspace.activeConversationId}
             historyError={getConversationHistoryError(workspace.activeConversationId)}
             hasMoreHistory={hasMoreConversationHistory(workspace.activeConversationId)}
@@ -320,6 +333,12 @@ export function AuthenticatedShell({
         onLogout={onLogout}
       />
       {isProfileEditorOpen ? <ProfileEditor self={selfProfile} onSave={saveProfile} onCancel={closeProfileEditor} /> : null}
+      {forwarding.source ? <ForwardMessageDialog targets={buildForwardTargets(data)}
+        selectedConversationId={forwarding.selectedConversationId} phase={forwarding.phase}
+        error={forwarding.error} submitted={forwarding.submitted} canSend={canSendMessages}
+        onSelectTarget={forwarding.selectTarget} onSubmit={forwarding.submit} onRetry={forwarding.retry} onClose={forwarding.close}
+        onRestoreFocus={() => forwardRestoreFocusRef.current?.()} /> : null}
+      {forwarding.feedback ? <p className="auth-forward-feedback" role="status">{forwarding.feedback}</p> : null}
       <BottomNav
         view={workspace.view}
         accountButtonRef={mobileAccountTriggerRef}

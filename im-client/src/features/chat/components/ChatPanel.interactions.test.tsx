@@ -31,7 +31,7 @@ function fixture(messages: ChatMessage[] = [official], conversationId = 42) {
   const props = { conversation, self: { userId: 1, account: "me", name: "我", avatar: "我", tone: "blue" as const },
     connectionLabel: "在线", draft: "", canSend: false, statusMessage: "", isHistoryLoading: false, historyError: null,
     hasMoreHistory: false, onLoadOlderHistory: vi.fn(), onRetryHistory: vi.fn(), isDetailOpen: false, onReturnToSessions: vi.fn(),
-    onOpenDetail: vi.fn(), onToolPreview: vi.fn(), onSendText: vi.fn(), onRetryMessage: vi.fn(), onSelectReply: vi.fn(),
+    onOpenDetail: vi.fn(), onToolPreview: vi.fn(), onSendText: vi.fn(), onRetryMessage: vi.fn(), onSelectReply: vi.fn(), onForwardMessage: vi.fn(),
     apiBaseUrl: "https://api.test", accessToken: "token", attachmentResourceCache: cache };
   return { cache, adapter, props };
 }
@@ -40,6 +40,20 @@ describe("chat image and message interactions", () => {
   beforeEach(() => { openViewer.mockReset().mockResolvedValue(undefined); copyImage.mockReset().mockResolvedValue(undefined);
     saveImage.mockReset().mockResolvedValue({ saved: true }); copyMessage.mockReset().mockResolvedValue(undefined); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("forwards an accepted message through its own action without changing the reply", async () => {
+    // 测试目标：验证正式消息转发菜单调用独立回调，不改动回复草稿。
+    // 构造方法：渲染正式富文本消息，在正文右键菜单选择转发。
+    // 输入数据：accepted 的 message-1，正文包含图文 blocks。
+    // 预期行为：传递完整源消息一次，菜单关闭，回复与发送回调均不触发。
+    const { props } = fixture(); render(<ChatPanel {...props} />);
+    await screen.findAllByRole("img", { name: "聊天图片" });
+    fireEvent.contextMenu(screen.getByText("正文"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "转发" }));
+    expect(props.onForwardMessage).toHaveBeenCalledExactlyOnceWith(official, expect.any(Function));
+    expect(props.onSelectReply).not.toHaveBeenCalled(); expect(props.onSendText).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
 
   it("enables image actions only after load and uses the original block index", async () => {
     // 测试目标：验证图片真正加载完成后才可放大查看，且显示层省略空文字不会改变查看器图片 ID。

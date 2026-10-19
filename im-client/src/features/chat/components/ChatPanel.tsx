@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { ChatApiError } from "../api";
-import type { ChatConversation, ChatReplyTarget, ChatSelfProfile } from "../types";
+import type { ChatConversation, ChatMessage, ChatReplyTarget, ChatSelfProfile } from "../types";
 import { formatHoverMessageTime, isCompactMessage } from "../hooks/messageTimeline";
 import { Avatar, Icon, IconButton } from "./ui";
 import { Composer, type ComposerHandle } from "./Composer";
@@ -48,6 +48,7 @@ interface ChatPanelProps {
   attachmentResourceCache?: AttachmentResourceCache;
   replyTo?: ChatReplyTarget | null;
   onSelectReply?: (target: ChatReplyTarget | null) => void;
+  onForwardMessage?: (message: ChatMessage, restoreFocus: () => void) => void;
   composerBusy?: boolean;
   clipboardContextKey?: string;
 }
@@ -73,7 +74,7 @@ export function ChatPanel({
   onReadThrough,
   draftBlocks = EMPTY_DRAFT_BLOCKS, onChangeDraftBlocks = () => undefined, onPickFiles = () => [],
   onSendRich = () => undefined, apiBaseUrl = "", accessToken = "", userId = self.userId, attachmentResourceCache,
-  replyTo = null, onSelectReply = () => undefined, composerBusy = false, clipboardContextKey,
+  replyTo = null, onSelectReply = () => undefined, onForwardMessage, composerBusy = false, clipboardContextKey,
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -90,7 +91,7 @@ export function ChatPanel({
     useChatImageResources(conversation, apiBaseUrl, accessToken, userId, attachmentResourceCache);
   const interactions = useChatImageInteractions(conversation, self.userId, imageContext, resolvedAttachmentCache, (target) => {
     onSelectReply(target); composerRef.current?.focus();
-  });
+  }, (message) => { onForwardMessage?.(message, () => composerRef.current?.focus()); });
   const updateBottomState = useCallback((list: HTMLElement) => {
     const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop <= MESSAGE_LIST_BOTTOM_THRESHOLD;
     isAtBottomRef.current = atBottom;

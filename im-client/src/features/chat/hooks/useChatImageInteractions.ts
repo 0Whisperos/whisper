@@ -19,7 +19,8 @@ interface ChatInteractionMenu {
 }
 
 export function useChatImageInteractions(conversation: ChatConversation, selfUserId: number,
-  context: AttachmentLoadContext, cache: AttachmentResourceCache, onReply?: (target: ChatReplyTarget) => void) {
+  context: AttachmentLoadContext, cache: AttachmentResourceCache, onReply?: (target: ChatReplyTarget) => void,
+  onForward?: (message: ChatMessage) => void) {
   const [menu, setMenu] = useState<ChatInteractionMenu | null>(null);
   const [feedback, setFeedback] = useState("");
   const contextKey = JSON.stringify([context.apiBaseUrl, context.accessToken, context.userId, context.conversationId]);
@@ -67,7 +68,8 @@ export function useChatImageInteractions(conversation: ChatConversation, selfUse
         } else if (label === "回复") {
           const target = replyTargetFromMessage(message);
           if (target) onReply?.(target);
-        } else report("该功能暂未实现");
+        } else if (label === "转发") onForward?.(message);
+        else report("该功能暂未实现");
       } })) });
   };
   const openImageMenu = (event: MouseEvent<HTMLElement>, message: ChatMessage, attachmentId: string) => {
