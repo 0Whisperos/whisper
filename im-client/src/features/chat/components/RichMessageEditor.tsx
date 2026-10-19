@@ -24,6 +24,7 @@ interface RichMessageEditorProps {
 
 export interface RichMessageEditorHandle {
   insertFiles: (files: File[]) => void;
+  insertText: (text: string) => void;
   focus: () => void;
 }
 
@@ -171,8 +172,14 @@ export const RichMessageEditor = forwardRef<RichMessageEditorHandle, RichMessage
     insertImagesAtSelection(editor, images, true);
   };
 
+  const insertText = (text: string) => {
+    if (!editor || !editor.isEditable || !text) return;
+    editor.chain().focus().insertContent(text).run();
+  };
+
   useImperativeHandle(forwardedRef, () => ({
     insertFiles,
+    insertText,
     focus: () => editor?.commands.focus(),
   }), [editor, onPickFiles]);
 

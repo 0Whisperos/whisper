@@ -2,7 +2,7 @@
 .auth-forward-dialog { display: flex; flex-direction: column; width: min(440px, 100%); max-height: min(640px, calc(100dvh - 40px)); padding: 22px; border: 1px solid #dce3ec; border-radius: 18px; color: #243248; background: #fff; box-shadow: 0 24px 80px #0003; }
 .auth-forward-dialog header, .auth-forward-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .auth-forward-dialog h2 { margin: 0; font-size: 19px; }
-.auth-forward-dialog > p { margin: 12px 0; font-size: 13px; }
+.auth-forward-dialog > p { margin: 12px 0; font-size: 15px; }
 .auth-forward-dialog button { border: 1px solid #dce3ec; border-radius: 9px; padding: 8px 14px; background: transparent; color: inherit; cursor: pointer; }
 .auth-forward-dialog button:disabled { opacity: .45; cursor: default; }
 .auth-forward-dialog .auth-forward-primary { color: #fff; background: #517cf1; border-color: #517cf1; }

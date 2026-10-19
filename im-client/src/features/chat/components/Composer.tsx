@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef } from "react";
 import { IconButton } from "./ui";
 import { RichMessageEditor, type RichMessageEditorHandle } from "./RichMessageEditor";
+import { EmojiPickerPopover } from "./EmojiPickerPopover";
 import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
 
 interface ComposerProps {
@@ -31,7 +32,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   return (
     <footer className="auth-composer">
       <div className="auth-composer-actions">
-        <IconButton icon="smile" label="表情" onClick={() => onToolPreview("表情")} />
+        <EmojiPickerPopover disabled={isBusy} onSelectEmoji={(emoji) => editorRef.current?.insertText(emoji)} />
         <IconButton icon="cut" label="截图" onClick={() => onToolPreview("截图")} />
         <IconButton icon="file" label="发送图片" disabled={isBusy} onClick={() => fileInputRef.current?.click()} />
         <input ref={fileInputRef} id="chat-image-picker" aria-label="选择图片" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden

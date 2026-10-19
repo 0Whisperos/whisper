@@ -21,6 +21,7 @@
     "@tiptap/extension-text": "^3.31.4",
     "@tiptap/pm": "^3.31.4",
     "@tiptap/react": "^3.31.4",
+    "emoji-picker-react": "^5.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

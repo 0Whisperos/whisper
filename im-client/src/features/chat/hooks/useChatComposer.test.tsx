@@ -55,4 +55,39 @@ describe("composer snapshots", () => {
     expect(result.current.drafts.blocks).toEqual([image]);
     expect(result.current.isBusy).toBe(false);
   });
+
+  it("allows a multi-code-point emoji sequence at the 4096 character limit", async () => {
+    // 测试目标：验证服务端一致的 Unicode 码点上限允许恰好 4096 个码点的消息。
+    // 构造方法：设置 4092 个 ASCII 字符和四码点肤色 ZWJ 表情，再调用编辑器发送流程。
+    // 输入数据："x" 重复 4092 次后接“👨🏽‍💻”，总计 4096 个 Unicode 码点。
+    // 预期行为：普通文本发送回调收到完整原文，且不显示长度错误。
+    const onSendText = vi.fn();
+    const { result } = renderHook(() => useChatComposer({ conversationId: 1, apiBaseUrl: "https://api.test", accessToken: "token",
+      userId: 1, canSendMessages: true, onSendText, onSendRich: vi.fn() }));
+    const message = `${"x".repeat(4092)}👨🏽‍💻`;
+    act(() => result.current.drafts.setDraft(message));
+
+    await act(async () => { await result.current.sendEditor(); });
+
+    expect(onSendText).toHaveBeenCalledWith(1, message);
+    expect(result.current.statusMessage).toBe("");
+  });
+
+  it("rejects a multi-code-point emoji sequence that exceeds the 4096 character limit", async () => {
+    // 测试目标：验证多码点表情使消息超过 4096 码点时，客户端阻止发送并保留草稿。
+    // 构造方法：设置 4093 个 ASCII 字符和四码点肤色 ZWJ 表情，再调用编辑器发送流程。
+    // 输入数据："x" 重复 4093 次后接“👨🏽‍💻”，总计 4097 个 Unicode 码点。
+    // 预期行为：不调用发送回调，提示长度错误，且完整消息仍留在草稿中。
+    const onSendText = vi.fn();
+    const { result } = renderHook(() => useChatComposer({ conversationId: 1, apiBaseUrl: "https://api.test", accessToken: "token",
+      userId: 1, canSendMessages: true, onSendText, onSendRich: vi.fn() }));
+    const message = `${"x".repeat(4093)}👨🏽‍💻`;
+    act(() => result.current.drafts.setDraft(message));
+
+    await act(async () => { await result.current.sendEditor(); });
+
+    expect(onSendText).not.toHaveBeenCalled();
+    expect(result.current.statusMessage).toBe("消息文字不能超过 4096 个字符");
+    expect(result.current.drafts.draft).toBe(message);
+  });
 });

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
@@ -6,6 +7,30 @@ import type { DraftImageBlock } from "../hooks/useChatDrafts";
 
 function makeImage(file = new File(["png"], "photo.png", { type: "image/png" })): DraftImageBlock {
   return { type: "image", localId: "photo-id", file, previewUrl: "blob:photo" };
+}
+
+function setCaret(editor: HTMLElement, offset: number, textNodeIndex = 0) {
+  const textNodes = Array.from(editor.querySelector("p")?.childNodes ?? []).filter((node): node is Text => node instanceof Text);
+  const text = textNodes[textNodeIndex];
+  if (!(text instanceof Text)) throw new Error("编辑器中未找到文字节点");
+  act(() => {
+    const selection = window.getSelection();
+    if (!selection) throw new Error("当前环境不支持文本选区");
+    const range = document.createRange();
+    range.setStart(text, offset);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+}
+
+function StatefulComposer({ initialBlocks, onSendText }: { initialBlocks: Array<{ type: "text"; id: string; text: string } | DraftImageBlock>; onSendText: (text: string) => void }) {
+  const [blocks, setBlocks] = useState(initialBlocks);
+  const draft = blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
+  const canSend = Boolean(draft.trim()) || blocks.some((block) => block.type === "image");
+  return <Composer draft={draft} canSend={canSend} statusMessage="" onToolPreview={vi.fn()} onSendText={onSendText}
+    blocks={blocks} onChangeBlocks={setBlocks} onPickFiles={vi.fn(() => [])} />;
 }
 
 describe("Composer rich editor", () => {
@@ -22,6 +47,89 @@ describe("Composer rich editor", () => {
     expect(editor).toHaveTextContent("前");
     expect(editor).toHaveTextContent("后");
     expect(document.querySelector(".auth-composer-inline-blocks")).not.toBeInTheDocument();
+  });
+
+  it("inserts a selected emoji at the editor caret and sends it through the normal text action", async () => {
+    // 测试目标：验证选中 Unicode 表情后插入当前光标位置，且仍由用户主动触发普通文本发送。
+    // 构造方法：将光标放在“ab”的中间，打开选择器并选择“😀”，再点击发送按钮。
+    // 输入数据：草稿“ab”和表情“😀”。
+    // 预期行为：草稿变为“a😀b”，选择表情时不发送，发送按钮收到完整文本且编辑器恢复焦点。
+    const user = userEvent.setup();
+    const onSendText = vi.fn();
+    render(<StatefulComposer initialBlocks={[{ type: "text", id: "text", text: "ab" }]} onSendText={onSendText} />);
+    const editor = screen.getByRole("textbox", { name: "输入消息" });
+
+    await user.click(editor);
+    setCaret(editor, 1);
+    await user.click(screen.getByRole("button", { name: "表情" }));
+    const emoji = await waitFor(() => {
+      const result = document.querySelector<HTMLElement>('[role="gridcell"][data-epr-unified="1f600"]');
+      if (!result) throw new Error("未找到 😀 表情格");
+      return result;
+    });
+    await user.click(emoji);
+
+    await waitFor(() => expect(editor).toHaveTextContent("a😀b"));
+    expect(onSendText).not.toHaveBeenCalled();
+    expect(editor).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "发送消息" }));
+    expect(onSendText).toHaveBeenCalledWith("a😀b");
+  });
+
+  it("sends a selected emoji with Enter through the normal text action", async () => {
+    // 测试目标：验证插入 Unicode 表情后按 Enter 会走现有文本发送回调。
+    // 构造方法：将光标放在“a”末尾，选中“😀”，再在编辑器聚焦时按 Enter。
+    // 输入数据：“a”加表情“😀”。
+    // 预期行为：只发送一次，回调收到完整文本“a😀”。
+    const user = userEvent.setup();
+    const onSendText = vi.fn();
+    render(<StatefulComposer initialBlocks={[{ type: "text", id: "text", text: "a" }]} onSendText={onSendText} />);
+    const editor = screen.getByRole("textbox", { name: "输入消息" });
+
+    await user.click(editor);
+    setCaret(editor, 1);
+    await user.click(screen.getByRole("button", { name: "表情" }));
+    const emoji = await waitFor(() => {
+      const result = document.querySelector<HTMLElement>('[role="gridcell"][data-epr-unified="1f600"]');
+      if (!result) throw new Error("未找到 😀 表情格");
+      return result;
+    });
+    await user.click(emoji);
+    expect(editor).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(onSendText).toHaveBeenCalledOnce();
+    expect(onSendText).toHaveBeenCalledWith("a😀");
+  });
+
+  it("keeps emoji insertion in the text block after an inline image", async () => {
+    // 测试目标：验证含图片的富文本草稿在图片后的文字块插入表情时仍保持块顺序。
+    // 构造方法：渲染“前文、图片、后文”的草稿，将光标移至末尾并从选择器添加表情。
+    // 输入数据：前文“前”、photo.png、后文“后”和表情“😀”。
+    // 预期行为：onChangeBlocks 仍按文本、图片、文本顺序返回，末尾文字为“后😀”。
+    const user = userEvent.setup();
+    const image = makeImage();
+    const onChangeBlocks = vi.fn();
+    render(<Composer draft="前后" canSend statusMessage="" onToolPreview={vi.fn()} onSendText={vi.fn()}
+      blocks={[{ type: "text", id: "before", text: "前" }, image, { type: "text", id: "after", text: "后" }]}
+      onChangeBlocks={onChangeBlocks} onPickFiles={vi.fn(() => [])} />);
+    const editor = screen.getByRole("textbox", { name: "输入消息" });
+
+    await user.click(editor);
+    setCaret(editor, 1, 1);
+    await user.click(screen.getByRole("button", { name: "表情" }));
+    const emoji = await waitFor(() => {
+      const result = document.querySelector<HTMLElement>('[role="gridcell"][data-epr-unified="1f600"]');
+      if (!result) throw new Error("未找到 😀 表情格");
+      return result;
+    });
+    await user.click(emoji);
+
+    await waitFor(() => expect(onChangeBlocks).toHaveBeenLastCalledWith([
+      expect.objectContaining({ type: "text", text: "前" }),
+      expect.objectContaining({ type: "image", localId: image.localId }),
+      expect.objectContaining({ type: "text", text: "后😀" }),
+    ]));
   });
 
   it("inserts pasted images at the caret and serializes surrounding text in clipboard order", async () => {

@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createRef } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
@@ -6,7 +7,7 @@ import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
 const { nativeHtml, desktop } = vi.hoisted(() => ({ nativeHtml: vi.fn(), desktop: vi.fn(() => false) }));
 vi.mock("../messageClipboardApi", () => ({ readChatClipboardHtml: nativeHtml }));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: desktop }));
-import { RichMessageEditor } from "./RichMessageEditor";
+import { RichMessageEditor, type RichMessageEditorHandle } from "./RichMessageEditor";
 
 function fixture(context = "a") {
   const onChangeBlocks = vi.fn();
@@ -19,6 +20,19 @@ function paste(html: string, plain = "", files: File[] = []) {
   Object.defineProperty(event, "clipboardData", { value: { getData: (type: string) => type === "text/html" ? html : type === "text/plain" ? plain : "", items: [], files, types: html ? ["text/html", "text/plain"] : ["text/plain"] } });
   fireEvent(screen.getByRole("textbox", { name: "输入消息" }), event);
   return event;
+}
+
+function setCaret(editor: HTMLElement, offset: number) {
+  const text = editor.querySelector("p")?.firstChild;
+  if (!(text instanceof Text)) throw new Error("编辑器中未找到文字节点");
+  const selection = window.getSelection();
+  if (!selection) throw new Error("当前环境不支持文本选区");
+  const range = document.createRange();
+  range.setStart(text, offset);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  document.dispatchEvent(new Event("selectionchange"));
 }
 
 describe("rich editor clipboard", () => {
@@ -59,6 +73,28 @@ describe("rich editor clipboard", () => {
     paste("<pre><code>&lt;img src=x&gt;</code></pre>");
     await waitFor(() => expect(onChangeBlocks).toHaveBeenLastCalledWith([expect.objectContaining({ type: "text", text: "<img src=x>" })]));
     expect(onPickFiles).not.toHaveBeenCalled();
+  });
+
+  it("inserts a multi-code-point emoji sequence intact at the saved editor selection", async () => {
+    // 测试目标：验证肤色修饰与 ZWJ 组成的表情序列会作为完整文本插入，且焦点回到编辑器。
+    // 构造方法：在“前后”之间放置选区，调用编辑器公开的 insertText 方法。
+    // 输入数据：序列“👨🏽‍💻👨‍👩‍👧‍👦”。
+    // 预期行为：草稿文本精确保留完整序列并位于前后文字之间，编辑器获得焦点。
+    const user = userEvent.setup();
+    const onChangeBlocks = vi.fn();
+    const editorRef = createRef<RichMessageEditorHandle>();
+    render(<RichMessageEditor ref={editorRef} blocks={[{ type: "text", id: "text", text: "前后" }]}
+      disabled={false} onChangeBlocks={onChangeBlocks} onPickFiles={() => []} onSend={vi.fn()} />);
+    const editor = screen.getByRole("textbox", { name: "输入消息" });
+    await user.click(editor);
+    act(() => setCaret(editor, 1));
+
+    act(() => editorRef.current?.insertText("👨🏽‍💻👨‍👩‍👧‍👦"));
+
+    await waitFor(() => expect(onChangeBlocks).toHaveBeenLastCalledWith([
+      expect.objectContaining({ type: "text", text: "前👨🏽‍💻👨‍👩‍👧‍👦后" }),
+    ]));
+    expect(editor).toHaveFocus();
   });
 
   it("prevents default synchronously and discards a native fallback after switching context", async () => {
