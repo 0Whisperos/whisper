@@ -57,6 +57,21 @@ export type ChatContentBlock =
 
 export type ChatMessageContent = TextMessageContent | { blocks: ChatContentBlock[] };
 
+/** A shallow reference: the original body is provided for display, without nested replies. */
+export interface ChatReplyTarget {
+  messageId: string;
+  senderUserId: number;
+  messageType: "text" | "rich";
+  content: ChatMessageContent;
+}
+
+export interface ChatReplyTargetDto {
+  message_id: string;
+  sender_user_id: number;
+  message_type: "text" | "rich";
+  content: ChatMessageContent;
+}
+
 export interface ChatMessage {
   /** Stable client-side key. Pending messages keep this value after acknowledgement. */
   localKey: string;
@@ -67,6 +82,8 @@ export interface ChatMessage {
   clientMessageId: string;
   messageType: "text" | "rich";
   content: ChatMessageContent;
+  replyToMessageId?: string | null;
+  replyTo?: ChatReplyTarget | null;
   createdAt: string | null;
   clientSentAt: string;
   localStatus: "sending" | "accepted" | "failed";
@@ -171,6 +188,8 @@ export interface ChatMessageDto {
   clientMessageId: string;
   messageType: "text" | "rich";
   content: ChatMessageContent;
+  replyToMessageId?: string | null;
+  replyTo?: ChatReplyTarget | null;
   createdAt: string;
 }
 

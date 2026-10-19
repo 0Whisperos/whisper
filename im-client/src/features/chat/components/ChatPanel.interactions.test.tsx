@@ -6,7 +6,8 @@ import type { AttachmentCacheAdapter } from "../attachmentCacheApi";
 import type { ChatConversation, ChatMessage } from "../types";
 import { ChatPanel } from "./ChatPanel";
 
-const { openViewer, copyImage, saveImage } = vi.hoisted(() => ({ openViewer: vi.fn(), copyImage: vi.fn(), saveImage: vi.fn() }));
+const { openViewer, copyImage, saveImage, copyMessage } = vi.hoisted(() => ({ openViewer: vi.fn(), copyImage: vi.fn(), saveImage: vi.fn(), copyMessage: vi.fn() }));
+vi.mock("../messageClipboardApi", () => ({ copyChatMessage: copyMessage, readChatClipboardHtml: vi.fn(async () => null) }));
 vi.mock("../../image-viewer/api", () => ({ copyImage, saveImage }));
 vi.mock("../../image-viewer/coordinator", () => ({ imageViewerCoordinator: { open: openViewer } }));
 
@@ -30,14 +31,14 @@ function fixture(messages: ChatMessage[] = [official], conversationId = 42) {
   const props = { conversation, self: { userId: 1, account: "me", name: "我", avatar: "我", tone: "blue" as const },
     connectionLabel: "在线", draft: "", canSend: false, statusMessage: "", isHistoryLoading: false, historyError: null,
     hasMoreHistory: false, onLoadOlderHistory: vi.fn(), onRetryHistory: vi.fn(), isDetailOpen: false, onReturnToSessions: vi.fn(),
-    onOpenDetail: vi.fn(), onToolPreview: vi.fn(), onSendText: vi.fn(), onRetryMessage: vi.fn(),
+    onOpenDetail: vi.fn(), onToolPreview: vi.fn(), onSendText: vi.fn(), onRetryMessage: vi.fn(), onSelectReply: vi.fn(),
     apiBaseUrl: "https://api.test", accessToken: "token", attachmentResourceCache: cache };
   return { cache, adapter, props };
 }
 
 describe("chat image and message interactions", () => {
   beforeEach(() => { openViewer.mockReset().mockResolvedValue(undefined); copyImage.mockReset().mockResolvedValue(undefined);
-    saveImage.mockReset().mockResolvedValue({ saved: true }); });
+    saveImage.mockReset().mockResolvedValue({ saved: true }); copyMessage.mockReset().mockResolvedValue(undefined); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it("enables image actions only after load and uses the original block index", async () => {
@@ -55,12 +56,12 @@ describe("chat image and message interactions", () => {
     fireEvent.click(images[1]); expect(openViewer).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps image menus exclusive and shows the agreed message placeholders", async () => {
-    // 测试目标：验证图片右键优先且只有两项，气泡菜单的占位操作仅给出说明。
+  it("keeps image menus exclusive and selects a real reply target", async () => {
+    // 测试目标：验证图片右键优先且只有两项，气泡菜单回复传递真实目标。
     // 构造方法：先右击未加载图片，再加载图片并右击，随后右击文字并选择回复。
     // 输入数据：正式对方消息中的聊天图片和文字“正文”。
-    // 预期行为：未加载图片无菜单；已加载图片只有复制/下载原图；文字菜单有复制/回复/转发，点击后提示未实现。
-    render(<ChatPanel {...fixture().props} />);
+    // 预期行为：图片菜单独占；选择回复后菜单关闭并传递原消息正文。
+    const { props } = fixture(); render(<ChatPanel {...props} />);
     const image = (await screen.findAllByRole("img", { name: "聊天图片" }))[0];
     fireEvent.contextMenu(image); expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     fireEvent.load(image); fireEvent.contextMenu(image, { clientX: 100, clientY: 90 });
@@ -71,19 +72,22 @@ describe("chat image and message interactions", () => {
     const messageMenu = screen.getByRole("menu", { name: "消息菜单" });
     expect(within(messageMenu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["复制", "回复", "转发"]);
     await userEvent.click(within(messageMenu).getByRole("menuitem", { name: "回复" }));
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument(); expect(screen.getByText("该功能暂未实现")).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(props.onSelectReply).toHaveBeenCalledWith(expect.objectContaining({ messageId: "message-1", content: official.content }));
   });
 
-  it.each(["sending", "failed"] as const)("restricts %s messages to a copy placeholder and blocks preview-image actions", async (localStatus) => {
-    // 测试目标：验证 sending 和 failed 各独立场景中的本地预览不获得正式附件操作。
+  it.each(["sending", "failed"] as const)("copies %s messages and their preview images without requiring acceptance", async (localStatus) => {
+    // 测试目标：验证 sending 和 failed 图片均可复制，但不能回复或下载。
     // 构造方法：以当前表项状态渲染本人临时 rich 消息，加载预览图片后分别右击图片与文字。
     // 输入数据：messageId=null、previewUrl=blob:preview，状态为 sending 或 failed。
-    // 预期行为：图片不启用放大或菜单；文字只展示复制占位，不显示回复/转发/撤回。
+    // 预期行为：图片不启用放大，但有复制菜单；文字菜单也只允许复制。
     const pending: ChatMessage = { ...official, senderUserId: 1, messageId: null, conversationSeq: null, localStatus,
       content: { blocks: [{ type: "image", attachment_id: "local-image", previewUrl: "blob:preview" }, { type: "text", text: "待发" }] } };
     render(<ChatPanel {...fixture([pending]).props} />);
     const image = screen.getByRole("img", { name: "聊天图片" }); fireEvent.load(image); fireEvent.contextMenu(image);
-    expect(image).not.toHaveClass("is-interactive"); expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(image).not.toHaveClass("is-interactive"); expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["复制"]);
+    await userEvent.click(screen.getByRole("menuitem", { name: "复制" }));
+    expect(copyMessage).toHaveBeenCalledWith(expect.objectContaining({ content: { blocks: [{ type: "image", attachment_id: "local-image", previewUrl: "blob:preview" }] } }), expect.anything(), expect.anything());
     fireEvent.contextMenu(screen.getByText("待发")); expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["复制"]);
   });
 
@@ -96,6 +100,20 @@ describe("chat image and message interactions", () => {
     fireEvent.contextMenu(screen.getByText("正文")); expect(screen.getByRole("menuitem", { name: "撤回" })).toBeInTheDocument();
     rerender(<ChatPanel {...props} conversation={{ ...props.conversation, conversationId: 43 }} />);
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("dismisses pending menus after acknowledgement so they cannot read a released local preview", async () => {
+    // 测试目标：验证确认消息替换临时预览时，不允许菜单继续使用旧 Blob。
+    // 构造方法：给 sending 消息打开菜单，再在相同 localKey 上替换为 accepted。
+    // 输入数据：messageId=null 的本地消息，以及正式 message-1 确认。
+    // 预期行为：确认后菜单自动关闭，不调用旧消息的复制操作。
+    const { props } = fixture([{ ...official, messageId: null, localStatus: "sending" }]);
+    const { rerender } = render(<ChatPanel {...props} />);
+    fireEvent.contextMenu(screen.getByText("正文"));
+    expect(screen.getByRole("menu", { name: "消息菜单" })).toBeInTheDocument();
+    rerender(<ChatPanel {...props} conversation={{ ...props.conversation, messages: [official] }} />);
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(copyMessage).not.toHaveBeenCalled();
   });
 
   it("copies and saves the logical image target and reports failures without a success claim", async () => {

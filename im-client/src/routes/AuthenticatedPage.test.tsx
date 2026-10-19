@@ -197,6 +197,27 @@ describe("AuthenticatedPage", () => {
     expect(input.textContent).toBe("");
   });
 
+  it("passes the selected reply through the page into the WebSocket transport", async () => {
+    // 测试目标：验证页面包装函数不会丢掉 Shell 传入的回复目标。
+    // 构造方法：认证连接、右键原文选择回复，在输入框键入答复并发送。
+    // 输入数据：会话 10002 第一条正式消息、正文“我会回家”。
+    // 预期行为：transport 收到该正式 ID，回复状态条在提交后清除。
+    const sendTransport = vi.fn();
+    useChatConnectionMock.mockReturnValue({ state: { status: "authenticated", userId: 20001, connectionId: "connection-1",
+      accessTokenExpiresAt: session.accessTokenExpiresAt } satisfies ChatConnectionState,
+      close: vi.fn(), sendTextMessage: sendTransport, sendDeliveredAck: vi.fn(), sendReadAck: vi.fn() });
+    const user = userEvent.setup();
+    render(<AuthenticatedPage apiBaseUrl="http://127.0.0.1:8080" session={session} refreshSession={vi.fn()} isLoggingOut={false} onLogout={vi.fn()} />);
+    const list = screen.getByRole("region", { name: "消息列表" });
+    fireEvent.contextMenu(within(list).getByText("晚饭回家吃吗？"));
+    await user.click(screen.getByRole("menuitem", { name: "回复" }));
+    await user.type(screen.getByRole("textbox", { name: "输入消息" }), "我会回家");
+    await user.click(screen.getByRole("button", { name: "发送消息" }));
+    expect(sendTransport).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 10002, text: "我会回家",
+      replyToMessageId: chatMockData.conversations[10002].messages[0].messageId }));
+    expect(screen.queryByRole("group", { name: "回复消息" })).not.toBeInTheDocument();
+  });
+
   it("shows auth_failed using the stable error code", () => {
     // 测试目标：验证认证失败提示依赖稳定错误码而不是服务端 message 文本。
     // 构造方法：mock useChatConnection 返回 auth_failed invalid_token。

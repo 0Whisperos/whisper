@@ -13,6 +13,7 @@ import type {
 } from "../types";
 import type { AuthSession } from "../../login/types";
 import { mergeOfficialMessage, toAcceptedTimelineMessage } from "./messageTimeline";
+import { replyTargetToDto } from "../messageReply";
 
 const AVATAR_TONES: AvatarTone[] = ["blue", "teal", "gold", "orange", "purple", "rose", "green", "gray"];
 
@@ -463,6 +464,8 @@ function mergeConversationMessages(data: ChatData, conversationId: number, incom
       client_message_id: message.clientMessageId,
       message_type: message.messageType,
       content: message.content,
+      reply_to_message_id: message.replyToMessageId,
+      reply_to: replyTargetToDto(message.replyTo),
       created_at: message.createdAt,
     });
   }, data);

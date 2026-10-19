@@ -1,4 +1,6 @@
 import type { ChatData, ChatMessage, ChatMessageDto } from "../types";
+import type { ChatReplyTarget, ChatReplyTargetDto } from "../types";
+import { parseReplyTarget } from "../messageReply";
 
 const MESSAGE_GROUP_GAP_MS = 10 * 60 * 1000;
 
@@ -8,6 +10,7 @@ export interface PendingTextMessageInput {
   clientMessageId: string;
   text: string;
   clientSentAt: string;
+  replyTo?: ChatReplyTarget | null;
 }
 
 export interface ServerTextMessage {
@@ -19,6 +22,8 @@ export interface ServerTextMessage {
   message_type: "text" | "rich";
   content: ChatMessage["content"];
   created_at: string;
+  reply_to_message_id?: string | null;
+  reply_to?: ChatReplyTargetDto | null;
 }
 
 export function insertPendingTextMessage(data: ChatData, input: PendingTextMessageInput): ChatData {
@@ -38,6 +43,7 @@ export function insertPendingTextMessage(data: ChatData, input: PendingTextMessa
     clientMessageId: input.clientMessageId,
     messageType: "text",
     content: { text: input.text },
+    ...(input.replyTo ? { replyToMessageId: input.replyTo.messageId, replyTo: input.replyTo } : {}),
     createdAt: null,
     clientSentAt: input.clientSentAt,
     localStatus: "sending",
@@ -212,6 +218,8 @@ function toOfficialMessage(incoming: ServerTextMessage, local?: ChatMessage): Ch
     clientMessageId: incoming.client_message_id,
     messageType: incoming.message_type,
     content: incoming.content,
+    replyToMessageId: incoming.reply_to_message_id ?? incoming.reply_to?.message_id ?? null,
+    replyTo: parseReplyTarget(incoming.reply_to),
     createdAt: incoming.created_at,
     clientSentAt: local?.clientSentAt ?? incoming.created_at,
     localStatus: "accepted",
@@ -249,6 +257,7 @@ export function insertPendingRichMessage(data: ChatData, input: {
   conversationId: number; senderUserId: number; clientMessageId: string;
   blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>;
   clientSentAt: string;
+  replyTo?: ChatReplyTarget | null;
 }): ChatData {
   const conversation = data.conversations[input.conversationId];
   if (!conversation || conversation.messages.some((message) => message.clientMessageId === input.clientMessageId)) return data;
@@ -256,6 +265,7 @@ export function insertPendingRichMessage(data: ChatData, input: {
     localKey: `local:${input.clientMessageId}`, messageId: null, conversationId: input.conversationId,
     conversationSeq: null, senderUserId: input.senderUserId, clientMessageId: input.clientMessageId,
     messageType: "rich", content: { blocks: input.blocks }, createdAt: null, clientSentAt: input.clientSentAt,
+    ...(input.replyTo ? { replyToMessageId: input.replyTo.messageId, replyTo: input.replyTo } : {}),
     localStatus: "sending", displayTime: formatMessageTime(input.clientSentAt), showTime: true, showAvatar: true,
   };
   return replaceConversationMessages(data, input.conversationId, [...conversation.messages, message]);

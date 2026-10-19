@@ -96,6 +96,40 @@ function renderMessaging(options: {
 }
 
 describe("useChatMessaging", () => {
+  it("preserves a reply through rejection, retry and server acceptance", () => {
+    // 测试目标：验证失败重试继续引用原目标，且服务端确认替换本地引用信息。
+    // 构造方法：发送回复、注入拒绝帧、重试，再注入含引用目标的确认帧。
+    // 输入数据：会话 42、original 原文及 client-7 回复“你好”。
+    // 预期行为：首次发送与重试均携带相同引用 ID，最终气泡仍保留引用且不重复。
+    const { result } = renderMessaging();
+    const replyTo = { messageId: "original", senderUserId: 20002, messageType: "text" as const, content: { text: "原文" } };
+    act(() => result.current.messaging.send(42, "你好", replyTo));
+    expect(sentMessages[0]).toMatchObject({ replyToMessageId: "original" });
+    act(() => result.current.messaging.handleSendMessageRejected(rejectedFrame("client-7")));
+    expect(result.current.data.conversations[42].messages[0]).toMatchObject({ replyTo, localStatus: "failed" });
+    act(() => result.current.messaging.retry("client-7"));
+    expect(sentMessages[1]).toMatchObject({ clientMessageId: "client-7", replyToMessageId: "original" });
+    const frame = acceptedFrame("client-7");
+    frame.payload.message.reply_to_message_id = "original";
+    frame.payload.message.reply_to = { message_id: "original", sender_user_id: 20002, message_type: "text", content: { text: "原文" } };
+    act(() => result.current.messaging.handleServerAccepted(frame));
+    expect(result.current.data.conversations[42].messages).toHaveLength(1);
+    expect(result.current.data.conversations[42].messages[0]).toMatchObject({ replyTo, replyToMessageId: "original", localStatus: "accepted" });
+  });
+
+  it("sends rich replies without serializing local quote content or preview URLs", () => {
+    // 测试目标：验证图文回复仅发送引用 ID 与正式附件，同时本地保留引用预览。
+    // 构造方法：调用 rich 发送入口，传入图片块和浅层原文引用。
+    // 输入数据：attachment-1、blob:local 和 original 引用。
+    // 预期行为：transport 无 previewUrl/引用正文，本地气泡有引用，引用内容不混入正文。
+    const { result } = renderMessaging();
+    const replyTo = { messageId: "original", senderUserId: 20002, messageType: "text" as const, content: { text: "原文" } };
+    act(() => result.current.messaging.sendRich(42, [{ type: "image", attachment_id: "attachment-1", previewUrl: "blob:local" }], replyTo));
+    expect(sentRichMessages[0]).toMatchObject({ replyToMessageId: "original", blocks: [{ type: "image", attachment_id: "attachment-1" }] });
+    expect(sentRichMessages[0]).not.toHaveProperty("replyTo");
+    expect(result.current.data.conversations[42].messages[0]).toMatchObject({ replyTo, replyToMessageId: "original" });
+  });
+
   beforeEach(() => {
     sentMessages.length = 0;
     sentRichMessages.length = 0;
@@ -104,6 +138,7 @@ describe("useChatMessaging", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("optimistically adds a trimmed sending message and updates the session preview", () => {
@@ -135,6 +170,25 @@ describe("useChatMessaging", () => {
       messageType: "rich", localStatus: "sending", content: { blocks: [{ type: "image", attachment_id: "attachment-1", previewUrl: "blob:local" }] },
     });
     expect(sentRichMessages[0].blocks).toEqual([{ type: "image", attachment_id: "attachment-1" }]);
+  });
+
+  it("retains pending and failed image previews until server acceptance", () => {
+    // 测试目标：验证未成功消息的可见图片能持续用于复制，确认后释放本地资源。
+    // 构造方法：发送带 blob 预览的图片，先注入失败，再注入正式确认。
+    // 输入数据：blob:pending-image、attachment-1、client-7。
+    // 预期行为：pending/failed 时不回收，accepted 后回收一次。
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, revokeObjectURL });
+    const { result } = renderMessaging();
+    act(() => result.current.messaging.sendRich(42, [{ type: "image", attachment_id: "attachment-1", previewUrl: "blob:pending-image" }]));
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    act(() => result.current.messaging.handleSendMessageRejected(rejectedFrame("client-7")));
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    const frame = acceptedFrame("client-7");
+    frame.payload.message.message_type = "rich";
+    frame.payload.message.content = { blocks: [{ type: "image", attachment_id: "attachment-1" }] };
+    act(() => result.current.messaging.handleServerAccepted(frame));
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:pending-image");
   });
 
   it("merges server acceptance into the existing local bubble", () => {

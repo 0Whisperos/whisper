@@ -125,6 +125,25 @@ describe("chat HTTP API", () => {
     );
   });
 
+  it("restores a reference whose target is outside the current history page", async () => {
+    // 测试目标：验证历史响应携带的页外引用转换后不丢失正文。
+    // 构造方法：替换 fetch 返回仅含一条回复的历史页，原目标不在 messages 数组。
+    // 输入数据：reply-id 引用 original；目标为发送者 2 的 rich 消息。
+    // 预期行为：客户端同时保留 replyToMessageId 和浅层 replyTo，含图文顺序。
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ messages: [{
+      message_id: "reply-id", conversation_id: 42, conversation_seq: 100, sender_user_id: 1,
+      client_message_id: "client-reply", message_type: "text", content: { text: "答复" },
+      created_at: "2026-10-16T10:00:00+08:00", reply_to_message_id: "original",
+      reply_to: { message_id: "original", sender_user_id: 2, message_type: "rich",
+        content: { blocks: [{ type: "text", text: "原文" }, { type: "image", attachment_id: "a" }] } },
+    }], has_more: true, last_seq: 100, delivered_seq: 100, read_seq: 100, peer_delivered_seq: 100, peer_read_seq: 100 }), { status: 200 }));
+    const page = await loadConversationMessages("https://api.test", "token", 42);
+    expect(page.messages[0]).toMatchObject({ replyToMessageId: "original", replyTo: {
+      messageId: "original", senderUserId: 2, messageType: "rich",
+      content: { blocks: [{ type: "text", text: "原文" }, { type: "image", attachment_id: "a" }] },
+    } });
+  });
+
   it("maps stable server error codes to ChatApiError", async () => {
     // 测试目标：验证服务端稳定错误码不会被前端误当成普通网络错误。
     // 构造方法：替换 fetch 返回 403 及 not_conversation_member 错误结构。

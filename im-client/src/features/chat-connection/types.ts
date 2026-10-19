@@ -1,4 +1,5 @@
 import type { AuthSession } from "../login/types";
+import type { ChatReplyTargetDto } from "../chat/types";
 
 export type ChatAuthErrorCode =
   | "invalid_request"
@@ -80,6 +81,8 @@ export interface ChatTextMessage {
   message_type: "text" | "rich";
   content: { text: string } | { blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }> };
   created_at: string;
+  reply_to_message_id?: string | null;
+  reply_to?: ChatReplyTargetDto | null;
 }
 
 export interface ChatSendMessageFrame {
@@ -91,6 +94,7 @@ export interface ChatSendMessageFrame {
     message_type: "text" | "rich";
     content: { text: string } | { blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }> };
     client_sent_at: string;
+    reply_to_message_id?: string;
   };
 }
 
@@ -186,6 +190,7 @@ export interface ChatSendTextMessageInput {
   conversationId: number;
   text: string;
   clientSentAt: string;
+  replyToMessageId?: string;
 }
 
 export interface ChatSendRichMessageInput {
@@ -193,6 +198,7 @@ export interface ChatSendRichMessageInput {
   conversationId: number;
   blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string }>;
   clientSentAt: string;
+  replyToMessageId?: string;
 }
 
 export interface ChatConnectionOptions {

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { forwardRef, useImperativeHandle, useRef } from "react";
 import { IconButton } from "./ui";
 import { RichMessageEditor, type RichMessageEditorHandle } from "./RichMessageEditor";
 import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
@@ -12,14 +12,20 @@ interface ComposerProps {
   blocks: ChatDraftBlock[];
   onChangeBlocks: (blocks: ChatDraftBlock[]) => void;
   onPickFiles: (files: File[]) => DraftImageBlock[];
+  isBusy?: boolean;
+  clipboardContextKey?: string;
 }
 
-export function Composer({ draft, canSend, statusMessage, onToolPreview, onSendText, blocks, onChangeBlocks, onPickFiles }: ComposerProps) {
+export interface ComposerHandle { focus: () => void }
+
+export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer({ draft, canSend, statusMessage, onToolPreview, onSendText, blocks, onChangeBlocks, onPickFiles,
+  isBusy: busy, clipboardContextKey }: ComposerProps, ref) {
   const editorRef = useRef<RichMessageEditorHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const isBusy = statusMessage.startsWith("正在上传图片");
+  const isBusy = busy ?? statusMessage.startsWith("正在上传图片");
+  useImperativeHandle(ref, () => ({ focus: () => editorRef.current?.focus() }), []);
   const sendDraft = () => {
-    if (canSend) onSendText(draft.trim());
+    if (canSend && !isBusy) onSendText(draft.trim());
   };
 
   return (
@@ -44,6 +50,7 @@ export function Composer({ draft, canSend, statusMessage, onToolPreview, onSendT
         onChangeBlocks={onChangeBlocks}
         onPickFiles={onPickFiles}
         onSend={sendDraft}
+        clipboardContextKey={clipboardContextKey}
       />
       <output className="auth-interaction-status" aria-live="polite">{statusMessage}</output>
       <button
@@ -58,4 +65,4 @@ export function Composer({ draft, canSend, statusMessage, onToolPreview, onSendT
       </button>
     </footer>
   );
-}
+});

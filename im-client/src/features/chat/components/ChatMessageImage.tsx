@@ -8,20 +8,23 @@ interface ChatMessageImageProps {
   interactive: boolean;
   onOpen: () => void;
   onMenu: (event: MouseEvent<HTMLElement>) => void;
+  onPendingMenu?: (event: MouseEvent<HTMLElement>) => void;
   onCloseMenu: () => void;
   onLayout: () => void;
   onError: () => void;
   onRetry: () => void;
 }
 
-export function ChatMessageImage({ src, failed, interactive, onOpen, onMenu, onCloseMenu, onLayout, onError, onRetry }: ChatMessageImageProps) {
+export function ChatMessageImage({ src, failed, interactive, onOpen, onMenu, onPendingMenu, onCloseMenu, onLayout, onError, onRetry }: ChatMessageImageProps) {
   const [loadedSource, setLoadedSource] = useState<string | null>(null);
   const loaded = Boolean(src && loadedSource === src);
   useLayoutEffect(() => { setLoadedSource(null); onCloseMenu(); }, [src, onCloseMenu]);
   useEffect(() => () => onCloseMenu(), []);
   const contextMenu = (event: MouseEvent<HTMLElement>) => {
     event.preventDefault(); event.stopPropagation();
-    if (loaded && interactive) onMenu(event); else onCloseMenu();
+    if (loaded && interactive) onMenu(event);
+    else if (loaded && onPendingMenu) onPendingMenu(event);
+    else onCloseMenu();
   };
   if (!src) return failed
     ? <span className="auth-message-image-error" role="group" aria-label="图片加载失败" onContextMenu={contextMenu}>

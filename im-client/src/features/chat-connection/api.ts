@@ -1,3 +1,4 @@
+import { isReplyMetadata } from "../chat/messageReply";
 import type {
   ChatAuthFrame,
   ChatBusinessServerFrame,
@@ -131,6 +132,7 @@ export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnec
           message_type: "text",
           content: { text: input.text },
           client_sent_at: input.clientSentAt,
+          ...(input.replyToMessageId ? { reply_to_message_id: input.replyToMessageId } : {}),
         },
       };
       socket.send(JSON.stringify(frame));
@@ -145,6 +147,7 @@ export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnec
           message_type: "rich",
           content: { blocks: input.blocks },
           client_sent_at: input.clientSentAt,
+          ...(input.replyToMessageId ? { reply_to_message_id: input.replyToMessageId } : {}),
         },
       };
       socket.send(JSON.stringify(frame));
@@ -409,7 +412,8 @@ function isTextMessage(value: unknown): value is ChatTextMessage {
     && typeof value.content === "object"
     && value.content !== null
     && (value.message_type === "text" ? hasStringProperty(value.content, "text") : isRichContent(value.content))
-    && hasStringProperty(value, "created_at");
+    && hasStringProperty(value, "created_at")
+    && isReplyMetadata(value);
 }
 
 function isRichContent(value: object): boolean {

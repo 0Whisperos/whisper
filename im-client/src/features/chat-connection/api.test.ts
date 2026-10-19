@@ -268,6 +268,29 @@ describe("chat connection API", () => {
     });
   });
 
+  it("sends only the reply id and preserves reference content in incoming frames", () => {
+    // 测试目标：验证回复请求不携带本地摘要，服务端确认能通过协议校验。
+    // 构造方法：认证 mock socket 后发送回复，再接收带浅层引用的确认帧。
+    // 输入数据：original 引用、答复正文、发送者 20001。
+    // 预期行为：发送 payload 含 reply_to_message_id，接收回调完整保留 reply_to。
+    const socket = new MockWebSocket();
+    const onServerFrame = vi.fn();
+    const controller = connectChatWebSocket({ session: testSession, onStateChange: vi.fn(), onServerFrame,
+      webSocketFactory: () => socket });
+    authenticateSocket(socket);
+    controller.sendTextMessage({ clientMessageId: "reply-client", conversationId: 10001, text: "答复",
+      clientSentAt: "2026-10-16T10:00:00Z", replyToMessageId: "original" });
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ payload: { reply_to_message_id: "original", content: { text: "答复" } } });
+    const frame = { type: "server_accepted", request_id: "reply-request", payload: { client_message_id: "reply-client", message: {
+      message_id: "reply-id", conversation_id: 10001, conversation_seq: 5, sender_user_id: 20001,
+      client_message_id: "reply-client", message_type: "text", content: { text: "答复" }, created_at: "2026-10-16T10:00:01Z",
+      reply_to_message_id: "original", reply_to: { message_id: "original", sender_user_id: 20002, message_type: "text", content: { text: "原文" } },
+    } } };
+    socket.receive(JSON.stringify(frame));
+    expect(onServerFrame).toHaveBeenCalledWith(frame);
+    controller.close();
+  });
+
   it("sends delivered and read cursor acknowledgements with their own request ids", () => {
     // 测试目标：验证送达和已读游标都通过认证后的 WebSocket 请求帧发送，且字段名各自正确。
     // 构造方法：使用固定 request_id 序列认证 socket，再依次调用两个 ACK controller 方法。

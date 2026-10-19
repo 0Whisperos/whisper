@@ -2,8 +2,10 @@ import type {
   ChatFriendDto,
   ChatMessageDto,
   ChatMessagePageDto,
+  ChatReplyTargetDto,
   ChatUserProfileDto,
 } from "./types";
+import { isReplyMetadata, parseReplyTarget } from "./messageReply";
 
 export type ChatApiErrorCode =
   | "invalid_token"
@@ -195,6 +197,8 @@ function parseMessagePage(value: unknown): ChatMessagePageDto | null {
       clientMessageId: message.client_message_id,
       messageType: message.message_type,
       content: message.content,
+      replyToMessageId: message.reply_to_message_id ?? message.reply_to?.message_id ?? null,
+      replyTo: parseReplyTarget(message.reply_to),
       createdAt: message.created_at,
     });
   }
@@ -212,6 +216,8 @@ function parseMessagePage(value: unknown): ChatMessagePageDto | null {
 }
 
 function isMessage(value: unknown): value is {
+  reply_to_message_id?: string | null;
+  reply_to?: ChatReplyTargetDto | null;
   message_id: string;
   conversation_id: number;
   conversation_seq: number;
@@ -230,7 +236,8 @@ function isMessage(value: unknown): value is {
     && "client_message_id" in value && typeof value.client_message_id === "string"
     && "message_type" in value && (value.message_type === "text" || value.message_type === "rich")
     && "content" in value && (value.message_type === "text" ? isTextContent(value.content) : isRichContent(value.content))
-    && "created_at" in value && typeof value.created_at === "string";
+    && "created_at" in value && typeof value.created_at === "string"
+    && isReplyMetadata(value);
 }
 
 function isTextContent(value: unknown): value is { text: string } {

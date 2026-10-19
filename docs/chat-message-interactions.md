@@ -1,10 +1,29 @@
 # 聊天消息交互与图片查看规划
 
-状态：待实施设计。本文记录已经确认的产品范围、协议和实施思路，不表示功能已经完成。本次只新增规划文档，不修改客户端、服务端或数据库。
+状态：复制与持久回复代码已实现并通过自动化验证，Windows 桌面剪贴板互通待实机验收。本文同时保留后续转发、撤回的设计；这些设计不表示功能已经完成。当前交付范围及实际接口以本节和 [消息协议](message-ack-protocol.md)、[数据库结构](database-schema.md) 为准。
+
+## 本次确认的实施范围（2026-10-16）
+
+- 消息复制不受 `sending`、`failed`、`accepted` 状态限制；可见正文中的文字和图片均可复制。本地图片使用独立保留的预览资源，正式图片复用受控附件缓存。单张图片复制原图位图，完整图文按顺序写入 HTML 与纯文本备用格式。
+- HTML 写入剪贴板的 `text/html`，不是把 HTML 源码作为普通文字复制。`text/plain` 永远按文字插入；从网页代码块复制的转义 HTML 源码保留为文字，不执行二次解析。
+- 回复目标随各会话草稿保留；取消回复只移除引用。输入框状态条、发送后的引用条、页外原消息提示，以及发送失败重试均保留一致的引用语义。
+- 数据库只增加 nullable `reply_to_message_id`。客户端生成摘要；im-api 历史响应批量附带原目标必要正文；im-chat 校验同会话目标并贯通落库、幂等、确认与实时推送。
+- 客户端消息包含 `reply_to_message_id` 和浅层 `reply_to: { message_id, sender_user_id, message_type, content } | null`，不递归附带原目标自己的引用。普通消息引用为空；旧消息缺字段兼容为空。
+- 本次不实施转发、撤回、撤回状态校准及其数据库字段。现有转发、撤回菜单保持占位，以下相关章节属于后续设计。
+
+### 本次验证记录
+
+- im-client：`npm test -- --reporter=dot`，60 个文件、421 项测试通过；覆盖 HTML 源码文字、混排顺序、全部消息状态复制、回复 UI、快照、重试及协议接线。
+- 生产构建：`npm run build -- --outDir .tmp/message-interactions-build` 通过，包含 TypeScript 检查。当前环境默认 `dist/assets` 清理遇权限限制，因此使用独立构建输出目录。
+- Chrome 实际界面检查：已验证正常宽度和 390×720 窄窗口下的引用气泡、右键回复、回复状态条与输入区排列；预览使用仓库 mock 数据，未发送真实消息。临时页面和服务已清理。
+- Tauri Rust：`cargo test --offline -- --test-threads=1`，48 项通过；`cargo check --offline` 通过。
+- im-chat：默认测试 101 项通过；专用 MySQL 显式执行的消息存储测试 15 项通过，含 3 项新持久回复集成；`cargo check` 通过。未运行本次无关的 Redis/Kafka 外部环境测试。
+- im-api：`go test ./...`、`go vet ./...` 通过。真实 GORM migration 在专用 `whisper_cdc_test` 库验证了唯一新增回复列为 nullable `CHAR(36)`、默认 `NULL`，无反向索引；未操作业务数据库。本次启动的专用测试 MySQL 已恢复停止。
+- 当前 `CGO_ENABLED=0` 且缺少 GCC，SQLite 的 cgo 持久化/升级测试未执行；Windows 原生剪贴板与 WebView2 跨应用往返、实际双客户端桌面流程尚未人工验收。
 
 现有消息发送与回执语义见 [消息与回执协议](message-ack-protocol.md)，混合图文消息和附件授权见 [聊天图片消息流程](chat-image-message-flow.md)，桌面图片缓存见 [聊天图片本地磁盘缓存方案](chat-image-disk-cache.md)，当前 MySQL 结构见 [数据库表结构规划](database-schema.md)，事件封装见 [Kafka Outbox 事件封装](kafka-outbox-event-envelope.md)。
 
-## 目标与范围
+## 完整交互设计范围（包含后续功能）
 
 本期为 `im-client` 增加消息气泡和图片的自定义交互，并补齐这些交互依赖的持久回复、普通转发和撤回能力。
 
@@ -30,16 +49,16 @@
 - 消息编辑、删除本地记录、收藏、Pin、创建话题和翻译。
 - 撤销已经保存到用户目录、已经写入系统剪贴板或已经成功转发出的图片副本。
 
-## 当前实现依据
+## 实现依据与代码职责
 
 | 本地证据 | 当前行为及设计影响 |
 | --- | --- |
-| [`ChatPanel.tsx`](../im-client/src/features/chat/components/ChatPanel.tsx) | 当前在一个组件内完成消息列表、时间提示、纯文本/富文本气泡和图片加载状态渲染；尚无消息菜单或图片查看器。新增交互应拆出独立组件和状态编排，不能继续把全部职责堆入该文件。 |
-| [`RichMessageEditor.tsx`](../im-client/src/features/chat/components/RichMessageEditor.tsx) | 当前粘贴逻辑只提取图片文件；发现图片后会阻止默认粘贴。要恢复图文顺序，必须增加受控 HTML 解析和有序 block 插入。 |
+| [`ChatPanel.tsx`](../im-client/src/features/chat/components/ChatPanel.tsx) | 组合现有菜单、图片交互和回复状态；气泡正文拆到 `ChatMessageBubble`，回复摘要和导航各有独立模块。 |
+| [`RichMessageEditor.tsx`](../im-client/src/features/chat/components/RichMessageEditor.tsx) | 编辑器接收有序图文 blocks；复制粘贴使用受控 HTML 转换，纯文本中的 HTML 代码按字面插入。 |
 | [`attachmentResourceCache.ts`](../im-client/src/features/chat/attachmentResourceCache.ts) | 当前图片资源可能来自 Tauri asset URL 或当前 WebView 的 Blob URL。独立窗口不能把主窗口 Blob URL 当作稳定资源契约，应通过 Rust 缓存键读取原图。 |
 | [`useChatMessaging.ts`](../im-client/src/features/chat/hooks/useChatMessaging.ts) | 已具备文本/富文本 optimistic message、确认超时、失败和重试流程；回复要在现有发送输入和幂等语义上增加引用 ID。 |
 | [`message/store.rs`](../im-chat/src/message/store.rs) | 消息、附件关联和 outbox 在同一事务完成。附件只能由原上传者在绑定会话中从 `uploaded` 单次转为 `attached`，因此转发不能复用原 `attachment_id`。 |
-| [`message.go`](../im-api/internal/model/entity/message.go) | `messages` 尚无回复目标和撤回时间；数据库迁移由现有 GORM `AutoMigrate` 管理。 |
+| [`message.go`](../im-api/internal/model/entity/message.go) | 本次只增加回复目标列；迁移由现有 GORM `AutoMigrate` 管理，撤回时间列属于后续设计。 |
 | [`attachments/service.go`](../im-api/internal/service/attachments/service.go) | 下载授权已经校验会话成员及附件关联状态；撤回后还需联查关联消息状态，禁止继续签发新授权。 |
 | [`message-ack-protocol.md`](message-ack-protocol.md) | `conversation_seq` 和成员游标只描述消息创建顺序。撤回旧消息不会产生新序号，离线客户端不能只依赖 `delivered_seq` 发现撤回。 |
 
@@ -56,7 +75,7 @@
 | 独立查看器中的图片 | 当前查看器 session 有效 | 复制图片 |
 | 撤回占位、头像、消息列表空白、输入框、其他页面 | 无 | 不显示自定义菜单，也不显示系统菜单 |
 
-处于 `sending` 或 `failed` 的本地临时消息只允许复制当前可见文字；回复、转发和撤回要求正式 `message_id`。图片尚未加载、加载失败或不存在正式附件 ID 时，不显示图片菜单。
+处于 `sending` 或 `failed` 的本地临时消息允许复制完整可见正文，包括本地图片；回复、转发和撤回要求正式 `message_id`。已加载的本地预览图提供“复制”，不提供下载和查看器；正式图片保留“复制、下载原图”。图片尚未加载或加载失败时不显示图片菜单。
 
 菜单使用触发点附近的屏幕坐标定位，并限制在当前窗口可视区域内。发生以下任一情况时关闭：点击菜单外部、按下 Escape、切换会话、窗口失焦、消息状态变为撤回或菜单对应 DOM 被卸载。
 
@@ -114,6 +133,8 @@ Whisper 自有 HTML 采用版本化、可识别的最小结构，例如：
 
 编辑器粘贴时优先识别 `data-whisper-message-version="1"`，按 DOM 顺序恢复文字和图片 blocks。对外部 HTML 只读取普通文字和允许的内嵌图片，不直接渲染外部 HTML，不请求远程 `http`/`https` 图片，不执行样式、脚本或事件属性。系统剪贴板只提供图片文件时，继续使用现有图片粘贴流程。
 
+只有剪贴板 `text/html` 才参与 HTML 解析。纯文本中的 `<div>`、`<img>` 等代码按字面文字保留；`pre`/`code` 中的可见源码不进行二次解析。原生 HTML 补读仅由用户粘贴事件触发。HTML 的 IPC/解析上限为 72 MiB，图片沿用单图 20 MiB、每条最多 10 张、合计 50 MiB；超过限制整体失败，不复制或粘贴不完整图文。
+
 外部应用是否接受 data URL 图片由其剪贴板实现决定。本期只承诺 Whisper 客户端之间的图文顺序往返，以及纯文本 fallback 可用。
 
 ### 回复
@@ -121,6 +142,8 @@ Whisper 自有 HTML 采用版本化、可识别的最小结构，例如：
 选择“回复”后，输入框上方显示回复状态条，包含被回复用户、单行摘要和取消按钮。用户仍可编辑普通文字、粘贴图片或选择图片；发送时将回复目标作为消息元数据提交。
 
 摘要规则：
+
+本次以下摘要规则均在客户端执行，服务端只返回目标的必要原文；用户名从成员资料解析，不额外写入数据库。撤回相关摘要规则为后续设计。
 
 - 取原消息 blocks 中第一段非空文字，压缩为单行并最多显示 80 个 Unicode 字符。
 - 没有文字但有图片时显示 `[图片]`；有多张图片时显示 `[N张图片]`。
@@ -238,8 +261,8 @@ platform/
 
 ### `im-api`
 
-- GORM entity 增加回复目标和撤回时间，由现有迁移入口执行 `AutoMigrate`。
-- 历史消息查询批量收集当前页的 `reply_to_message_id`，一次查询引用目标并生成摘要，避免 N+1 查询。
+- 本次 GORM entity 只增加回复目标，由现有迁移入口执行 `AutoMigrate`；撤回时间属于后续迁移。
+- 历史消息查询批量收集当前页的 `reply_to_message_id`，一次查询并附带浅层目标正文，摘要交给客户端，避免 N+1 查询。
 - 历史消息返回前按 `recalled_at` 清除正文和回复元数据；引用目标已撤回时返回 `recalled = true` 和空摘要。
 - 增加批量消息状态查询接口，供已登录客户端在 WebSocket 重连后校准已经加载的旧消息。
 - 附件下载授权联查关联消息；消息撤回后返回稳定业务错误，不再签发新 URL。
@@ -309,6 +332,13 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
 
 `filePath` 只用于成功后的用户提示，不作为后续 command 的输入。错误返回稳定 code，例如 `viewer_session_expired`、`image_not_cached`、`image_unavailable`、`unsupported_media_type`、`clipboard_write_failed`、`save_failed`；内部 IO、平台 API 或绝对源路径细节只记录在安全日志中。
 
+### 消息剪贴板（本次新增）
+
+- `write_chat_message_clipboard`：仅允许 `main` 调用。参数为 `apiBaseUrl`、`userId`、`conversationId` 和有序 `blocks`。文字块为 `{ type: "text", text }`；图片块的 `source` 为 `{ kind: "cache", attachmentId }` 或本地临时图片的 `{ kind: "inline", contentType, base64 }`。Rust 再次校验图片类型、解码结果、数量和大小；不接收任意源路径或远程 URL。
+- 只有一张图片且其余文字均为空白时写原生位图；其他正文一次写 HTML 与纯文本备用格式。生成完整内容后才触碰剪贴板，失败不写入成功子集。
+- `read_chat_clipboard_html`：仅允许 `main` 调用，返回 `{ html: string | null }`；前端只在用户粘贴事件缺少 HTML 时补读。原生读取与图片/消息写入共用锁，不新增通配 clipboard/fs 权限。
+- HTML 超过 72 MiB 返回 `clipboard_content_too_large`；此上限约束生成、IPC 和解析，arboard 系统读取仍可能先分配原内容。剪贴板读写失败使用稳定错误码，界面反馈失败并允许重试。
+
 ## 消息协议扩展
 
 ### 正式消息 DTO
@@ -324,21 +354,20 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
   "client_message_id": "client-message-uuid",
   "message_type": "text",
   "content": { "text": "这个间隔还有多少优化空间？" },
+  "reply_to_message_id": "message-uuid-original",
   "reply_to": {
     "message_id": "message-uuid-original",
     "sender_user_id": 20001,
-    "recalled": false,
-    "summary": {
-      "text": "对于每个球，算法观察+分析到最后得出结论的耗时约为4.5～4.7s",
-      "image_count": 0
+    "message_type": "text",
+    "content": {
+      "text": "对于每个球，算法观察+分析到最后得出结论的耗时约为4.5～4.7s"
     }
   },
-  "recalled_at": null,
   "created_at": "2026-10-14T18:30:00.000+08:00"
 }
 ```
 
-引用目标撤回后，回复消息自身仍是活动消息，但引用结构变为：
+以下撤回 DTO 为后续方案，本次尚不实现。引用目标撤回后，回复消息自身仍是活动消息，但引用结构拟变为：
 
 ```json
 {
@@ -545,40 +574,38 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
 
 ### 结论
 
-本期不新增数据表，只修改 `messages` 表。`attachments` 和 `outbox_events` 表均不增加字段。
+本次不新增数据表，只为 `messages` 增加 `reply_to_message_id`。`attachments` 和 `outbox_events` 表均不增加字段。
 
 上线前可审核的等价 DDL：
 
 ```sql
 ALTER TABLE messages
-  ADD COLUMN reply_to_message_id CHAR(36) NULL DEFAULT NULL,
-  ADD COLUMN recalled_at DATETIME(6) NULL DEFAULT NULL,
-  ADD INDEX idx_messages_reply_to_message_id (reply_to_message_id);
+  ADD COLUMN reply_to_message_id CHAR(36) NULL DEFAULT NULL;
 ```
 
 ### `messages` 新增字段
 
 | 字段名 | 类型 | 是否为空 | 默认值 | 索引/约束 | 字段含义 |
 | --- | --- | --- | --- | --- | --- |
-| `reply_to_message_id` | `CHAR(36)` | 是 | `NULL` | `idx_messages_reply_to_message_id` 普通索引 | 被回复消息的正式 `message_id`。发送时校验目标存在、属于同一会话且尚未撤回；普通消息和普通转发为空。 |
-| `recalled_at` | `DATETIME(6)` | 是 | `NULL` | 无 | 非空表示消息已经撤回，保存服务端第一次成功撤回的时间。数据库时间规则沿用现有 schema 约定。 |
+| `reply_to_message_id` | `CHAR(36)` | 是 | `NULL` | 无 | 被回复消息的正式 `message_id`。发送时校验目标存在且属于同一会话；普通消息为空。 |
 
 GORM entity 对应增加 nullable 字段：
 
 ```go
-ReplyToMessageID *string    `gorm:"column:reply_to_message_id;type:char(36);index:idx_messages_reply_to_message_id"`
-RecalledAt        *time.Time `gorm:"column:recalled_at;type:datetime(6)"`
+ReplyToMessageID *string `gorm:"column:reply_to_message_id;type:char(36)"`
 ```
 
 实际字段顺序由 MySQL/GORM 迁移结果决定，不作为业务契约。实施时先在目标 MySQL 版本和近似数据量上审查 `AutoMigrate` 生成行为、锁表影响和索引创建耗时，再执行生产迁移。
 
+`recalled_at` 以及反向引用索引仅在后续撤回能力确有需要时迁移，不属于本次 DDL。
+
 ### 数据库设计决策
 
 - 不新增回复表。每条消息最多引用一条原消息，nullable 列足以表达关系。
-- 不保存引用摘要快照。历史和实时 DTO 由服务端根据原消息当前状态生成，因此原消息撤回后不会继续泄露旧文字或图片摘要。
+- 不保存引用摘要快照。历史和实时 DTO 附带目标必要正文，由客户端生成摘要。后续撤回能力还需按原消息状态过滤正文。
 - 不增加 `recalled_by_user_id`。本期只有原发送者可以撤回，发送者已经由 `sender_user_id` 确定。
 - `recalled_at` 不单独建立索引。历史查询使用现有会话索引，状态校准使用唯一 `message_id`，没有按撤回时间扫描消息的需求。
-- `reply_to_message_id` 建普通索引，用于按目标 `message_id` 查找引用它的回复；读取引用目标本身使用现有 `messages.message_id` 唯一索引。
+- 本次不建 `reply_to_message_id` 反向索引；读取引用目标使用现有 `messages.message_id` 唯一索引。后续按原消息查全部回复时再评估索引。
 - 不设置物理外键，保持当前 schema 使用业务事务维护消息关联的方式。服务端仍必须验证同会话关系。
 - 数据库保留原 `content`，便于内部审计和一致性；所有对外 DTO mapper、附件授权和转发入口必须以 `recalled_at` 为准隐藏或拒绝原内容。
 - `attachments` 不增加字段。签发下载授权时联查其 `message_id` 对应消息的 `recalled_at`；非空时拒绝授权。

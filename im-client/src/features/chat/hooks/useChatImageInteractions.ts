@@ -5,18 +5,21 @@ import { copyImage, saveImage } from "../../image-viewer/api";
 import { imageViewerCoordinator } from "../../image-viewer/coordinator";
 import type { ImageTarget } from "../../image-viewer/types";
 import type { AttachmentLoadContext, AttachmentResourceCache } from "../attachmentResourceCache";
-import type { ChatConversation, ChatMessage } from "../types";
+import type { ChatConversation, ChatMessage, ChatReplyTarget } from "../types";
+import { replyTargetFromMessage } from "../messageReply";
+import { copyChatMessage } from "../messageClipboardApi";
 
 interface ChatInteractionMenu {
   position: { x: number; y: number };
   items: ContextMenuItem[];
   label: string;
   ownerKey: string;
+  ownerState: string;
   anchor: HTMLElement;
 }
 
 export function useChatImageInteractions(conversation: ChatConversation, selfUserId: number,
-  context: AttachmentLoadContext, cache: AttachmentResourceCache) {
+  context: AttachmentLoadContext, cache: AttachmentResourceCache, onReply?: (target: ChatReplyTarget) => void) {
   const [menu, setMenu] = useState<ChatInteractionMenu | null>(null);
   const [feedback, setFeedback] = useState("");
   const contextKey = JSON.stringify([context.apiBaseUrl, context.accessToken, context.userId, context.conversationId]);
@@ -27,7 +30,8 @@ export function useChatImageInteractions(conversation: ChatConversation, selfUse
   const closeMenu = useCallback(() => setMenu(null), []);
   useEffect(() => { setMenu(null); setFeedback(""); }, [contextKey]);
   useEffect(() => {
-    if (menu && (!menu.anchor.isConnected || !conversation.messages.some((message) => message.localKey === menu.ownerKey))) closeMenu();
+    if (menu && (!menu.anchor.isConnected || !conversation.messages.some((message) => message.localKey === menu.ownerKey
+      && messageState(message) === menu.ownerState))) closeMenu();
   }, [conversation.messages, menu, closeMenu]);
   const report = (value: string) => {
     if (mountedRef.current && currentContextRef.current === contextKey) setFeedback(value);
@@ -56,12 +60,28 @@ export function useChatImageInteractions(conversation: ChatConversation, selfUse
     event.preventDefault(); event.stopPropagation(); setFeedback("");
     const labels = message.messageId !== null && message.localStatus === "accepted"
       ? ["复制", "回复", "转发", ...(message.senderUserId === selfUserId ? ["撤回"] : [])] : ["复制"];
-    setMenu({ position: { x: event.clientX, y: event.clientY }, label: "消息菜单", ownerKey: message.localKey,
-      anchor: event.currentTarget, items: labels.map((label) => ({ label, onSelect: () => report("该功能暂未实现") })) });
+    setMenu({ position: { x: event.clientX, y: event.clientY }, label: "消息菜单", ownerKey: message.localKey, ownerState: messageState(message),
+      anchor: event.currentTarget, items: labels.map((label) => ({ label, onSelect: () => {
+        if (label === "复制") {
+          void copyChatMessage(message, context, cache).catch(() => report("复制失败，请重试"));
+        } else if (label === "回复") {
+          const target = replyTargetFromMessage(message);
+          if (target) onReply?.(target);
+        } else report("该功能暂未实现");
+      } })) });
   };
   const openImageMenu = (event: MouseEvent<HTMLElement>, message: ChatMessage, attachmentId: string) => {
     event.preventDefault(); event.stopPropagation(); setFeedback("");
-    setMenu({ position: { x: event.clientX, y: event.clientY }, label: "图片菜单", ownerKey: message.localKey,
+    if (message.localStatus !== "accepted" || !message.messageId) {
+      const block = "blocks" in message.content && message.content.blocks.find((item) => item.type === "image" && item.attachment_id === attachmentId);
+      if (!block) return;
+      setMenu({ position: { x: event.clientX, y: event.clientY }, label: "图片菜单", ownerKey: message.localKey, ownerState: messageState(message),
+        anchor: event.currentTarget, items: [{ label: "复制", onSelect: () => {
+          void copyChatMessage({ ...message, content: { blocks: [block] } }, context, cache).catch(() => report("复制失败，请重试"));
+        } }] });
+      return;
+    }
+    setMenu({ position: { x: event.clientX, y: event.clientY }, label: "图片菜单", ownerKey: message.localKey, ownerState: messageState(message),
       anchor: event.currentTarget, items: [
         { label: "复制", onSelect: () => runImageAction(attachmentId, copyImage, "复制失败，请重试") },
         { label: "下载原图", onSelect: () => runImageAction(attachmentId, saveImage, "保存失败") },
@@ -80,4 +100,8 @@ function isMissingCachedImage(error: unknown): boolean {
   const code = typeof error === "string" ? error : error instanceof Error ? error.message
     : error && typeof error === "object" && "code" in error ? String(error.code) : "";
   return ["image_not_cached", "image_unavailable", "image_cache_missing", "invalid_cached_image"].includes(code);
+}
+
+function messageState(message: ChatMessage): string {
+  return `${message.localStatus}:${message.messageId ?? ""}`;
 }

@@ -6,8 +6,9 @@ import type {
   ChatSendMessageRejectedFrame,
   ChatServerAcceptedFrame,
 } from "../../chat-connection/types";
-import type { ChatData } from "../types";
+import type { ChatData, ChatReplyTarget } from "../types";
 import type { ChatSendRichMessageInput } from "../../chat-connection/types";
+import { usePendingImagePreviews } from "./usePendingImagePreviews";
 import {
   insertPendingRichMessage,
   insertPendingTextMessage,
@@ -21,6 +22,7 @@ export interface SendTextMessageInput {
   conversationId: number;
   text: string;
   clientSentAt: string;
+  replyToMessageId?: string;
 }
 
 interface UseChatMessagingOptions {
@@ -51,6 +53,7 @@ export function useChatMessaging({
   reloadHistory,
 }: UseChatMessagingOptions) {
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const retainPreviews = usePendingImagePreviews(data);
   const dataRef = useRef(data);
   const pendingReadAcksRef = useRef(new Map<number, { readSeq: number; retryAfterDelivery: boolean }>());
   dataRef.current = data;
@@ -76,7 +79,7 @@ export function useChatMessaging({
     timersRef.current.clear();
   }, []);
 
-  const send = useCallback((conversationId: number, rawText: string): boolean => {
+  const send = useCallback((conversationId: number, rawText: string, replyTo?: ChatReplyTarget | null): boolean => {
     const text = rawText.trim();
     const current = dataRef.current;
     if (!text || !current?.conversations[conversationId]) {
@@ -90,10 +93,12 @@ export function useChatMessaging({
       clientMessageId,
       text,
       clientSentAt,
+      replyTo,
     }) : latest);
     startAcknowledgementTimer(clientMessageId);
     try {
-      sendTextMessage({ clientMessageId, conversationId, text, clientSentAt });
+      sendTextMessage({ clientMessageId, conversationId, text, clientSentAt,
+        ...(replyTo ? { replyToMessageId: replyTo.messageId } : {}) });
     } catch {
       clearAcknowledgementTimer(clientMessageId);
       updateData((latest) => latest ? markMessageFailed(latest, clientMessageId, "send_failed") : latest);
@@ -101,25 +106,27 @@ export function useChatMessaging({
     return true;
   }, [clearAcknowledgementTimer, clientMessageIdFactory, now, sendTextMessage, startAcknowledgementTimer, updateData]);
 
-  const sendRich = useCallback((conversationId: number, blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>): string | null => {
+  const sendRich = useCallback((conversationId: number, blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>, replyTo?: ChatReplyTarget | null): string | null => {
     if (!blocks.some((block) => block.type === "image" || (block.type === "text" && block.text.trim()))
       || !dataRef.current?.conversations[conversationId] || !sendRichMessage) return null;
     const clientMessageId = clientMessageIdFactory();
     const clientSentAt = now().toISOString();
+    retainPreviews(clientMessageId, blocks);
     updateData((latest) => latest ? insertPendingRichMessage(latest, {
-      conversationId, senderUserId: latest.self.userId, clientMessageId, blocks, clientSentAt,
+      conversationId, senderUserId: latest.self.userId, clientMessageId, blocks, clientSentAt, replyTo,
     }) : latest);
     startAcknowledgementTimer(clientMessageId);
     try {
       sendRichMessage({ clientMessageId, conversationId, blocks: blocks.map((block) => block.type === "image"
-        ? { type: "image" as const, attachment_id: block.attachment_id } : block), clientSentAt });
+        ? { type: "image" as const, attachment_id: block.attachment_id } : block), clientSentAt,
+        ...(replyTo ? { replyToMessageId: replyTo.messageId } : {}) });
     }
     catch {
       clearAcknowledgementTimer(clientMessageId);
       updateData((latest) => latest ? markMessageFailed(latest, clientMessageId, "send_failed") : latest);
     }
     return clientMessageId;
-  }, [clearAcknowledgementTimer, clientMessageIdFactory, now, sendRichMessage, startAcknowledgementTimer, updateData]);
+  }, [clearAcknowledgementTimer, clientMessageIdFactory, now, retainPreviews, sendRichMessage, startAcknowledgementTimer, updateData]);
 
   const retry = useCallback((clientMessageId: string): boolean => {
     const current = dataRef.current;
@@ -144,12 +151,14 @@ export function useChatMessaging({
             ? { type: "image" as const, attachment_id: block.attachment_id }
             : block),
           clientSentAt: message.clientSentAt,
+          ...(message.replyToMessageId ? { replyToMessageId: message.replyToMessageId } : {}),
         });
       } else if (message.messageType === "text" && "text" in message.content) sendTextMessage({
         clientMessageId: message.clientMessageId,
         conversationId: message.conversationId,
         text: message.content.text,
         clientSentAt: message.clientSentAt,
+        ...(message.replyToMessageId ? { replyToMessageId: message.replyToMessageId } : {}),
       });
     } catch {
       clearAcknowledgementTimer(clientMessageId);

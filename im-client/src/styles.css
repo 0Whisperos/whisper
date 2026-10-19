@@ -1115,7 +1115,7 @@ canvas {
 .auth-chat-panel {
   position: relative;
   display: grid;
-  grid-template-rows: 60px minmax(0, 1fr) var(--composer-height);
+  grid-template-rows: 60px minmax(0, 1fr) auto;
   background: var(--chat-surface);
 }
 
@@ -2297,7 +2297,7 @@ canvas {
   }
 
   .auth-chat-panel {
-    grid-template-rows: 60px minmax(0, 1fr) 140px;
+    grid-template-rows: 60px minmax(0, 1fr) auto;
   }
 
   .auth-composer {

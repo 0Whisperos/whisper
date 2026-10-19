@@ -8,7 +8,7 @@ import { AttachmentResourceCache } from "../features/chat/attachmentResourceCach
 import { useChatData } from "../features/chat/hooks/useChatData";
 import { useChatMessaging } from "../features/chat/hooks/useChatMessaging";
 import { saveCurrentProfile } from "../features/chat/profileApi";
-import type { EditableSelfProfile } from "../features/chat/types";
+import type { ChatContentBlock, ChatReplyTarget, EditableSelfProfile } from "../features/chat/types";
 import type { AuthSession } from "../features/login/types";
 import { useFriendRequests } from "../features/chat/hooks/useFriendRequests";
 import { imageViewerCoordinator } from "../features/image-viewer/coordinator";
@@ -103,13 +103,14 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
 
   const canSendMessages = chatConnection.state.status === "authenticated";
 
-  function handleSendText(conversationId: number, text: string): boolean {
-    return messaging.send(conversationId, text);
+  function handleSendText(conversationId: number, text: string, replyTo?: ChatReplyTarget | null): boolean {
+    if (!canSendMessages) return false;
+    return messaging.send(conversationId, text, replyTo);
   }
 
-  function handleSendRich(conversationId: number, blocks: Array<{ type: "text"; text: string } | { type: "image"; attachment_id: string; previewUrl?: string }>): string | null {
+  function handleSendRich(conversationId: number, blocks: ChatContentBlock[], replyTo?: ChatReplyTarget | null): string | null {
     if (chatConnection.state.status !== "authenticated") return null;
-    return messaging.sendRich(conversationId, blocks);
+    return messaging.sendRich(conversationId, blocks, replyTo);
   }
 
   function handleRetryMessage(clientMessageId: string) {

@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { ChatApiError } from "../api";
-import type { ChatConversation, ChatSelfProfile } from "../types";
+import type { ChatConversation, ChatReplyTarget, ChatSelfProfile } from "../types";
 import { formatHoverMessageTime, isCompactMessage } from "../hooks/messageTimeline";
 import { Avatar, Icon, IconButton } from "./ui";
-import { Composer } from "./Composer";
+import { Composer, type ComposerHandle } from "./Composer";
 import type { ChatDraftBlock, DraftImageBlock } from "../hooks/useChatDrafts";
-import { AttachmentResourceCache, attachmentResourceKey } from "../attachmentResourceCache";
-import { richMessageDisplayBlocksWithIndexes } from "./richMessageLayout";
+import { AttachmentResourceCache } from "../attachmentResourceCache";
 import { useChatImageResources } from "../hooks/useChatImageResources";
 import { useChatImageInteractions } from "../hooks/useChatImageInteractions";
-import { ChatMessageImage } from "./ChatMessageImage";
+import { ChatMessageBubble } from "./ChatMessageBubble";
+import { ReplyComposerBanner } from "./ReplyComposerBanner";
+import { replyAuthor } from "./ReplyQuote";
+import { useReplyNavigation } from "../hooks/useReplyNavigation";
 import { ContextMenu } from "../../../shared/ui/ContextMenu";
 
 const MESSAGE_LIST_BOTTOM_THRESHOLD = 32;
@@ -44,6 +46,10 @@ interface ChatPanelProps {
   accessToken?: string;
   userId?: number;
   attachmentResourceCache?: AttachmentResourceCache;
+  replyTo?: ChatReplyTarget | null;
+  onSelectReply?: (target: ChatReplyTarget | null) => void;
+  composerBusy?: boolean;
+  clipboardContextKey?: string;
 }
 
 export function ChatPanel({
@@ -67,8 +73,11 @@ export function ChatPanel({
   onReadThrough,
   draftBlocks = EMPTY_DRAFT_BLOCKS, onChangeDraftBlocks = () => undefined, onPickFiles = () => [],
   onSendRich = () => undefined, apiBaseUrl = "", accessToken = "", userId = self.userId, attachmentResourceCache,
+  replyTo = null, onSelectReply = () => undefined, composerBusy = false, clipboardContextKey,
 }: ChatPanelProps) {
   const messageListRef = useRef<HTMLElement | null>(null);
+  const composerRef = useRef<ComposerHandle | null>(null);
+  const replyNavigation = useReplyNavigation(conversation, messageListRef);
   const [hoveredMessageKey, setHoveredMessageKey] = useState<string | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const isAtBottomRef = useRef(true);
@@ -79,7 +88,9 @@ export function ChatPanel({
   const unreadCount = unreadIncomingCount(conversation, self.userId);
   const { imageResources, imageFailures, imageContext, resolvedAttachmentCache, retryImage, recoverImage } =
     useChatImageResources(conversation, apiBaseUrl, accessToken, userId, attachmentResourceCache);
-  const interactions = useChatImageInteractions(conversation, self.userId, imageContext, resolvedAttachmentCache);
+  const interactions = useChatImageInteractions(conversation, self.userId, imageContext, resolvedAttachmentCache, (target) => {
+    onSelectReply(target); composerRef.current?.focus();
+  });
   const updateBottomState = useCallback((list: HTMLElement) => {
     const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop <= MESSAGE_LIST_BOTTOM_THRESHOLD;
     isAtBottomRef.current = atBottom;
@@ -258,7 +269,7 @@ export function ChatPanel({
               <article
                 data-message-key={message.localKey}
                 data-conversation-seq={message.conversationSeq ?? undefined}
-                className={`auth-message-row ${isSelf ? "self" : ""} ${compact ? "compact" : ""}`}
+                className={`auth-message-row ${isSelf ? "self" : ""} ${compact ? "compact" : ""} ${replyNavigation.highlightedKey === message.localKey ? "is-reply-target" : ""}`}
               >
                 <Avatar avatar={profile?.avatar ?? "?"} tone={profile?.tone ?? "gray"} imageUrl={isSelf ? self.avatarImageUrl : undefined} className="auth-message-avatar" />
                 <div className={`auth-message-body ${message.receipt ? "has-receipt" : ""}`}>
@@ -279,30 +290,12 @@ export function ChatPanel({
                           {hoverTime}
                         </time>
                       ) : null}
-                      {"text" in message.content ? <p className="auth-message-bubble" onContextMenu={(event) => interactions.openMessageMenu(event, message)}>{message.content.text}</p> : (
-                        <div className="auth-message-bubble auth-rich-message-bubble" role="group" aria-label="富文本消息" onContextMenu={(event) => interactions.openMessageMenu(event, message)}>
-                          <div className="auth-rich-message-blocks">
-                            {richMessageDisplayBlocksWithIndexes(message.content.blocks).map(({ block, blockIndex }) => {
-                              if (block.type === "text") {
-                                return <p className="auth-rich-message-text" key={`text-${blockIndex}`}>{block.text}</p>;
-                              }
-                              const localPreview = message.localStatus === "accepted" ? undefined : block.previewUrl;
-                              const imageKey = attachmentResourceKey(imageContext, block.attachment_id);
-                              const image = imageResources[imageKey];
-                              const imageFailed = imageFailures[imageKey];
-                              const imageUrl = localPreview ?? image?.src;
-                              return <ChatMessageImage key={`${message.localKey}:${blockIndex}`} src={imageUrl} failed={imageFailed}
-                                interactive={message.localStatus === "accepted" && message.messageId !== null}
-                                onLayout={keepBottomAfterLayoutChange}
-                                onError={() => { if (!localPreview && !imageFailed) recoverImage(block.attachment_id); }}
-                                onRetry={() => retryImage(block.attachment_id)}
-                                onCloseMenu={interactions.closeMenu}
-                                onOpen={() => interactions.openImage(message, blockIndex)}
-                                onMenu={(event) => interactions.openImageMenu(event, message, block.attachment_id)} />;
-                            })}
-                          </div>
-                        </div>
-                      )}
+                      <ChatMessageBubble message={message} conversation={conversation} self={self}
+                        imageContext={imageContext} imageResources={imageResources} imageFailures={imageFailures}
+                        onMessageMenu={interactions.openMessageMenu} onImageMenu={interactions.openImageMenu}
+                        onCloseMenu={interactions.closeMenu} onOpenImage={interactions.openImage}
+                        onImageLayout={keepBottomAfterLayoutChange} onRecoverImage={recoverImage} onRetryImage={retryImage}
+                        onLocateReply={replyNavigation.locateReply} />
                     </div>
                   </div>
                   {message.receipt ? (
@@ -329,48 +322,55 @@ export function ChatPanel({
           );
         })}
       </section>
-      {!isAtBottom && unreadCount > 0 ? (
-        <button
-          type="button"
-          className="auth-new-messages-button"
-          aria-label={`跳转到最新消息，${unreadCount} 条未读`}
-          onClick={() => {
-            const list = messageListRef.current;
-            if (list) {
-              list.scrollTop = list.scrollHeight;
-              updateBottomState(list);
-            }
-          }}
-        >
-          <svg className="auth-new-messages-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="m5 2 7 7 7-7" />
-            <path d="m5 12 7 7 7-7" />
-          </svg>
-          <span className="auth-new-messages-count">{unreadCount}</span>
-        </button>
-      ) : null}
-      {isHistoryLoading ? <output className="auth-panel-status" aria-live="polite">正在加载消息...</output> : null}
-      {historyError ? (
-        <div className="auth-panel-error" role="alert">
-          <span>消息加载失败：{historyError.code}</span>
-          <button type="button" onClick={onRetryHistory}>重试</button>
-        </div>
-      ) : null}
-      {interactions.menu ? <ContextMenu position={interactions.menu.position} items={interactions.menu.items}
-        onClose={interactions.closeMenu} ariaLabel={interactions.menu.label}
-        portalRoot={interactions.menu.anchor.closest<HTMLElement>(".auth-shell") ?? undefined} /> : null}
-      {interactions.feedback ? <p className="auth-chat-interaction-error" role="status">{interactions.feedback}</p> : null}
-      <Composer
-        key={conversation.conversationId}
-        draft={draft}
-        canSend={canSend}
-        statusMessage={statusMessage}
-        onToolPreview={onToolPreview}
-        blocks={draftBlocks}
-        onChangeBlocks={onChangeDraftBlocks}
-        onPickFiles={onPickFiles}
-        onSendText={(text) => draftBlocks.some((block) => block.type === "image") ? onSendRich() : onSendText(text)}
-      />
+      <div className="auth-chat-footer">
+        {!isAtBottom && unreadCount > 0 ? (
+          <button
+            type="button"
+            className="auth-new-messages-button"
+            aria-label={`跳转到最新消息，${unreadCount} 条未读`}
+            onClick={() => {
+              const list = messageListRef.current;
+              if (list) {
+                list.scrollTop = list.scrollHeight;
+                updateBottomState(list);
+              }
+            }}
+          >
+            <svg className="auth-new-messages-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="m5 2 7 7 7-7" />
+              <path d="m5 12 7 7 7-7" />
+            </svg>
+            <span className="auth-new-messages-count">{unreadCount}</span>
+          </button>
+        ) : null}
+        {isHistoryLoading ? <output className="auth-panel-status" aria-live="polite">正在加载消息...</output> : null}
+        {historyError ? (
+          <div className="auth-panel-error" role="alert">
+            <span>消息加载失败：{historyError.code}</span>
+            <button type="button" onClick={onRetryHistory}>重试</button>
+          </div>
+        ) : null}
+        {interactions.menu ? <ContextMenu position={interactions.menu.position} items={interactions.menu.items}
+          onClose={interactions.closeMenu} ariaLabel={interactions.menu.label}
+          portalRoot={interactions.menu.anchor.closest<HTMLElement>(".auth-shell") ?? undefined} /> : null}
+        {interactions.feedback ? <p className="auth-chat-interaction-error" role="status">{interactions.feedback}</p> : null}
+        {replyNavigation.feedback ? <p className="auth-reply-feedback" role="status">{replyNavigation.feedback}</p> : null}
+        {replyTo ? <ReplyComposerBanner target={replyTo} authorName={replyAuthor(replyTo, conversation, self)}
+          onCancel={() => { onSelectReply(null); composerRef.current?.focus(); }} /> : null}
+        <Composer ref={composerRef}
+          key={conversation.conversationId}
+          draft={draft}
+          isBusy={composerBusy}
+          clipboardContextKey={clipboardContextKey}
+          canSend={canSend}
+          statusMessage={statusMessage}
+          onToolPreview={onToolPreview}
+          blocks={draftBlocks}
+          onChangeBlocks={onChangeDraftBlocks}
+          onPickFiles={onPickFiles}
+          onSendText={(text) => draftBlocks.some((block) => block.type === "image") ? onSendRich() : onSendText(text)}
+        />
+      </div>
     </section>
   );
 }
