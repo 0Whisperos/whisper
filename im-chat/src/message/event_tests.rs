@@ -1,6 +1,52 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn outbox_stores_only_reply_id_and_accepts_old_events() {
+    // 测试目标：验证内部事件只保存稳定引用 ID，旧事件无需新增字段仍能读取。
+    // 构造方法：从事件 JSON 加入引用 ID 和临时目标内容，再解析并重新序列化。
+    // 输入数据：合法引用 UUID 和目标正文 private original。
+    // 预期行为：保留引用 ID，不保存 reply_to；删除引用字段后的旧事件校验成功。
+    let mut value = serde_json::to_value(event()).unwrap();
+    value["message"]["reply_to_message_id"] = json!("550e8400-e29b-41d4-a716-446655440003");
+    value["message"]["reply_to"] = json!({
+        "message_id":"550e8400-e29b-41d4-a716-446655440003",
+        "sender_user_id":20002, "message_type":"text", "content":{"text":"private original"}
+    });
+    let decoded: MessageCreatedEvent = serde_json::from_value(value).unwrap();
+    decoded.validate().unwrap();
+    let mut stored = serde_json::to_value(decoded).unwrap();
+    assert_eq!(
+        stored["message"]["reply_to_message_id"],
+        "550e8400-e29b-41d4-a716-446655440003"
+    );
+    assert!(stored["message"].get("reply_to").is_none());
+    stored["message"]
+        .as_object_mut()
+        .unwrap()
+        .remove("reply_to_message_id");
+    serde_json::from_value::<MessageCreatedEvent>(stored)
+        .unwrap()
+        .validate()
+        .unwrap();
+}
+
+#[test]
+fn event_validation_rejects_invalid_reply_uuid() {
+    // 测试目标：验证内部事件的无效引用 ID 不会进入投递。
+    // 构造方法：在合法事件设置非法引用，直接调用 validate。
+    // 输入数据：reply_to_message_id="invalid"。
+    // 预期行为：返回明确字段错误，不要求查询数据库。
+    let mut event = event();
+    event.message.reply_to_message_id = Some("invalid".to_owned());
+    assert_eq!(
+        event.validate(),
+        Err(EventValidationError::InvalidField(
+            "message.reply_to_message_id"
+        ))
+    );
+}
+
 fn event() -> MessageCreatedEvent {
     MessageCreatedEvent::new(
         AcceptedMessage {
@@ -11,6 +57,8 @@ fn event() -> MessageCreatedEvent {
             client_message_id: "550e8400-e29b-41d4-a716-446655440001".to_owned(),
             message_type: "text".to_owned(),
             content: json!({ "text": "你好" }),
+            reply_to_message_id: None,
+            reply_to: None,
             created_at: "2026-09-20T12:00:00+08:00".to_owned(),
         },
         "2026-09-20T12:00:00+08:00".to_owned(),

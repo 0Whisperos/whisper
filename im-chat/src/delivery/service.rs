@@ -1,6 +1,6 @@
 use crate::connection::{ConnectionRegistry, SendToConnectionResult};
 use crate::frame::PushFrame;
-use crate::message::{AcceptedMessage, MessageCreatedEvent};
+use crate::message::{AcceptedMessage, MessageCreatedEvent, populate_reply};
 use crate::node_rpc::{EnqueueStatus, ForwardMessageRequest, client::NodeRpcClient};
 use crate::presence::{PresenceManager, RouteState};
 use axum::extract::ws::Message;
@@ -12,6 +12,8 @@ use super::store;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DeliveryError {
+    #[error("failed to query reply target: {0}")]
+    Reply(sqlx::Error),
     #[error("failed to query active conversation members: {0}")]
     Members(#[from] sqlx::Error),
     #[error("failed to read online routing: {0}")]
@@ -36,6 +38,10 @@ struct MessageCreatedPayload<'a> {
 
 /// Keep reads behind one boundary so no member is enqueued before all reads succeed.
 trait DeliveryLookup: Sync {
+    fn message(
+        &self,
+        message: &AcceptedMessage,
+    ) -> impl Future<Output = Result<AcceptedMessage, DeliveryError>> + Send;
     fn members(
         &self,
         conversation_id: u64,
@@ -45,6 +51,13 @@ trait DeliveryLookup: Sync {
 }
 
 impl DeliveryLookup for DeliveryService {
+    async fn message(&self, message: &AcceptedMessage) -> Result<AcceptedMessage, DeliveryError> {
+        let mut message = message.clone();
+        populate_reply(&self.pool, &mut message)
+            .await
+            .map_err(DeliveryError::Reply)?;
+        Ok(message)
+    }
     async fn members(&self, conversation_id: u64) -> Result<Vec<u64>, DeliveryError> {
         Ok(store::active_members(&self.pool, conversation_id).await?)
     }
@@ -80,11 +93,12 @@ impl DeliveryService {
         event: &MessageCreatedEvent,
         lookup: &impl DeliveryLookup,
     ) -> Result<(), DeliveryError> {
+        let message = lookup.message(&event.message).await?;
         let frame = PushFrame::new(
             "message_created",
             MessageCreatedPayload {
                 event_id: &event.event_id,
-                message: &event.message,
+                message: &message,
             },
         );
         let text = serde_json::to_string(&frame)?;
@@ -120,7 +134,7 @@ impl DeliveryService {
                         target_user_id: user_id,
                         connection_id: route.connection_id.clone(),
                         event_id: event.event_id.clone(),
-                        message: event.message.clone(),
+                        message: message.clone(),
                     };
                     match self
                         .rpc_client

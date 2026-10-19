@@ -13,6 +13,18 @@ struct Lookup {
 }
 
 impl DeliveryLookup for Lookup {
+    async fn message(&self, message: &AcceptedMessage) -> Result<AcceptedMessage, DeliveryError> {
+        let mut message = message.clone();
+        if let Some(id) = &message.reply_to_message_id {
+            message.reply_to = Some(crate::message::ReplyTarget {
+                message_id: id.clone(),
+                sender_user_id: 20002,
+                message_type: "text".to_owned(),
+                content: json!({"text":"current target"}),
+            });
+        }
+        Ok(message)
+    }
     async fn members(&self, _: u64) -> Result<Vec<u64>, DeliveryError> {
         if self.fail_members {
             return Err(DeliveryError::Members(sqlx::Error::PoolClosed));
@@ -32,6 +44,42 @@ impl DeliveryLookup for Lookup {
             .cloned()
             .unwrap_or(RouteState::Offline))
     }
+}
+
+#[tokio::test]
+async fn reply_push_uses_target_loaded_at_delivery_boundary() {
+    // 测试目标：验证内部事件不含引用原文时，投递仍使用查询出口补齐的浅层目标。
+    // 构造方法：在事件只设置引用 ID，通过可替代查询边界读取目标并捕获本机消息。
+    // 输入数据：文本回复、引用 UUID、边界返回作者 20002 和正文 current target。
+    // 预期行为：推送保留回复正文，并附带查得的引用 ID、作者、类型和原文。
+    let service = service();
+    let mut receiver = connect(&service, 20001, "sender");
+    let lookup = Lookup {
+        members: vec![20001],
+        routes: HashMap::from([(20001, local_route("sender"))]),
+        fail_members: false,
+        fail_route: None,
+    };
+    let mut event = event();
+    let id = "550e8400-e29b-41d4-a716-446655440005";
+    event.message.reply_to_message_id = Some(id.to_owned());
+    assert!(event.message.reply_to.is_none());
+    service.deliver_with_lookup(&event, &lookup).await.unwrap();
+    let Message::Text(text) = receiver.try_recv().unwrap() else {
+        panic!("text frame")
+    };
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["payload"]["message"]["content"]["text"], "hello");
+    assert_eq!(value["payload"]["message"]["reply_to_message_id"], id);
+    assert_eq!(value["payload"]["message"]["reply_to"]["message_id"], id);
+    assert_eq!(
+        value["payload"]["message"]["reply_to"]["content"]["text"],
+        "current target"
+    );
+    assert_eq!(
+        value["payload"]["message"]["reply_to"]["sender_user_id"],
+        20002
+    );
 }
 
 fn local_route(connection_id: &str) -> RouteState {

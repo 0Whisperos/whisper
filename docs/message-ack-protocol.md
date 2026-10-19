@@ -102,7 +102,11 @@
 | `client_message_id` | `string` | 是 | 发送方客户端生成的幂等 ID。发送方客户端可用它把正式消息和本地临时消息合并。 |
 | `message_type` | `string` | 是 | 消息类型。第一阶段只支持 `text`。 |
 | `content` | `object` | 是 | 消息内容。结构由 `message_type` 决定。 |
+| `reply_to_message_id` | `string \| null` | 新版本返回 | 被回复消息 ID；普通消息为空。旧消息响应缺失时客户端按空引用处理。 |
+| `reply_to` | `object \| null` | 新版本返回 | 浅层引用目标，仅含 `message_id`、`sender_user_id`、`message_type`、`content`，不递归包含目标自身的引用；异常缺失时保留引用 ID 并返回空目标。 |
 | `created_at` | `string` | 是 | 服务端创建正式消息的时间，使用 GB/T 7408 扩展格式。 |
+
+引用正文由客户端生成单行摘要：第一段非空文字压缩空白并截取最多 80 个 Unicode 码点，按图片数量附加 `[图片]` 或 `[N张图片]`。昵称从当前成员资料解析。`server_accepted`、`message_created` 和消息历史均使用相同的引用结构；历史响应批量补齐页外目标，不要求先加载原消息所在历史页。
 
 ### `TextMessageContent`
 
@@ -137,6 +141,8 @@
 ## `send_message` 请求
 
 客户端发送聊天消息时使用 `send_message`。
+
+回复请求额外携带可选 `payload.reply_to_message_id`（UUID），普通消息省略，显式 `null` 等同省略。客户端不提交引用正文、昵称或摘要。服务端验证目标存在且属于本会话；不存在与跨会话统一返回 `reply_message_not_found`，格式错误返回 `invalid_reply_message_id`。
 
 ```json
 {
@@ -193,7 +199,7 @@
 | `client_message_id` | `string` | 是 | 客户端发送幂等 ID。客户端用它找到本地“发送中”的临时消息。 |
 | `message` | `Message` | 是 | 服务端正式消息对象。 |
 
-幂等重试时，如果服务端发现 `(sender_user_id, client_message_id)` 已经处理过，且 `conversation_id` 和内容哈希均一致，也返回同一个 `server_accepted` 结构。
+幂等重试时，如果服务端发现 `(sender_user_id, client_message_id)` 已经处理过，且会话、消息类型、内容哈希和 `reply_to_message_id` 均一致，也返回同一个 `server_accepted` 结构。引用目标不同同样属于 `duplicate_client_message_conflict`。
 
 ## `send_message_rejected` 响应
 
@@ -459,7 +465,9 @@
 | `invalid_message` | 所有业务请求 | 请求 JSON、`type`、`request_id`、`payload` 或业务字段格式非法。 |
 | `conversation_not_found` | `send_message`、`delivered_ack`、`read_ack` | 会话不存在。 |
 | `not_conversation_member` | `send_message`、`delivered_ack`、`read_ack` | 当前用户不是该会话的有效成员。 |
-| `duplicate_client_message_conflict` | `send_message` | 同一 `client_message_id` 被复用于不同会话或不同内容。 |
+| `duplicate_client_message_conflict` | `send_message` | 同一 `client_message_id` 被复用于不同会话、消息类型、内容或引用目标。 |
+| `invalid_reply_message_id` | `send_message` | 引用目标 ID 不是有效 UUID。 |
+| `reply_message_not_found` | `send_message` | 引用目标不存在或不属于目标会话，不泄露其他会话消息是否存在。 |
 | `cursor_out_of_range` | `delivered_ack`、`read_ack` | 上报游标超过服务端已知的会话最大序号，或不符合服务端游标规则。 |
 | `internal_error` | 所有业务请求 | 服务端内部错误。 |
 

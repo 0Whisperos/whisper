@@ -23,6 +23,11 @@ static IDEMPOTENCY_MISS_BARRIER: std::sync::Mutex<
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum AcceptMessageError {
+    #[error("invalid reply message id")]
+    InvalidReplyMessageId,
+
+    #[error("reply message not found")]
+    ReplyMessageNotFound,
     #[error("invalid message")]
     InvalidMessage,
 
@@ -57,6 +62,8 @@ pub(super) enum AcceptMessageError {
 impl AcceptMessageError {
     pub(super) fn into_reject(self, client_message_id: Option<String>) -> super::SendMessageReject {
         let (error_code, message) = match self {
+            Self::InvalidReplyMessageId => ("invalid_reply_message_id", "invalid reply message id"),
+            Self::ReplyMessageNotFound => ("reply_message_not_found", "reply message not found"),
             Self::InvalidMessage => (INVALID_MESSAGE, "invalid message"),
             Self::ConversationNotFound => (CONVERSATION_NOT_FOUND, "conversation not found"),
             Self::NotConversationMember => (
@@ -89,6 +96,9 @@ pub(super) async fn accept_message(
     sender_user_id: u64,
     payload: SendMessagePayload,
 ) -> Result<AcceptedMessage, AcceptMessageError> {
+    if !super::reply::valid_reply_id(payload.reply_to_message_id.as_deref()) {
+        return Err(AcceptMessageError::InvalidReplyMessageId);
+    }
     let validated =
         content::validate_send_payload(&payload).map_err(|_| AcceptMessageError::InvalidMessage)?;
 
@@ -99,13 +109,23 @@ pub(super) async fn accept_message(
     if let Some(existing) =
         find_existing_message_in_tx(&mut tx, sender_user_id, &payload.client_message_id).await?
     {
-        let accepted = accept_existing_or_conflict(existing, &payload, &validated)?;
+        let mut accepted = accept_existing_or_conflict(existing, &payload, &validated)?;
+        super::populate_reply(&mut *tx, &mut accepted).await?;
         tx.commit().await?;
         return Ok(accepted);
     }
 
     #[cfg(test)]
     wait_at_idempotency_miss_barrier(&payload.client_message_id).await;
+
+    let reply_to = match payload.reply_to_message_id.as_deref() {
+        Some(id) => Some(
+            super::reply::find_reply_target(&mut *tx, payload.conversation_id, id)
+                .await?
+                .ok_or(AcceptMessageError::ReplyMessageNotFound)?,
+        ),
+        None => None,
+    };
 
     let now = OffsetDateTime::now_utc();
     let created_at = to_database_datetime(now);
@@ -119,6 +139,8 @@ pub(super) async fn accept_message(
         client_message_id: payload.client_message_id.clone(),
         message_type: validated.message_type.clone(),
         content: validated.content.clone(),
+        reply_to_message_id: payload.reply_to_message_id.clone(),
+        reply_to,
         created_at: format_protocol_time(to_storage_offset(now)),
     };
 
@@ -207,7 +229,7 @@ fn existing_message_query() -> sqlx::query::Query<'static, sqlx::MySql, sqlx::my
     sqlx::query(
         "SELECT message_id, conversation_id, conversation_seq, sender_user_id, \
          client_message_id, message_type, CAST(content AS CHAR) AS content, \
-         content_hash, created_at \
+         content_hash, reply_to_message_id, created_at \
          FROM messages WHERE sender_user_id = ? AND client_message_id = ?",
     )
 }
@@ -246,8 +268,8 @@ async fn insert_message(
     sqlx::query(
         "INSERT INTO messages \
          (message_id, conversation_id, conversation_seq, sender_user_id, client_message_id, \
-          message_type, content, content_hash, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?)",
+          message_type, content, content_hash, reply_to_message_id, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)",
     )
     .bind(&message.message_id)
     .bind(message.conversation_id)
@@ -257,6 +279,7 @@ async fn insert_message(
     .bind(&message.message_type)
     .bind(content)
     .bind(content_hash)
+    .bind(&message.reply_to_message_id)
     .bind(created_at)
     .execute(&mut **tx)
     .await
@@ -302,7 +325,9 @@ async fn accept_concurrent_duplicate(
             source: sqlx::Error::RowNotFound,
         });
     };
-    accept_existing_or_conflict(existing, &payload, &validated)
+    let mut accepted = accept_existing_or_conflict(existing, &payload, &validated)?;
+    super::populate_reply(pool, &mut accepted).await?;
+    Ok(accepted)
 }
 
 fn accept_existing_or_conflict(
@@ -313,6 +338,7 @@ fn accept_existing_or_conflict(
     if existing.message.conversation_id == payload.conversation_id
         && existing.message.message_type == validated.message_type
         && existing.content_hash == validated.content_hash
+        && existing.message.reply_to_message_id == payload.reply_to_message_id
     {
         return Ok(existing.message);
     }
@@ -337,6 +363,8 @@ fn stored_message_from_row(row: MySqlRow) -> Result<StoredMessage, AcceptMessage
         client_message_id: row.try_get("client_message_id")?,
         message_type: row.try_get("message_type")?,
         content,
+        reply_to_message_id: row.try_get("reply_to_message_id")?,
+        reply_to: None,
         created_at: format_protocol_time(from_database_datetime(created_at)),
     };
     Ok(StoredMessage {

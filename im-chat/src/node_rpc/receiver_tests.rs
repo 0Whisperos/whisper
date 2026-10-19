@@ -1,5 +1,5 @@
-use super::*;
 use super::super::protocol::FriendRequestStatus;
+use super::*;
 use crate::connection::ActiveConnection;
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
@@ -13,6 +13,8 @@ fn message() -> AcceptedMessage {
         client_message_id: "client-1".into(),
         message_type: "text".into(),
         content: serde_json::json!({"text": "hello"}),
+        reply_to_message_id: None,
+        reply_to: None,
         created_at: "2026-09-30T00:00:00Z".into(),
     }
 }
@@ -31,10 +33,10 @@ fn connection(registry: &ConnectionRegistry, capacity: usize) -> mpsc::Receiver<
 
 #[test]
 fn forwards_existing_message_frame_to_exact_connection() {
-    // 测试目标：验证节点接口复用 message_created 帧并防止连接重建后的误投递。
-    // 构造方法：注册用户 20 的 connection-1，先尝试旧连接，再发有效请求。
-    // 输入数据：事件 event-1、会话 7 的消息和目标用户 20。
-    // 预期行为：旧连接返回 mismatch 且无帧；有效请求返回 queued 且帧字段完整。
+    // 测试目标：验证节点接口保留浅层引用原文并防止连接重建后的误投递。
+    // 构造方法：注册用户 20 的 connection-1，附加已读取的引用，先尝试旧连接再发送。
+    // 输入数据：事件 event-1、会话 7 的回复消息、目标用户 20 和引用正文 original。
+    // 预期行为：旧连接返回 mismatch 且无帧；有效请求保留引用 ID、作者、类型和原文。
     let registry = ConnectionRegistry::new();
     let mut receiver = connection(&registry, 2);
     let mut request = ForwardMessageRequest {
@@ -43,6 +45,13 @@ fn forwards_existing_message_frame_to_exact_connection() {
         event_id: "event-1".into(),
         message: message(),
     };
+    request.message.reply_to_message_id = Some("original-id".to_owned());
+    request.message.reply_to = Some(crate::message::ReplyTarget {
+        message_id: "original-id".to_owned(),
+        sender_user_id: 20,
+        message_type: "rich".to_owned(),
+        content: serde_json::json!({"blocks":[{"type":"text","text":"original"}]}),
+    });
     assert_eq!(
         forward_message(&registry, request.clone()).unwrap(),
         EnqueueStatus::ConnectionIdMismatch
@@ -60,6 +69,27 @@ fn forwards_existing_message_frame_to_exact_connection() {
     assert_eq!(frame["type"], "message_created");
     assert_eq!(frame["payload"]["event_id"], "event-1");
     assert_eq!(frame["payload"]["message"]["content"]["text"], "hello");
+    assert_eq!(
+        frame["payload"]["message"]["reply_to_message_id"],
+        "original-id"
+    );
+    assert_eq!(
+        frame["payload"]["message"]["reply_to"]["sender_user_id"],
+        20
+    );
+    assert_eq!(
+        frame["payload"]["message"]["reply_to"]["message_type"],
+        "rich"
+    );
+    assert_eq!(
+        frame["payload"]["message"]["reply_to"]["content"]["blocks"][0]["text"],
+        "original"
+    );
+    assert!(
+        frame["payload"]["message"]["reply_to"]
+            .get("reply_to")
+            .is_none()
+    );
 }
 
 #[test]

@@ -27,6 +27,8 @@ pub(crate) struct SendMessagePayload {
     pub(crate) message_type: String,
     pub(crate) content: serde_json::Value,
     #[serde(default)]
+    pub(crate) reply_to_message_id: Option<String>,
+    #[serde(default)]
     pub(crate) client_sent_at: Option<String>,
 }
 
@@ -39,6 +41,10 @@ pub(crate) struct AcceptedMessage {
     pub(crate) client_message_id: String,
     pub(crate) message_type: String,
     pub(crate) content: serde_json::Value,
+    #[serde(default)]
+    pub(crate) reply_to_message_id: Option<String>,
+    #[serde(default)]
+    pub(crate) reply_to: Option<super::ReplyTarget>,
     pub(crate) created_at: String,
 }
 

@@ -7,6 +7,7 @@ fn valid_payload() -> SendMessagePayload {
         conversation_id: 10001,
         message_type: TEXT.to_string(),
         content: json!({ "text": "hello" }),
+        reply_to_message_id: None,
         client_sent_at: Some("2026-08-16T12:00:00Z".to_string()),
     }
 }

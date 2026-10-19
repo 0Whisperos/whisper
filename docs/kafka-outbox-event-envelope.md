@@ -111,7 +111,9 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 
 ## Message 字段引用
 
-`message` 字段复用 `docs/message-ack-protocol.md` 中定义的 `Message` 结构。为避免实现时误解，本文列出该结构在 Kafka event envelope 中的字段含义。
+`message` 保存正式消息事实，基本字段与 `docs/message-ack-protocol.md` 的 `Message` 一致，但内部事件只携带 `reply_to_message_id`，不携带客户端响应中的 `reply_to` 目标正文。投递到 WebSocket 或跨节点 RPC 前，服务端按同会话查询目标并补齐浅层引用 DTO。
+
+旧事件缺失 `reply_to_message_id` 时按 `null` 解析。本次扩展仍为向后兼容的 `message_created v1`，不引入撤回事件。
 
 | 字段名 | 类型 | 是否必填 | 字段含义 |
 | --- | --- | --- | --- |
@@ -122,6 +124,7 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 | `client_message_id` | `string` | 是 | 发送方客户端生成的发送幂等 ID。发送方客户端可用它把正式消息和本地临时消息合并。 |
 | `message_type` | `string` | 是 | 消息类型。第一阶段固定为 `text`。 |
 | `content` | `TextMessageContent` | 是 | 消息内容。第一阶段文本消息使用 `{ "text": "..." }`。 |
+| `reply_to_message_id` | `string \| null` | 新事件返回 | 稳定引用 ID。普通消息为空；旧事件允许缺失。不保存引用原文、摘要或用户名。 |
 | `created_at` | `string` | 是 | 服务端创建正式消息的时间，使用 GB/T 7408 扩展格式。 |
 
 ## TextMessageContent 结构

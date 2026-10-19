@@ -4,12 +4,16 @@ use serde_json::json;
 use sqlx::mysql::MySqlPoolOptions;
 use std::env;
 
+#[path = "store_reply_tests.rs"]
+mod reply_tests;
+
 fn valid_payload(client_message_id: String, conversation_id: u64) -> SendMessagePayload {
     SendMessagePayload {
         client_message_id,
         conversation_id,
         message_type: super::super::TEXT.to_string(),
         content: json!({ "text": "hello" }),
+        reply_to_message_id: None,
         client_sent_at: Some("2026-08-16T12:00:00Z".to_string()),
     }
 }
@@ -59,7 +63,7 @@ async fn accept_message_writes_message_and_outbox_when_test_database_is_configur
     // 测试目标：验证正常发送会在同一事务中写入 messages 与 outbox_events 并返回 accepted。
     // 构造方法：TEST_DATABASE_URL 存在时创建最小 schema 和 active 会话成员，然后调用 accept_message。
     // 输入数据：user_id=20001，direct conversation，text="hello"，唯一 client_message_id。
-    // 预期行为：返回 conversation_seq=1，数据库中存在对应 message 和 message_created outbox。
+    // 预期行为：返回 conversation_seq=1，数据库中存在 message 和 outbox，时间在 DATETIME(6) 微秒精度一致。
     let pool = test_pool().await;
     ensure_schema(&pool).await;
     let fixture = TestFixture::create(&pool, 20001, true).await;
@@ -79,7 +83,14 @@ async fn accept_message_writes_message_and_outbox_when_test_database_is_configur
             .expect("message timestamp should load");
     let accepted_created_at = OffsetDateTime::parse(&accepted.created_at, &Rfc3339)
         .expect("accepted timestamp is RFC3339");
-    assert_eq!(stored_created_at, to_database_datetime(accepted_created_at));
+    let expected_created_at = to_database_datetime(accepted_created_at);
+    assert_eq!(
+        (stored_created_at.date(), stored_created_at.as_hms_micro()),
+        (
+            expected_created_at.date(),
+            expected_created_at.as_hms_micro()
+        )
+    );
     let message_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE message_id = ?")
             .bind(&accepted.message_id)
@@ -462,6 +473,7 @@ async fn ensure_schema(pool: &MySqlPool) {
             message_type VARCHAR(32) NOT NULL,
             content JSON NOT NULL,
             content_hash CHAR(64) NOT NULL,
+            reply_to_message_id CHAR(36) NULL DEFAULT NULL,
             created_at DATETIME(6) NOT NULL,
             UNIQUE KEY uk_messages_message_id (message_id),
             UNIQUE KEY uk_messages_conversation_seq (conversation_id, conversation_seq),

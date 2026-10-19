@@ -15,6 +15,7 @@ pub(crate) struct MessageCreatedEvent {
     pub(crate) aggregate_id: String,
     pub(crate) event_version: u32,
     pub(crate) occurred_at: String,
+    #[serde(serialize_with = "super::reply::serialize_event_message")]
     pub(crate) message: AcceptedMessage,
 }
 
@@ -44,6 +45,11 @@ impl MessageCreatedEvent {
     }
 
     pub(crate) fn validate(&self) -> Result<(), EventValidationError> {
+        if !super::reply::valid_reply_id(self.message.reply_to_message_id.as_deref()) {
+            return Err(EventValidationError::InvalidField(
+                "message.reply_to_message_id",
+            ));
+        }
         if self.event_type != MESSAGE_CREATED {
             return Err(EventValidationError::UnsupportedType);
         }
@@ -85,6 +91,7 @@ impl MessageCreatedEvent {
             conversation_id: self.message.conversation_id,
             message_type: self.message.message_type.clone(),
             content: self.message.content.clone(),
+            reply_to_message_id: self.message.reply_to_message_id.clone(),
             client_sent_at: None,
         };
         content::validate_send_payload(&payload)

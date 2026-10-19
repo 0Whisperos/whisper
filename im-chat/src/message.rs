@@ -1,7 +1,10 @@
 mod content;
 mod event;
 mod handler;
+mod reply;
 mod store;
+
+pub(crate) use reply::{ReplyTarget, populate_reply};
 
 pub(crate) use event::{EventValidationError, MessageCreatedEvent};
 #[allow(unused_imports)]
