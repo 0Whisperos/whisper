@@ -25,8 +25,6 @@ interface ChatMessageBubbleProps {
 
 export function ChatMessageBubble({ message, conversation, self, imageContext, imageResources, imageFailures,
   onMessageMenu, onImageMenu, onCloseMenu, onOpenImage, onImageLayout, onRecoverImage, onRetryImage, onLocateReply }: ChatMessageBubbleProps) {
-  if (message.recalledAt) return <p className="auth-message-recalled">{message.senderUserId === self.userId
-    ? "你撤回了一条消息" : `${conversation.participants[message.senderUserId]?.name ?? "对方"}撤回了一条消息`}</p>;
   const quote = message.replyTo ? <ReplyQuote target={message.replyTo}
     authorName={replyAuthor(message.replyTo, conversation, self)} onLocate={() => onLocateReply(message.replyTo!.messageId)} />
     : message.replyToMessageId ? <button type="button" className="auth-reply-quote" aria-label="定位被回复消息"

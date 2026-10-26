@@ -267,6 +267,17 @@ export function ChatPanel({
         {conversation.messages.map((message, index) => {
           const profile = message.senderUserId === self.userId ? self : conversation.participants[message.senderUserId];
           const isSelf = message.senderUserId === self.userId;
+          if (message.recalledAt) return (
+            <div key={message.localKey} className="auth-message-group">
+              <article
+                data-message-key={message.localKey}
+                data-conversation-seq={message.conversationSeq ?? undefined}
+                className={`auth-message-recalled ${replyNavigation.highlightedKey === message.localKey ? "is-reply-target" : ""}`}
+              >
+                {isSelf ? "你撤回了一条消息" : `${profile?.name ?? "对方"}撤回了一条消息`}
+              </article>
+            </div>
+          );
           const previous = conversation.messages[index - 1];
           const compact = isCompactMessage(previous, message);
           const hoverTime = formatHoverMessageTime(message.createdAt ?? message.clientSentAt, !compact);
@@ -305,7 +316,7 @@ export function ChatPanel({
                         onLocateReply={replyNavigation.locateReply} />
                     </div>
                   </div>
-                  {message.receipt && !message.recalledAt ? (
+                  {message.receipt ? (
                     <footer className="auth-message-footer">
                       <span className={`auth-message-receipt ${message.receipt === "已读" ? "is-read" : "is-pending"}`} aria-label={message.receipt}>
                         {message.receipt === "已读" ? <Icon name="check" /> : null}
