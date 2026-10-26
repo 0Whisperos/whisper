@@ -174,6 +174,7 @@ CREATE TABLE messages (
   content JSON NOT NULL,
   content_hash CHAR(64) NOT NULL,
   reply_to_message_id CHAR(36) NULL DEFAULT NULL,
+  recalled_at DATETIME(6) NULL DEFAULT NULL,
   created_at DATETIME(6) NOT NULL,
 
   UNIQUE KEY uk_messages_message_id (message_id),
@@ -197,6 +198,7 @@ CREATE TABLE messages (
 | `content` | `JSON` | 否 | 无 | 无 | 消息内容。第一阶段文本消息使用类似 `{ "text": "hello" }` 的结构；后续不同 `message_type` 可以对应不同内容结构。 |
 | `content_hash` | `CHAR(64)` | 否 | 无 | 无 | 规范化消息内容的 SHA-256 十六进制摘要。用于判断同一个 `client_message_id` 是否被错误复用于不同内容。 |
 | `reply_to_message_id` | `CHAR(36)` | 是 | `NULL` | 无 | 被回复消息的正式 ID。每条消息最多引用同会话的一条消息；普通消息为空。原文、用户名和摘要不重复落库。幂等恢复除内容哈希外还比较此字段。 |
+| `recalled_at` | `DATETIME(6)` | 是 | `NULL` | 无 | 原发送者首次撤回时间。空值表示正常；撤回保留正文、图片、引用和原序号，客户端按此状态显示占位。 |
 | `created_at` | `DATETIME(6)` | 否 | 无 | 索引 `idx_messages_conversation_created` | 服务端创建正式消息的时间。它是服务端时间线时间，不使用客户端发送时间排序；系统边界输出时使用 GB/T 7408 扩展格式。 |
 
 ### 回复字段迁移
@@ -208,7 +210,13 @@ ALTER TABLE messages
   ADD COLUMN reply_to_message_id CHAR(36) NULL DEFAULT NULL;
 ```
 
-本次不增加回复表、摘要快照、撤回字段或反向引用索引。目标消息按已有 `message_id` 唯一索引查询；历史接口按同会话批量补齐引用目标。迁移应先于新的 im-chat、im-api 上线，全部后端节点更新后再启用客户端回复；应先在专用测试库验证，业务库迁移由部署流程执行。
+回复不增加独立表、摘要快照或反向引用索引。目标消息按已有 `message_id` 唯一索引查询；历史接口按同会话批量补齐引用目标。撤回新增以下 nullable 字段，已有数据保持空值，无需回填：
+
+```sql
+ALTER TABLE messages ADD COLUMN recalled_at DATETIME(6) NULL DEFAULT NULL;
+```
+
+撤回不改写 `content`、`content_hash`、回复关系、序号或成员游标。状态更新和 `message_recalled` outbox 在同一事务中提交，重复撤回返回首次时间；不修改附件授权或图片缓存。详见 [消息撤回](message-recall.md)。迁移应先于新后端上线，在专用测试库验证；业务库迁移由部署流程执行。
 
 ## `outbox_events`
 
@@ -238,7 +246,7 @@ CREATE TABLE outbox_events (
 | `id` | `CHAR(36)` | 否 | 无 | 主键 | 事件 ID。全局唯一，下游 Consumer 可以使用它做幂等去重；payload 中也保留同一个事件 ID，方便不读取 Kafka headers 的消费者处理。 |
 | `aggregatetype` | `VARCHAR(255)` | 否 | 无 | 无 | 事件所属的业务聚合类型。聊天消息事件第一阶段使用 `chat_message`，可供 Debezium Outbox Event Router 写入 Kafka headers 或决定 topic 路由。 |
 | `aggregateid` | `VARCHAR(255)` | 否 | 无 | 无 | 事件所属的具体业务对象 ID。聊天消息事件建议填 `conversation_id` 的字符串形式，并作为 Kafka record key，使同一会话事件进入同一分区。 |
-| `type` | `VARCHAR(255)` | 否 | 无 | 无 | 业务事件类型。第一阶段使用 `message_created`；后续可扩展 `message_edited`、`message_recalled`、`message_deleted` 等。它不是发布状态。 |
+| `type` | `VARCHAR(255)` | 否 | 无 | 无 | 业务事件类型。当前使用 `message_created`、`message_recalled`，未来可扩展其他事件；它不是发布状态。 |
 | `payload` | `JSON` | 否 | 无 | 无 | 事件业务内容。建议保存完整 event envelope，包括 `event_id`、`event_type`、`aggregate_type`、`aggregate_id`、`event_version` 和 `message`。 |
 | `created_at` | `DATETIME(6)` | 否 | 无 | 索引 `idx_outbox_events_created` | 事件创建时间。用于排查、监控、延迟计算和后续归档清理；系统边界输出时使用 GB/T 7408 扩展格式。 |
 

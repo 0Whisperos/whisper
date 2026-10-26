@@ -1,6 +1,6 @@
 # 聊天消息交互与图片查看规划
 
-状态：复制与持久回复已有实现；本轮增加单目标普通转发，验证记录见下节。撤回及撤回状态校准仍为后续设计，撤回菜单保持占位。当前交付范围及实际接口以本节和 [消息协议](message-ack-protocol.md)、[数据库结构](database-schema.md) 为准。
+状态：复制、持久回复和单目标普通转发已有实现。2026-10-23 的撤回范围以 [消息撤回](message-recall.md) 为准：原文与接口正文保留、仅状态控制 UI、引用仍可发送、不清理图片缓存或限制附件授权。历史交付验证记录保持原日期，不代表本轮撤回验证结果。
 
 ## 单目标转发实施范围（2026-10-19）
 
@@ -55,7 +55,7 @@
 - 全客户端关闭 WebView/WebView2 默认右键菜单，包括登录页、空白区域和消息输入框。输入框仍支持键盘剪切、复制和粘贴。
 - 回复是持久引用，不是把摘要拼进普通文本。发送后的回复气泡在正文上方显示引用条。
 - 转发一次只选择一个好友或已有会话，以当前用户身份重新发送消息正文，不显示原作者和来源，也不携带原消息的回复关系。
-- 只有原发送者可以撤回消息，不限制撤回时间。撤回后双方显示占位提示，引用该消息的摘要变为“原消息已撤回”。
+- 只有原发送者可以撤回消息，不限制撤回时间。撤回后双方显示占位提示，引用条变为“该消息已撤回”，已有引用仍可发送。
 
 本期不包含：
 
@@ -75,9 +75,9 @@
 | [`RichMessageEditor.tsx`](../im-client/src/features/chat/components/RichMessageEditor.tsx) | 编辑器接收有序图文 blocks；复制粘贴使用受控 HTML 转换，纯文本中的 HTML 代码按字面插入。 |
 | [`attachmentResourceCache.ts`](../im-client/src/features/chat/attachmentResourceCache.ts) | 当前图片资源可能来自 Tauri asset URL 或当前 WebView 的 Blob URL。独立窗口不能把主窗口 Blob URL 当作稳定资源契约，应通过 Rust 缓存键读取原图。 |
 | [`useChatMessaging.ts`](../im-client/src/features/chat/hooks/useChatMessaging.ts) | 已具备文本/富文本 optimistic message、确认超时、失败和重试流程；回复要在现有发送输入和幂等语义上增加引用 ID。 |
-| [`message/store.rs`](../im-chat/src/message/store.rs) | 消息、附件关联和 outbox 在同一事务完成。附件只能由原上传者在绑定会话中从 `uploaded` 单次转为 `attached`，因此转发不能复用原 `attachment_id`。 |
-| [`message.go`](../im-api/internal/model/entity/message.go) | 本次只增加回复目标列；迁移由现有 GORM `AutoMigrate` 管理，撤回时间列属于后续设计。 |
-| [`attachments/service.go`](../im-api/internal/service/attachments/service.go) | 下载授权已经校验会话成员及附件关联状态；撤回后还需联查关联消息状态，禁止继续签发新授权。 |
+| [`message/send/store.rs`](../im-chat/src/message/send/store.rs) | 消息、附件关联和 outbox 在同一事务完成。附件只能由原上传者在绑定会话中从 `uploaded` 单次转为 `attached`，因此转发不能复用原 `attachment_id`。 |
+| [`message.go`](../im-api/internal/model/entity/message.go) | 回复列与 nullable `recalled_at` 由现有 GORM `AutoMigrate` 管理；撤回保留正文和原序号。 |
+| [`attachments/service.go`](../im-api/internal/service/attachments/service.go) | 下载授权沿用既有会话成员及附件关联校验，本轮撤回不修改此契约。 |
 | [`message-ack-protocol.md`](message-ack-protocol.md) | `conversation_seq` 和成员游标只描述消息创建顺序。撤回旧消息不会产生新序号，离线客户端不能只依赖 `delivered_seq` 发现撤回。 |
 
 ## 交互规格
@@ -161,12 +161,12 @@ Whisper 自有 HTML 采用版本化、可识别的最小结构，例如：
 
 摘要规则：
 
-本次以下摘要规则均在客户端执行，服务端只返回目标的必要原文；用户名从成员资料解析，不额外写入数据库。撤回相关摘要规则为后续设计。
+以下摘要规则均在客户端执行，服务端返回目标原文与撤回状态；用户名从成员资料解析，不额外写入数据库。
 
 - 取原消息 blocks 中第一段非空文字，压缩为单行并最多显示 80 个 Unicode 字符。
 - 没有文字但有图片时显示 `[图片]`；有多张图片时显示 `[N张图片]`。
 - 同时存在文字和图片时显示截断文字，并附加 `[图片]` 或 `[N张图片]`。
-- 原消息已撤回时只显示“原消息已撤回”，不返回或保留旧摘要。
+- 原消息已撤回时引用条只显示“该消息已撤回”；底层目标正文仍保留。
 
 回复消息的气泡在正文上方显示引用条，样式参考需求截图：弱化背景、左侧强调线、第一行“回复 用户名：摘要”，正文位于引用条下方。用户名由 `sender_user_id` 在当前会话成员资料中解析，资料缺失时显示“用户 <id>”。
 
@@ -176,7 +176,7 @@ Whisper 自有 HTML 采用版本化、可识别的最小结构，例如：
 - 原消息已加载但已撤回：定位撤回占位。
 - 原消息未加载：不自动发起无限历史查询，提示“原消息尚未加载，请先加载更早记录”。
 
-发送回复前，服务端必须确认引用消息存在、属于同一会话且尚未撤回。验证结果以服务端数据库为准，客户端摘要不参与可信数据写入。
+发送回复前，服务端确认引用消息存在且属于同一会话；原消息已撤回时仍允许提交回复。验证结果以服务端数据库为准，客户端摘要不参与可信数据写入。
 
 ### 单目标普通转发
 
@@ -192,9 +192,9 @@ Whisper 自有 HTML 采用版本化、可识别的最小结构，例如：
 
 转发任务使用独立临时状态，不写入或清空源会话、目标会话的编辑器草稿。任一图片授权、下载、上传或确认失败时，不发送不完整消息；保留选择器中的失败状态供用户重试或取消。已成功上传但最终没有发出的目标附件会留下未关联记录和 OSS 对象；当前仓库的过期清理任务仍是 TODO，本轮明确接受这项存储积累，不包含清理或补偿能力。
 
-源图片下载授权沿用现有批次原子语义：同一批中任一附件不存在、无权访问或未关联时，整批授权失败。客户端不得把成功子集继续拼成一条不完整的转发消息。撤回后的授权限制将在后续撤回功能中实现。
+源图片下载授权沿用现有批次原子语义：同一批中任一附件不存在、无权访问或未关联时，整批授权失败。客户端不得把成功子集继续拼成一条不完整的转发消息。本轮撤回不修改服务端下载授权；客户端收到撤回状态后停止尚未完整取得内容的转发任务。
 
-普通转发不携带 `reply_to_message_id`。完整取得正文和全部图片后，转发任务即持有独立副本；后续源消息撤回不阻断该任务，也不级联撤回已发送副本。未来撤回功能只限制尚未完成内容取得时的新授权，不增加最终发送阶段的源消息校验。
+普通转发不携带 `reply_to_message_id`。完整取得正文和全部图片后，转发任务即持有独立副本；后续源消息撤回不阻断该任务，也不级联撤回已发送副本，不增加最终发送阶段的源消息校验。
 
 ### 撤回
 
@@ -209,10 +209,10 @@ Whisper 自有 HTML 采用版本化、可识别的最小结构，例如：
 撤回后的表现：
 
 - 原气泡替换为“你撤回了一条消息”或“<用户> 撤回了一条消息”。
-- 不再向客户端返回原正文、图片 blocks 或回复元数据。
-- 引用该消息的其他回复仍保留自己的正文，但引用条变为“原消息已撤回”。
-- 客户端删除该消息的可见图片资源，并使对应磁盘缓存失效。
-- `im-api` 不再为关联附件签发新的下载授权。
+- 数据库和客户端 DTO 保留原正文、图片 blocks 及回复元数据，UI 按 `recalled_at` 隐藏原消息内容。
+- 引用该消息的其他回复及草稿保留正文和引用，引用条变为“该消息已撤回”，仍允许发送。
+- 客户端从当前气泡及查看器中移除相应图片展示，图片缓存及文件保留。
+- `im-api` 附件下载授权保持既有行为。
 - 已经签发且尚未过期的 URL、外部保存文件和系统剪贴板内容无法由服务端追回，文案和实现不得承诺远程删除这些副本。
 
 撤回不是新消息，不分配新的 `conversation_seq`，也不改变 `conversations.last_seq`、`delivered_seq` 或 `read_seq`。
@@ -271,7 +271,7 @@ platform/
 ### `im-chat`
 
 - 扩展 `send_message` payload 和正式消息模型，支持可选 `reply_to_message_id`。
-- 发送时先按 `(sender_user_id, client_message_id)` 查找并比较已有消息；命中且会话、类型、内容和引用目标一致时直接恢复原确认。只有确定是新消息后，才校验引用目标当前仍存在、属于同一会话且未撤回，避免原消息后来撤回导致已经成功的回复无法幂等重试。附件也保持同样的“先恢复幂等、再校验新请求资源”顺序。
+- 发送时先按 `(sender_user_id, client_message_id)` 查找并比较已有消息；命中且会话、类型、内容和引用目标一致时直接恢复原确认。新消息只校验引用目标存在且属于同一会话，目标已撤回仍可回复。附件保持“先恢复幂等、再校验新请求资源”顺序。
 - 增加 `recall_message` WebSocket handler、所有权校验、幂等撤回事务和稳定错误映射。
 - 把 outbox/Kafka 事件解析从只接受 `message_created` 扩展为显式的创建/撤回联合类型。
 - 复用现有会话分区 key、Redis presence、同节点队列和跨节点 HTTP 转发，把 `message_recalled` 推送给在线成员。
@@ -279,11 +279,11 @@ platform/
 
 ### `im-api`
 
-- 本次 GORM entity 只增加回复目标，由现有迁移入口执行 `AutoMigrate`；撤回时间属于后续迁移。
+- GORM entity 增加 nullable 撤回时间，由现有迁移入口执行 `AutoMigrate`，不新增表或索引。
 - 历史消息查询批量收集当前页的 `reply_to_message_id`，一次查询并附带浅层目标正文，摘要交给客户端，避免 N+1 查询。
-- 历史消息返回前按 `recalled_at` 清除正文和回复元数据；引用目标已撤回时返回 `recalled = true` 和空摘要。
+- 历史消息和浅层引用增加 `recalled_at`，保留原正文与引用结构；摘要及撤回展示由客户端生成。
 - 增加批量消息状态查询接口，供已登录客户端在 WebSocket 重连后校准已经加载的旧消息。
-- 附件下载授权联查关联消息；消息撤回后返回稳定业务错误，不再签发新 URL。
+- 附件下载授权不因本轮撤回修改。
 - HTTP handler 只负责解析、鉴权上下文和错误码映射；查询和摘要规则放在消息领域 service/repository 中。
 
 ## Tauri command 契约
@@ -385,14 +385,15 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
 }
 ```
 
-以下撤回 DTO 为后续方案，本次尚不实现。引用目标撤回后，回复消息自身仍是活动消息，但引用结构拟变为：
+引用目标撤回后，回复消息自身仍是活动消息，浅层引用保持原结构并增加撤回时间：
 
 ```json
 {
   "message_id": "message-uuid-original",
   "sender_user_id": 20001,
-  "recalled": true,
-  "summary": null
+  "message_type": "text",
+  "content": { "text": "原正文继续保留" },
+  "recalled_at": "2026-10-23T12:00:00.123456+08:00"
 }
 ```
 
@@ -405,17 +406,17 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
   "conversation_seq": 42,
   "sender_user_id": 20001,
   "client_message_id": "original-client-message-uuid",
-  "message_type": "rich",
-  "content": null,
+  "message_type": "text",
+  "content": { "text": "原正文继续保留" },
   "reply_to": null,
   "recalled_at": "2026-10-14T18:35:00.000+08:00",
   "created_at": "2026-10-14T18:25:00.000+08:00"
 }
 ```
 
-协议不返回撤回消息原正文。数据库可以保留原 `content` 作为消息事实，但所有面向客户端的 DTO mapper 必须根据 `recalled_at` 生成安全结构。
+协议和数据库都保留撤回消息原正文，客户端依据 `recalled_at` 替换展示。正式消息和引用目标字段缺失时按未撤回处理。
 
-`content` 从必填对象扩展为“活动消息为对象、撤回消息为 `null`”，属于客户端类型契约变化；`server_accepted`、`message_created`、历史 API 和客户端解析器必须在同一发布批次支持该联合类型。撤回消息自身原有的 `reply_to` 同样返回 `null`。
+`content` 保持既有必填对象结构，回复元数据也不因撤回被清空；不新增 `summary` 或 `recalled` 字段。客户端隐藏撤回消息自身的正文及引用展示，但不销毁底层数据。
 
 ### `send_message` 回复扩展
 
@@ -436,14 +437,13 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
 }
 ```
 
-服务端先按 `(sender_user_id, client_message_id)` 恢复幂等请求，除现有会话、类型和内容比较外，还必须比较 `reply_to_message_id`。正文相同但引用目标不同属于 `duplicate_client_message_conflict`。只有幂等查询确认不存在旧消息后，才检查引用目标当前是否撤回；已经成功发送的回复在原消息后来撤回后仍能返回原 `server_accepted`。
+服务端先按 `(sender_user_id, client_message_id)` 恢复幂等请求，除现有会话、类型和内容比较外，还比较 `reply_to_message_id`。正文相同但引用目标不同属于 `duplicate_client_message_conflict`。新回复校验目标存在且属于同一会话，已撤回目标仍允许引用。
 
 新增回复相关错误码：
 
 | 错误码 | 条件 |
 | --- | --- |
 | `reply_message_not_found` | 引用 ID 不存在，或引用消息不属于目标会话。统一错误避免泄露其他会话消息是否存在。 |
-| `reply_message_recalled` | 引用消息已经撤回。 |
 | `invalid_reply_message_id` | 引用 ID 格式无效。 |
 
 ### `recall_message` 请求
@@ -468,6 +468,7 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
     "message_id": "message-uuid-original",
     "conversation_id": 10001,
     "conversation_seq": 42,
+    "sender_user_id": 20001,
     "recalled_at": "2026-10-14T18:35:00.000+08:00"
   }
 }
@@ -564,7 +565,7 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
 
 - 需要有效 Bearer access token。
 - 当前用户必须是目标会话有效成员。
-- 每批 1 到 100 个去重后的 UUID。
+- 原请求数组每批 1 到 100 个合法 UUID，去重前检查长度；内部按首次出现顺序去重。
 - 查询条件必须包含路径中的 `conversation_id`；其他会话或不存在的 ID 不返回记录，不能借此探测消息存在性。
 
 响应：
@@ -581,10 +582,11 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
 客户端在每次 WebSocket 从非认证状态重新进入 `authenticated` 后执行：
 
 1. 按会话收集当前内存中已加载的正式 `message_id`。
-2. 同时收集这些消息引用的 `reply_to.message_id`。
+2. 同时收集这些消息引用的 `reply_to.message_id` 和各会话草稿的回复目标 ID。
 3. 每个会话去重后按最多 100 个分批查询。
 4. 将撤回状态单调合并进本地消息和引用摘要。
 5. 单批失败不清空现有消息；记录可重试状态，并在下一次认证或用户手动重试时再次校准。
+6. 本次认证期间发现新增消息、引用或草稿目标 ID 时补查，不扫描未加载历史。
 
 新启动客户端和新加载的历史页直接使用历史 DTO 中的当前 `recalled_at`，无需为未加载消息建立通用事件游标。本期不引入新的客户端持久化消息数据库或全局消息变更游标。
 
@@ -592,13 +594,13 @@ viewer 应先订阅 `image-viewer-session-updated`，再调用本 command 读取
 
 ### 结论
 
-本次不新增数据表，只为 `messages` 增加 `reply_to_message_id`。`attachments` 和 `outbox_events` 表均不增加字段。
+不新增数据表。回复已有 `reply_to_message_id`；本轮为 `messages` 增加 `recalled_at`。`attachments` 和 `outbox_events` 表均不增加字段。
 
 上线前可审核的等价 DDL：
 
 ```sql
 ALTER TABLE messages
-  ADD COLUMN reply_to_message_id CHAR(36) NULL DEFAULT NULL;
+  ADD COLUMN recalled_at DATETIME(6) NULL DEFAULT NULL;
 ```
 
 ### `messages` 新增字段
@@ -606,30 +608,32 @@ ALTER TABLE messages
 | 字段名 | 类型 | 是否为空 | 默认值 | 索引/约束 | 字段含义 |
 | --- | --- | --- | --- | --- | --- |
 | `reply_to_message_id` | `CHAR(36)` | 是 | `NULL` | 无 | 被回复消息的正式 `message_id`。发送时校验目标存在且属于同一会话；普通消息为空。 |
+| `recalled_at` | `DATETIME(6)` | 是 | `NULL` | 无 | 首次撤回时间；不清空原文，也不分配新序号。 |
 
 GORM entity 对应增加 nullable 字段：
 
 ```go
 ReplyToMessageID *string `gorm:"column:reply_to_message_id;type:char(36)"`
+RecalledAt *time.Time `gorm:"column:recalled_at;type:datetime(6)"`
 ```
 
 实际字段顺序由 MySQL/GORM 迁移结果决定，不作为业务契约。实施时先在目标 MySQL 版本和近似数据量上审查 `AutoMigrate` 生成行为、锁表影响和索引创建耗时，再执行生产迁移。
 
-`recalled_at` 以及反向引用索引仅在后续撤回能力确有需要时迁移，不属于本次 DDL。
+本轮不增加反向引用索引或 `recalled_at` 索引。
 
 ### 数据库设计决策
 
 - 不新增回复表。每条消息最多引用一条原消息，nullable 列足以表达关系。
-- 不保存引用摘要快照。历史和实时 DTO 附带目标必要正文，由客户端生成摘要。后续撤回能力还需按原消息状态过滤正文。
+- 不保存引用摘要快照。历史和实时 DTO 附带目标正文及撤回状态，由客户端生成摘要或撤回提示。
 - 不增加 `recalled_by_user_id`。本期只有原发送者可以撤回，发送者已经由 `sender_user_id` 确定。
 - `recalled_at` 不单独建立索引。历史查询使用现有会话索引，状态校准使用唯一 `message_id`，没有按撤回时间扫描消息的需求。
 - 本次不建 `reply_to_message_id` 反向索引；读取引用目标使用现有 `messages.message_id` 唯一索引。后续按原消息查全部回复时再评估索引。
 - 不设置物理外键，保持当前 schema 使用业务事务维护消息关联的方式。服务端仍必须验证同会话关系。
-- 数据库保留原 `content`，便于内部审计和一致性；所有对外 DTO mapper、附件授权和转发入口必须以 `recalled_at` 为准隐藏或拒绝原内容。
-- `attachments` 不增加字段。签发下载授权时联查其 `message_id` 对应消息的 `recalled_at`；非空时拒绝授权。
+- 数据库和对外 DTO 均保留原 `content`；客户端按状态隐藏，并关闭后续操作入口。
+- `attachments` 不增加字段，下载授权与图片缓存不因本轮撤回改变。
 - `outbox_events` 不增加字段。使用现有 `type`、`payload` 和 `created_at` 保存 `message_recalled` append-only 事件。
 - 撤回事务只更新 `messages.recalled_at` 和插入 outbox，不修改 `content`、`conversation_seq`、`conversations.last_seq` 或成员游标。
-- 逻辑撤回不会清除已经写入数据库、旧 outbox/Kafka 事件、已签发 URL 或外部副本中的历史字节；本期保证的是新的客户端 DTO、UI、转发入口和下载授权不再提供这些内容。
+- 撤回只改变状态及 UI 展示，不清除数据库、outbox/Kafka、缓存、附件或外部副本中的历史字节。
 
 ## 失败处理与状态反馈
 
@@ -639,8 +643,8 @@ ReplyToMessageID *string `gorm:"column:reply_to_message_id;type:char(36)"`
 | 复制图片或图文失败 | 菜单关闭后显示“复制失败，请重试”，不显示成功提示。 |
 | 用户取消另存为 | 静默结束，不视为错误。 |
 | 保存目标写入失败 | 显示“保存失败”，日志保留安全诊断信息，不向 UI 暴露内部源路径。 |
-| 回复目标在发送前撤回 | 服务端拒绝发送，保留输入内容和回复条，提示“原消息已撤回”。 |
-| 后续撤回能力接入后，取得源内容时消息已撤回 | 新下载授权失败，终止取得内容；已经完整取得的副本允许继续转发。 |
+| 回复目标在发送前撤回 | 保留输入内容和引用，引用条显示“该消息已撤回”，仍允许发送。 |
+| 取得源内容时收到消息撤回状态 | 客户端终止尚未完整取得的转发任务；已经完整取得的副本允许继续转发。 |
 | 某张图片转发上传失败 | 不发送整条消息；保留转发任务的可重试状态。 |
 | 撤回请求超时 | 不先在本地永久改为撤回；重试同一请求，服务端幂等返回最终状态。 |
 | 实时撤回事件重复或晚于状态校准 | 以非空 `recalled_at` 为单调终态，不恢复正文。 |
@@ -686,10 +690,10 @@ ReplyToMessageID *string `gorm:"column:reply_to_message_id;type:char(36)"`
 
 ### `im-api` Go
 
-- `AutoMigrate` 后 `messages` 存在两个新列和引用索引，原有表及数据仍可读取。
-- 历史页批量生成引用摘要，不产生逐消息查询；撤回正文和摘要不出现在响应中。
+- `AutoMigrate` 后 `messages` 包含 nullable 回复与撤回字段，不增加索引，原有表及数据仍可读取。
+- 历史页批量补齐引用目标，不产生逐消息查询；撤回状态及完整原文均保留在响应中。
 - 状态接口鉴权、成员校验、空数组、超过 100 条、去重、未知/跨会话 ID 和正常混合状态。
-- 已撤回消息的附件下载授权被拒绝，活动消息不受影响。
+- 附件下载授权维持原有行为，撤回不触发缓存清理。
 - 领域错误在 HTTP 边界映射为稳定 code，未知内部错误不泄漏 SQL、路径、token 或 SDK 文本。
 
 ### 验证命令与桌面验收
@@ -725,11 +729,11 @@ Windows 桌面验收必须包括：
 
 ## 实施与发布顺序
 
-1. **数据库准备**：更新 Go entity，在测试数据库验证 `AutoMigrate` 和等价 DDL；先部署新增 nullable 列和索引。
-2. **事件兼容**：先让所有 `im-chat` consumer、节点 RPC 和投递节点能解析但不产生 `message_recalled`，确认旧 `message_created` 不受影响。
-3. **服务端能力**：部署回复验证、撤回事务与事件生产、历史 DTO、状态校准和附件授权限制。
+1. **数据库准备**：更新 Go entity，在测试数据库验证 `AutoMigrate` 和等价 DDL；先部署新增 nullable 列，不新增索引。
+2. **事件兼容**：产生首条撤回事件前，全部 `im-chat` consumer、节点 RPC 和投递节点必须支持 `message_recalled`，并确认旧 `message_created` 不受影响。当前构建没有撤回生产开关；分阶段滚动发布需单独准备只读新事件的兼容构建，或通过维护窗口统一升级。
+3. **服务端能力**：部署撤回事务与事件生产、保留正文的历史 DTO 和状态校准，不修改附件授权。
 4. **客户端能力**：部署新 DTO 合并、菜单、回复、转发、Tauri 剪贴板/保存和独立查看器。
-5. **开启撤回入口**：确认服务端节点全部支持新事件后再让客户端显示撤回菜单，避免旧 consumer 无法解析事件。
+5. **客户端兼容**：开启撤回前，确认接收端客户端已升级并排空旧版连接。旧版遇到未知 `message_recalled` 会关闭 WebSocket，且不具备撤回展示；当前没有能力协商或最低版本校验，不能直接混用旧版接收端。
 6. **验收**：完成自动化验证及 Windows 桌面验收，再把本文状态从“待实施设计”更新为实际完成状态，并同步 `database-schema.md`、`message-ack-protocol.md`、`kafka-outbox-event-envelope.md` 和图片流程文档中的正式契约。
 
 回滚客户端或服务端时可以保留两个 nullable 数据库列；它们不会影响旧消息写入。已经写出的 `message_recalled` 事件要求消费端保持向后兼容，因此事件兼容部署必须早于事件生产，不能晚于生产事件。
@@ -742,9 +746,9 @@ Windows 桌面验收必须包括：
 - 回复在实时消息和历史消息中都保留引用关系，点击可定位已加载原消息。
 - 转发为新的普通消息，所有图片使用目标会话的新附件 ID，现有草稿不受影响。
 - 本人可以不限时撤回，其他人不能撤回；重复请求幂等，不产生重复 outbox。
-- 撤回后历史 DTO、引用摘要、图片查看器、转发和新下载授权均不再暴露原内容。
+- 撤回后 UI 隐藏原气泡和图片，引用条显示“该消息已撤回”；DTO 正文、附件授权和缓存保持原值。
 - 在线成员通过 `message_recalled` 实时更新；离线客户端重连后通过批量状态接口校准旧消息。
-- 数据库只修改 `messages` 表的两个字段和一个索引，没有新增表或其他字段。
+- 本轮数据库只新增 `messages.recalled_at`，不新增表或索引。
 - 所有相关自动化测试通过，并完成 Windows 桌面专项验收。
 
 ## 依据与可核验来源

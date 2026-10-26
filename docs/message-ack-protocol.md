@@ -4,6 +4,8 @@
 
 文字与图片组成同一条消息的完整上传、发送、下载和接口扩展设计见 [聊天图片消息流程](chat-image-message-flow.md)。
 
+消息撤回请求、响应、事件及批量状态校准见 [消息撤回](message-recall.md)。撤回保留正文和原序号，由 `recalled_at` 控制客户端显示，不新增消息送达或已读 ACK。
+
 ## 总体原则
 
 - 业务消息只能在 WebSocket 认证成功后处理。认证握手本身不在本文档主体中定义。
@@ -103,10 +105,13 @@
 | `message_type` | `string` | 是 | 消息类型。第一阶段只支持 `text`。 |
 | `content` | `object` | 是 | 消息内容。结构由 `message_type` 决定。 |
 | `reply_to_message_id` | `string \| null` | 新版本返回 | 被回复消息 ID；普通消息为空。旧消息响应缺失时客户端按空引用处理。 |
-| `reply_to` | `object \| null` | 新版本返回 | 浅层引用目标，仅含 `message_id`、`sender_user_id`、`message_type`、`content`，不递归包含目标自身的引用；异常缺失时保留引用 ID 并返回空目标。 |
+| `reply_to` | `object \| null` | 新版本返回 | 浅层引用目标，含 `message_id`、`sender_user_id`、`message_type`、`content`、`recalled_at`，不递归包含目标自身的引用；异常缺失时保留引用 ID 并返回空目标。 |
+| `recalled_at` | `string \| null` | 新版本返回 | 首次撤回时间，空表示正常；旧响应缺字段按空处理。正文及引用结构继续保留，客户端显示撤回占位。 |
 | `created_at` | `string` | 是 | 服务端创建正式消息的时间，使用 GB/T 7408 扩展格式。 |
 
 引用正文由客户端生成单行摘要：第一段非空文字压缩空白并截取最多 80 个 Unicode 码点，按图片数量附加 `[图片]` 或 `[N张图片]`。昵称从当前成员资料解析。`server_accepted`、`message_created` 和消息历史均使用相同的引用结构；历史响应批量补齐页外目标，不要求先加载原消息所在历史页。
+
+引用目标已撤回时显示“该消息已撤回”，仍保留目标正文和引用 ID，且允许继续发送该回复。撤回消息自身的正文、图片和回复元数据只在 UI 隐藏，接口字段维持原值。
 
 ### `TextMessageContent`
 
@@ -480,6 +485,9 @@
 - `delivered_ack` 成功返回 `delivered_ack_accepted`，失败返回 `delivered_ack_rejected`。
 - `read_ack` 成功返回 `read_ack_accepted`，失败返回 `read_ack_rejected`。
 - `message_created` 是服务端主动推送，可以不携带 `request_id`。
+- `recall_message` 成功返回 `recall_message_accepted`，失败返回 `recall_message_rejected`；原样返回请求 ID。
+- `message_recalled` 是主动状态通知，重复到达不能重复插入消息，也不能推进消息或回执游标。
+- 每次实际重新认证后校准已经加载消息及引用的撤回状态，已知撤回不能被旧创建或历史响应恢复。
 - 发送方也会收到自己的 `message_created`，客户端必须合并而不是重复展示。
 - `delivered_seq` 表示连续收到进度，不表示用户自己发送的最后一条消息。
 - `read_seq` 表示实际阅读进度，不表示送达。

@@ -4,8 +4,8 @@
 
 ## 总体约定
 
-- 第一阶段 Kafka 只承载聊天消息创建后的实时分发事件。
-- 第一阶段只定义 `message_created v1`。
+- Kafka 承载 `message_created v1` 和 `message_recalled v1`，共用现有 topic、消费组及会话 ID 分区 key。
+- 本文的创建事件示例保持原结构；撤回 envelope、消费确认边界和发布顺序见 [消息撤回](message-recall.md)。
 - Kafka value 使用 JSON event envelope，不引入 Avro、Protobuf 或 Schema Registry。
 - Kafka payload 中的时间文本使用 GB/T 7408 扩展格式，包含日期、时间和时区偏移，例如 `2026-08-16T12:00:01.123+08:00`。
 - `outbox_events` 是 append-only 事件发布表，不维护 `pending`、`publishing`、`published` 等发布状态。
@@ -67,7 +67,7 @@ Consumer 从 Kafka 中读取的是完整 record。第一阶段 record 结构如�
 | 字段名 | 类型 | 是否必填 | 固定值/来源 | 字段含义 |
 | --- | --- | --- | --- | --- |
 | `event_id` | `string` | 是 | `outbox_events.id` | 事件 ID。Consumer 可用它做幂等去重；必须与 `value.event_id` 相同。 |
-| `event_type` | `string` | 是 | `outbox_events.type` | 事件类型。第一阶段固定为 `message_created`；必须与 `value.event_type` 相同。 |
+| `event_type` | `string` | 是 | `outbox_events.type` | `message_created` 或 `message_recalled`；必须与 `value.event_type` 相同。 |
 | `aggregate_type` | `string` | 是 | `outbox_events.aggregatetype` | 聚合类型。第一阶段固定为 `chat_message`；必须与 `value.aggregate_type` 相同。 |
 
 Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断，但业务处理必须以 `value` 中的完整 event envelope 为准。
@@ -102,18 +102,21 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 | 字段名 | 类型 | 是否必填 | 固定值/来源 | 字段含义 |
 | --- | --- | --- | --- | --- |
 | `event_id` | `string` | 是 | `outbox_events.id` | 领域事件 ID。全局唯一，用于 Consumer 幂等、日志关联和问题排查。 |
-| `event_type` | `string` | 是 | `outbox_events.type` | 领域事件类型。第一阶段固定为 `message_created`。 |
+| `event_type` | `string` | 是 | `outbox_events.type` | 领域事件类型：`message_created` 或 `message_recalled`。 |
 | `aggregate_type` | `string` | 是 | `outbox_events.aggregatetype` | 事件所属聚合类型。第一阶段固定为 `chat_message`。 |
 | `aggregate_id` | `string` | 是 | `outbox_events.aggregateid` | 事件所属聚合 ID。第一阶段为 `conversation_id` 的字符串形式。 |
 | `event_version` | `number` | 是 | 固定为 `1` | 事件结构版本。第一阶段固定为 `1`，用于后续事件结构演进。 |
 | `occurred_at` | `string` | 是 | 服务端事件发生时间 | 领域事件发生时间。通常与写入 `outbox_events.created_at` 的时间一致，使用 GB/T 7408 扩展格式。 |
-| `message` | `Message` | 是 | `messages` 中的正式消息事实 | 服务端正式消息对象。字段结构与 `docs/message-ack-protocol.md` 中的 `Message` 保持一致。 |
+| `message` | `Message` | 创建事件必填 | `messages` 中的正式消息事实 | 创建事件正文，引用只保留目标 ID；对客户端投递前补当前撤回状态及浅层引用。 |
+| `recalled_message` | `object` | 撤回事件必填 | 原消息定位信息与首次撤回时间 | 字段为 `message_id`、`conversation_id`、`conversation_seq`、`sender_user_id`、`recalled_at`，详见消息撤回契约。 |
 
 ## Message 字段引用
 
 `message` 保存正式消息事实，基本字段与 `docs/message-ack-protocol.md` 的 `Message` 一致，但内部事件只携带 `reply_to_message_id`，不携带客户端响应中的 `reply_to` 目标正文。投递到 WebSocket 或跨节点 RPC 前，服务端按同会话查询目标并补齐浅层引用 DTO。
 
-旧事件缺失 `reply_to_message_id` 时按 `null` 解析。本次扩展仍为向后兼容的 `message_created v1`，不引入撤回事件。
+旧事件缺失 `reply_to_message_id` 时按 `null` 解析，创建事件仍兼容 `message_created v1`。撤回使用独立的 `message_recalled v1` body；消费端按类型解析明确的联合事件。创建事件投递前读取消息及引用目标的最新撤回状态，原正文和原序号仍保留，不因为撤回跳过创建记录。
+
+`compose.yml` 的 EventRouter 开启 JSON payload 展开，[Debezium 官方配置](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html) 中 `table.json.payload.null.behavior` 默认为 `ignore`。因此 outbox 中显式为 `null` 的 `reply_to_message_id` 在 Kafka value 中也可能被省略；消费端将这两种表示视为同一空引用，非空引用 ID 仍必须完整保留。
 
 | 字段名 | 类型 | 是否必填 | 字段含义 |
 | --- | --- | --- | --- |
@@ -124,7 +127,7 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 | `client_message_id` | `string` | 是 | 发送方客户端生成的发送幂等 ID。发送方客户端可用它把正式消息和本地临时消息合并。 |
 | `message_type` | `string` | 是 | 消息类型。第一阶段固定为 `text`。 |
 | `content` | `TextMessageContent` | 是 | 消息内容。第一阶段文本消息使用 `{ "text": "..." }`。 |
-| `reply_to_message_id` | `string \| null` | 新事件返回 | 稳定引用 ID。普通消息为空；旧事件允许缺失。不保存引用原文、摘要或用户名。 |
+| `reply_to_message_id` | `string \| null` | 否 | 稳定引用 ID。普通消息为空；缺失按空引用处理。不保存引用原文、摘要或用户名。 |
 | `created_at` | `string` | 是 | 服务端创建正式消息的时间，使用 GB/T 7408 扩展格式。 |
 
 ## TextMessageContent 结构
@@ -158,7 +161,7 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 | `outbox_events.id` | `headers.event_id`、`value.event_id` | 事件 ID。用于 Consumer 幂等和日志关联。 |
 | `outbox_events.aggregatetype` | `headers.aggregate_type`、`value.aggregate_type` | 聚合类型。第一阶段为 `chat_message`。 |
 | `outbox_events.aggregateid` | `record.key`、`value.aggregate_id` | 聚合 ID。第一阶段为 `conversation_id` 的字符串形式。 |
-| `outbox_events.type` | `headers.event_type`、`value.event_type` | 事件类型。第一阶段为 `message_created`。 |
+| `outbox_events.type` | `headers.event_type`、`value.event_type` | 事件类型：`message_created` 或 `message_recalled`。 |
 | `outbox_events.payload` | `record.value` | 完整 event envelope JSON。 |
 | `outbox_events.created_at` | `value.occurred_at` | 事件发生时间的数据库存储值；输出到 Kafka payload 时使用 GB/T 7408 扩展格式。 |
 
@@ -171,7 +174,7 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 | `outbox_events.aggregateid == value.aggregate_id` | 确保 outbox 聚合 ID 和事件正文聚合 ID 一致。 |
 | `outbox_events.type == value.event_type` | 确保 outbox 事件类型和事件正文事件类型一致。 |
 | `record.key == value.aggregate_id` | 确保 Kafka 分区键和事件聚合 ID 一致。 |
-| `value.aggregate_id == String(value.message.conversation_id)` | 确保事件聚合 ID 指向消息所属会话。 |
+| `value.aggregate_id == String(body.conversation_id)` | 创建事件 body 为 `message`，撤回事件为 `recalled_message`；聚合 ID 必须指向其所属会话。 |
 | `value.event_version == 1` | 确保第一阶段 Consumer 按 v1 结构解析。 |
 
 ## 可靠性语义
@@ -186,7 +189,7 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
   没有领取、释放、租约或 token。先查询标记，完成投递决策后写标记，再提交 offset。
 - 本地入队、离线跳过、stale/畸形路由、队列满/关闭和远端 HTTP 转发尝试结束均属于已完成的
   本轮投递决策，不推进 delivered_seq/read_seq。
-- 完成标记、会话成员或成员 presence 的读取失败不提交 offset；远端 `chat_nodes` 地址查询
+- 完成标记、会话成员、当前消息/引用状态或成员 presence 的读取失败不提交 offset；远端 `chat_nodes` 地址查询
   失败按本次实时转发失败处理。已经投递后完成标记写入失败，当前流程只重试写标记；
   offset 提交失败保留标记并重建消费者，不再次执行已完成投递。
 - 坏 JSON、未知事件类型/版本、缺失必需字段/headers 或 key/header/value 冲突，记录
@@ -223,10 +226,10 @@ Headers 不是完整业务正文。Consumer 可以先读 headers 做快速判断
 
 ## 实现检查清单
 
-- 第一阶段只发布 `message_created v1`。
+- 当前发布 `message_created v1` 和 `message_recalled v1`，共用 topic 与消费组。
 - Kafka record 已定义 `topic`、`key`、`headers`、`value`，且每个字段都有含义说明。
 - `KafkaHeaders` 已定义 `event_id`、`event_type`、`aggregate_type`，且每个字段都有含义说明。
-- `EventEnvelope` 已定义 `event_id`、`event_type`、`aggregate_type`、`aggregate_id`、`event_version`、`occurred_at`、`message`，且每个字段都有含义说明。
+- `EventEnvelope` 已定义公共字段以及按类型区分的 `message` / `recalled_message` body。
 - `message` 字段复用 `docs/message-ack-protocol.md` 中的 `Message` 结构。
 - `occurred_at` 使用 GB/T 7408 扩展格式。
 - Outbox 到 Kafka 映射关系已覆盖 `id`、`aggregatetype`、`aggregateid`、`type`、`payload`、`created_at`。
