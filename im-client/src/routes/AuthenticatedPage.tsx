@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useChatConnection } from "../features/chat-connection/hooks/useChatConnection";
 import type { ChatBusinessServerFrame, ChatConnectionState } from "../features/chat-connection/types";
@@ -7,6 +7,8 @@ import { AvatarResourceCache } from "../features/chat/avatarResourceCache";
 import { AttachmentResourceCache } from "../features/chat/attachmentResourceCache";
 import { useChatData } from "../features/chat/hooks/useChatData";
 import { useChatMessaging } from "../features/chat/hooks/useChatMessaging";
+import { useMessageRecall } from "../features/chat/hooks/useMessageRecall";
+import { useRecallStatusSync, type RecallTarget } from "../features/chat/hooks/useRecallStatusSync";
 import { saveCurrentProfile } from "../features/chat/profileApi";
 import type { ChatContentBlock, ChatReplyTarget, EditableSelfProfile } from "../features/chat/types";
 import type { ForwardMessageBody } from "../features/chat/messageForwarding";
@@ -14,6 +16,8 @@ import type { AuthSession } from "../features/login/types";
 import { useFriendRequests } from "../features/chat/hooks/useFriendRequests";
 import { imageViewerCoordinator } from "../features/image-viewer/coordinator";
 import { useImageViewerLifecycle } from "./useImageViewerLifecycle";
+
+const EMPTY_RECALL_TARGETS: RecallTarget[] = [];
 
 interface AuthenticatedPageProps {
   apiBaseUrl: string;
@@ -24,6 +28,9 @@ interface AuthenticatedPageProps {
 }
 
 export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggingOut, onLogout }: AuthenticatedPageProps) {
+  const owner = `${apiBaseUrl.replace(/\/+$/, "")}:${session.userId}`;
+  const currentOwnerRef = useRef(owner);
+  currentOwnerRef.current = owner;
   const chatData = useChatData(apiBaseUrl, session);
   const avatarResourceCacheRef = useRef<AvatarResourceCache | null>(null);
   if (!avatarResourceCacheRef.current) {
@@ -36,6 +43,7 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
   useImageViewerLifecycle(apiBaseUrl, session.userId, chatData.data?.conversations, session.accessToken, attachmentResourceCache);
   const serverFrameHandlerRef = useRef<(frame: ChatBusinessServerFrame) => void>(() => undefined);
   const chatConnection = useChatConnection({
+    owner,
     session,
     refreshSession,
     onServerFrame: (frame) => serverFrameHandlerRef.current(frame),
@@ -93,7 +101,21 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
     sendReadAck,
     reloadHistory: chatData.retryHistory,
   });
+  const [draftRecallState, setDraftRecallState] = useState<{ owner: string; targets: RecallTarget[] }>(() => ({ owner, targets: [] }));
+  const draftRecallTargets = draftRecallState.owner === owner ? draftRecallState.targets : EMPTY_RECALL_TARGETS;
+  const updateDraftRecallTargets = useCallback((targets: RecallTarget[]) => {
+    if (currentOwnerRef.current !== owner) return;
+    setDraftRecallState((previous) => previous.owner === owner && JSON.stringify(previous.targets) === JSON.stringify(targets)
+      ? previous : { owner, targets });
+  }, [owner]);
+  const recall = useMessageRecall({ owner,
+    data: chatData.data, canSend: chatConnection.state.status === "authenticated" && !isLoggingOut,
+    sendRecall: chatConnection.sendRecallMessage, mergeRecalls: chatData.mergeRecalls });
+  const recallSync = useRecallStatusSync({ apiBaseUrl, userId: session.userId, accessToken: session.accessToken,
+    connectionId: chatConnection.state.status === "authenticated" ? chatConnection.state.connectionId : null,
+    data: chatData.data, draftTargets: draftRecallTargets, mergeRecalls: chatData.mergeRecalls });
   serverFrameHandlerRef.current = (frame) => {
+    if (recall.handleFrame(frame)) return;
     if (frame.type === "friend_request_updated") {
       void friendRequests.refresh();
       void chatData.refreshFriends();
@@ -167,12 +189,18 @@ export function AuthenticatedPage({ apiBaseUrl, session, refreshSession, isLoggi
       onSendRich={handleSendRich}
       onForwardMessage={handleForwardMessage}
       onRetryMessage={handleRetryMessage}
+      onRecallMessage={recall.recall}
+      pendingRecallIds={recall.pendingIds}
+      recallFeedback={recall.feedback}
+      recallSyncError={recallSync.error}
+      onRetryRecallSync={recallSync.retry}
+      onReplyTargetsChange={updateDraftRecallTargets}
       loadConversationHistory={chatData.loadHistory}
       loadOlderConversationHistory={chatData.loadOlderHistory}
       hasMoreConversationHistory={chatData.hasMoreHistory}
       onDeliveredAck={sendDeliveredAck}
       onReadAck={messaging.markReadThrough}
-      retryConversationHistory={chatData.retryHistory}
+      retryConversationHistory={(conversationId) => { void chatData.retryHistory(conversationId); recallSync.retry(); }}
       loadingConversationId={chatData.loadingConversationId}
       getConversationHistoryError={chatData.historyError}
       friendRequests={friendRequests}

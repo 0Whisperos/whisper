@@ -5,7 +5,7 @@ import type { ImageViewerSession, ViewerImageInput } from "./types";
 
 export function collectViewerImages(conversation: ChatConversation): ViewerImageInput[] {
   return conversation.messages
-    .filter((message) => message.localStatus === "accepted" && message.messageId !== null && message.conversationSeq !== null)
+    .filter((message) => message.localStatus === "accepted" && message.messageId !== null && message.conversationSeq !== null && !message.recalledAt)
     .slice().sort((a, b) => a.conversationSeq! - b.conversationSeq!)
     .flatMap((message) => "blocks" in message.content
       ? message.content.blocks.flatMap((block, index) => block.type === "image"
@@ -24,9 +24,11 @@ class ImageViewerCoordinator {
   private context: AttachmentLoadContext | null = null;
   private cache: AttachmentResourceCache | null = null;
   private revision = 0;
+  private opening: { conversationId: number; imageId: string } | null = null;
 
   async open(context: AttachmentLoadContext, conversation: ChatConversation, imageId: string, cache: AttachmentResourceCache): Promise<void> {
     const generation = ++this.generation;
+    this.opening = { conversationId: conversation.conversationId, imageId };
     this.context = context;
     this.cache = cache;
     const images = collectViewerImages(conversation);
@@ -46,9 +48,11 @@ class ImageViewerCoordinator {
     if (generation !== this.generation) return;
     await this.enqueue(async () => {
       if (generation !== this.generation) return;
+      const latestImages = collectViewerImages(this.latestConversations[conversation.conversationId] ?? conversation);
+      if (!latestImages.some((image) => image.id === imageId)) return;
       const input = {
         apiBaseUrl: context.apiBaseUrl, userId: context.userId, conversationId: context.conversationId,
-        images, selectedImageId: imageId,
+        images: latestImages, selectedImageId: imageId,
       };
       let session: ImageViewerSession;
       try { session = await prepareImageViewerSession(input); }
@@ -66,7 +70,8 @@ class ImageViewerCoordinator {
         return;
       }
       this.session = session;
-      this.signature = JSON.stringify(images);
+      this.opening = null;
+      this.signature = JSON.stringify(latestImages);
       await this.refresh(generation);
     }).catch((error: unknown) => { if (generation === this.generation) throw error; });
   }
@@ -75,15 +80,37 @@ class ImageViewerCoordinator {
     credentials?: Omit<AttachmentLoadContext, "conversationId">, cache?: AttachmentResourceCache): Promise<void> {
     ++this.revision;
     this.latestConversations = conversations;
+    if (this.opening && conversations[this.opening.conversationId]
+      && !collectViewerImages(conversations[this.opening.conversationId]).some((image) => image.id === this.opening!.imageId)) {
+      ++this.generation; this.opening = null;
+    }
     if (credentials && this.context) this.context = { ...credentials, conversationId: this.context.conversationId };
     if (cache) this.cache = cache;
     const generation = this.generation;
+    const revision = this.revision;
+    const session = this.session;
+    const conversation = session && conversations[session.conversationId];
+    if (session && conversation) {
+      const images = collectViewerImages(conversation);
+      const ids = new Set(images.map((image) => image.id));
+      const removed = session.images.some((image) => !ids.has(image.id));
+      if (removed) await this.enqueue(() => this.refresh(generation));
+      const added = images.some((image) => !session.images.some((old) => old.id === image.id));
+      if (added && this.context && this.cache) {
+        await this.cache.loadMany({ ...this.context, conversationId: session.conversationId }, images.map((image) => image.attachmentId));
+        if (generation !== this.generation || revision !== this.revision || this.session?.sessionId !== session.sessionId) return;
+        await this.enqueue(() => this.refresh(generation, removed));
+        return;
+      }
+      if (removed) return;
+    }
     await this.enqueue(() => this.refresh(generation));
   }
 
   async close(): Promise<void> {
     ++this.generation;
     this.session = null;
+    this.opening = null;
     this.signature = "";
     this.latestConversations = {};
     this.context = null;
@@ -91,7 +118,7 @@ class ImageViewerCoordinator {
     await this.enqueue(() => closeImageViewerSession());
   }
 
-  private async refresh(generation: number): Promise<void> {
+  private async refresh(generation: number, force = false): Promise<void> {
     const revision = this.revision;
     const session = this.session;
     if (!session || generation !== this.generation) return;
@@ -99,13 +126,7 @@ class ImageViewerCoordinator {
     if (!conversation) return;
     const images = collectViewerImages(conversation);
     const signature = JSON.stringify(images);
-    if (signature === this.signature) return;
-    const context = this.context;
-    const cache = this.cache;
-    if (context && cache) {
-      await cache.loadMany({ ...context, conversationId: session.conversationId }, images.map((image) => image.attachmentId));
-      if (generation !== this.generation || revision !== this.revision || this.session?.sessionId !== session.sessionId) return;
-    }
+    if (signature === this.signature && !force) return;
     const updated = await updateImageViewerSession(session.sessionId, images);
     if (generation !== this.generation || revision !== this.revision || this.session?.sessionId !== session.sessionId) return;
     this.session = updated;

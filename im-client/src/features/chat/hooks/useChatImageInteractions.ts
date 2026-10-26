@@ -20,7 +20,7 @@ interface ChatInteractionMenu {
 
 export function useChatImageInteractions(conversation: ChatConversation, selfUserId: number,
   context: AttachmentLoadContext, cache: AttachmentResourceCache, onReply?: (target: ChatReplyTarget) => void,
-  onForward?: (message: ChatMessage) => void) {
+  onForward?: (message: ChatMessage) => void, onRecall?: (message: ChatMessage) => void, pendingRecallIds?: Set<string>) {
   const [menu, setMenu] = useState<ChatInteractionMenu | null>(null);
   const [feedback, setFeedback] = useState("");
   const contextKey = JSON.stringify([context.apiBaseUrl, context.accessToken, context.userId, context.conversationId]);
@@ -59,6 +59,7 @@ export function useChatImageInteractions(conversation: ChatConversation, selfUse
   };
   const openMessageMenu = (event: MouseEvent<HTMLElement>, message: ChatMessage) => {
     event.preventDefault(); event.stopPropagation(); setFeedback("");
+    if (message.recalledAt) return;
     const labels = message.messageId !== null && message.localStatus === "accepted"
       ? ["复制", "回复", "转发", ...(message.senderUserId === selfUserId ? ["撤回"] : [])] : ["复制"];
     setMenu({ position: { x: event.clientX, y: event.clientY }, label: "消息菜单", ownerKey: message.localKey, ownerState: messageState(message),
@@ -69,11 +70,13 @@ export function useChatImageInteractions(conversation: ChatConversation, selfUse
           const target = replyTargetFromMessage(message);
           if (target) onReply?.(target);
         } else if (label === "转发") onForward?.(message);
+        else if (onRecall) onRecall(message);
         else report("该功能暂未实现");
-      } })) });
+      }, ...(label === "撤回" && message.messageId && pendingRecallIds?.has(message.messageId) ? { disabled: true } : {}) })) });
   };
   const openImageMenu = (event: MouseEvent<HTMLElement>, message: ChatMessage, attachmentId: string) => {
     event.preventDefault(); event.stopPropagation(); setFeedback("");
+    if (message.recalledAt) return;
     if (message.localStatus !== "accepted" || !message.messageId) {
       const block = "blocks" in message.content && message.content.blocks.find((item) => item.type === "image" && item.attachment_id === attachmentId);
       if (!block) return;
@@ -91,7 +94,7 @@ export function useChatImageInteractions(conversation: ChatConversation, selfUse
   };
   const openImage = (message: ChatMessage, blockIndex: number) => {
     closeMenu(); report("");
-    if (message.messageId === null || message.localStatus !== "accepted") return;
+    if (message.messageId === null || message.localStatus !== "accepted" || message.recalledAt) return;
     void imageViewerCoordinator.open(context, conversation, `${message.messageId}:${blockIndex}`, cache)
       .catch(() => report("图片加载失败"));
   };
@@ -105,5 +108,5 @@ function isMissingCachedImage(error: unknown): boolean {
 }
 
 function messageState(message: ChatMessage): string {
-  return `${message.localStatus}:${message.messageId ?? ""}`;
+  return `${message.localStatus}:${message.messageId ?? ""}:${message.recalledAt ?? ""}`;
 }

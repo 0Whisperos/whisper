@@ -43,6 +43,36 @@ it("sorts formal messages and retains repeated attachment positions", () => {
     .toEqual(["a:1", "a:2", "b:1", "b:2"]);
 });
 
+it("cancels a pending open when its message is recalled without touching image caches", async () => {
+  // 测试目标：验证缓存await期间撤回会阻止旧图片打开，不删除任何缓存。
+  // 构造方法：挂起所选图片loadMany，再同步该消息撤回并释放旧资源。
+  // 输入数据：m:1、recalledAt有效时间、已缓存asset结果。
+  // 预期行为：pending open正常结束且不调用prepare，缓存恢复也不触发。
+  const value = cache(); let release!: (value: unknown) => void;
+  value.loadMany.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+  const pending = imageViewerCoordinator.open(context, conversation(), "m:1", asCache(value));
+  await imageViewerCoordinator.sync({ 9: conversation([{ ...message("m", 1), recalledAt: "2026-10-23T09:00:00Z" }]) });
+  release([{ attachmentId: "same", resource: { attachmentId: "same", src: "asset://retained", source: "asset" } }]);
+  await pending; expect(prepareImageViewerSession).not.toHaveBeenCalled(); expect(value.recoverOnce).not.toHaveBeenCalled();
+});
+
+it("removes recalled images while an earlier new-image preload remains pending", async () => {
+  // 测试目标：验证撤回移除不被别的图片网络预载阻塞，旧预载也不能恢复撤回图。
+  // 构造方法：打开m图片，阻塞新增n的预载，再同步m已撤回且n保留。
+  // 输入数据：m:1/m:2撤回，n:1/n:2仍活动。
+  // 预期行为：预载未完成前update即收到仅n的列表，旧预载结束后不会重新加入m。
+  const value = cache(); await imageViewerCoordinator.open(context, conversation(), "m:1", asCache(value));
+  let release!: (value: unknown) => void;
+  value.loadMany.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+  const previous = imageViewerCoordinator.sync({ 9: conversation([message("m", 1), message("n", 2)]) }, context, asCache(value));
+  await vi.waitFor(() => expect(release).toBeDefined());
+  const current = imageViewerCoordinator.sync({ 9: conversation([{ ...message("m", 1), recalledAt: "2026-10-23T09:00:00Z" }, message("n", 2)]) }, context, asCache(value));
+  await vi.waitFor(() => expect(updateImageViewerSession).toHaveBeenCalled());
+  expect(vi.mocked(updateImageViewerSession).mock.calls[0][1].map((image) => image.id)).toEqual(["n:1", "n:2"]);
+  release([]); await Promise.all([previous, current]);
+  for (const call of vi.mocked(updateImageViewerSession).mock.calls) expect(call[1].every((image) => image.messageId !== "m")).toBe(true);
+});
+
 it("recovers Blob resources and retries stale disk cache once before opening", async () => {
   // 测试目标：验证 Blob 与后端缓存丢失走受限恢复，不空开查看器。
   // 构造方法：先以 Blob 打开，再模拟 prepare 报缓存丢失。

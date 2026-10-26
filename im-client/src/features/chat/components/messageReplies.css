@@ -15,3 +15,4 @@
 .auth-reply-feedback { margin: 0; padding: 6px 14px; font-size: 12px; opacity: .75; }
 .auth-chat-footer { position: relative; min-width: 0; }
 .auth-chat-footer .auth-new-messages-button { bottom: calc(100% + 16px); }
+.auth-message-recalled { color: var(--auth-text-secondary, #8a8f98); font-size: 12px; padding: 8px 12px; }

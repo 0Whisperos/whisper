@@ -7,6 +7,7 @@ import { ChatApiError } from "../features/chat/api";
 import type { ChatConnectionState } from "../features/chat-connection/types";
 import { AvatarResourceCache } from "../features/chat/avatarResourceCache";
 import { chatMockData } from "../features/chat/mockData";
+vi.mock("../features/chat/messageRecallApi", () => ({ loadMessageRecallStatuses: vi.fn(async () => []) }));
 
 const { saveCurrentProfileMock, updateSelfProfileMock, useChatConnectionMock, useChatDataMock, exportAvatarCropMock } = vi.hoisted(() => ({
   saveCurrentProfileMock: vi.fn(),
@@ -74,6 +75,7 @@ describe("AuthenticatedPage", () => {
       loadingConversationId: null,
       historyError: () => null,
       updateData: vi.fn(),
+      mergeRecalls: vi.fn(),
       updateSelfProfile: updateSelfProfileMock,
     });
   });
@@ -181,6 +183,7 @@ describe("AuthenticatedPage", () => {
       loadingConversationId: null,
       historyError: () => null,
       updateData,
+      mergeRecalls: vi.fn(),
     });
     const user = userEvent.setup();
 

@@ -52,6 +52,31 @@ function mockBootstrap(friends: ChatFriendDto[] = [{
 }
 
 describe("useChatData", () => {
+  it("remembers recall before bootstrap, merges stale history and preserves it across token renewal only", async () => {
+    // 测试目标：验证bootstrap前撤回、迟到旧历史、跨token保留及API隔离。
+    // 构造方法：挂起me响应，先记录撤回再完成bootstrap，拉活动旧历史，然后更新token与API。
+    // 输入数据：会话42消息old、撤回时间、旧历史recalledAt=null、新token与另一API。
+    // 预期行为：不凭事件插入行；旧正文仍保留但撤回终态优先；token续期保留，另一API不继承。
+    mockBootstrap(); let release!: (value: unknown) => void;
+    loadCurrentUserMock.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const hook = renderHook(({ token, api }) => useChatData(api, { ...session, accessToken: token }),
+      { initialProps: { token: "a", api: "https://api" } });
+    act(() => hook.result.current.mergeRecalls(42, [{ message_id: "old", recalled_at: "2026-10-23T09:00:00Z" }]));
+    await act(async () => release({ userId: 20001, account: "self", nickname: "我", signature: "", avatarObjectKey: null }));
+    await waitFor(() => expect(hook.result.current.data).not.toBeNull());
+    expect(hook.result.current.data?.conversations[42].messages).toEqual([]);
+    loadConversationMessagesMock.mockResolvedValue({ messages: [{ messageId: "old", conversationId: 42, conversationSeq: 1,
+      senderUserId: 20001, clientMessageId: "c", messageType: "text", content: { text: "原文" }, recalledAt: null, createdAt: "2020-01-01" }],
+      hasMore: false, lastSeq: 1, deliveredSeq: 1, readSeq: 0, peerDeliveredSeq: 0, peerReadSeq: 0 });
+    await act(async () => { await hook.result.current.loadHistory(42); });
+    expect(hook.result.current.data?.conversations[42].messages[0]).toMatchObject({ recalledAt: "2026-10-23T09:00:00Z", content: { text: "原文" } });
+    hook.rerender({ token: "b", api: "https://api" });
+    await waitFor(() => expect(hook.result.current.data).not.toBeNull());
+    expect(hook.result.current.data?.recalledMessages?.[42]?.old).toBe("2026-10-23T09:00:00Z");
+    hook.rerender({ token: "b", api: "https://other" });
+    await waitFor(() => expect(hook.result.current.data).not.toBeNull());
+    expect(hook.result.current.data?.recalledMessages?.[42]?.old).toBeUndefined();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

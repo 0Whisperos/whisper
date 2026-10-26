@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { ChatApiError } from "../api";
-import type { ChatContact, ChatData, ChatContentBlock, ChatReplyTarget, StatusScope } from "../types";
+import type { ChatContact, ChatData, ChatContentBlock, ChatMessage, ChatReplyTarget, StatusScope } from "../types";
+import { recallReply } from "../messageRecall";
+import type { RecallTarget } from "../hooks/useRecallStatusSync";
 import { useChatComposer } from "../hooks/useChatComposer";
 import { useChatLayout } from "../hooks/useChatLayout";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
@@ -26,6 +28,12 @@ import { useMessageForwarding } from "../hooks/useMessageForwarding";
 import type { ForwardMessageBody } from "../messageForwarding";
 
 interface AuthenticatedShellProps {
+  onRecallMessage?: (message: ChatMessage) => void;
+  pendingRecallIds?: Set<string>;
+  recallFeedback?: string;
+  recallSyncError?: string;
+  onRetryRecallSync?: () => void;
+  onReplyTargetsChange?: (targets: RecallTarget[]) => void;
   data: ChatData;
   connectionLabel: string;
   canSendMessages?: boolean;
@@ -53,6 +61,7 @@ interface AuthenticatedShellProps {
 }
 
 export function AuthenticatedShell({
+  onRecallMessage, pendingRecallIds, recallFeedback, recallSyncError, onRetryRecallSync, onReplyTargetsChange,
   data,
   connectionLabel,
   canSendMessages = false,
@@ -85,6 +94,7 @@ export function AuthenticatedShell({
   const composer = useChatComposer({ conversationId: workspace.activeConversationId, apiBaseUrl, accessToken,
     userId: data.self.userId, canSendMessages, onSendText, onSendRich });
   const { drafts } = composer;
+  useEffect(() => { onReplyTargetsChange?.(drafts.replyTargets); }, [drafts.replyTargets, onReplyTargetsChange]);
   const layout = useChatLayout();
   const theme = useThemeMode();
   const fallbackAvatarCacheRef = useRef<AvatarResourceCache | null>(null);
@@ -268,7 +278,12 @@ export function AuthenticatedShell({
             statusMessage={composer.statusMessage || workspace.statusMessages.chat}
             composerBusy={composer.isBusy}
             clipboardContextKey={composer.clipboardContextKey}
-            replyTo={drafts.replyTo}
+            replyTo={recallReply(drafts.replyTo, data.recalledMessages?.[workspace.activeConversationId])}
+            onRecallMessage={onRecallMessage}
+            pendingRecallIds={pendingRecallIds}
+            recallFeedback={recallFeedback}
+            recallSyncError={recallSyncError}
+            onRetryRecallSync={onRetryRecallSync}
             onSelectReply={drafts.setReply}
             onForwardMessage={(message, restoreFocus) => {
               forwardRestoreFocusRef.current = restoreFocus;

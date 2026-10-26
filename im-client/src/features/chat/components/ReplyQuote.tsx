@@ -1,5 +1,5 @@
 import type { ChatConversation, ChatReplyTarget, ChatSelfProfile } from "../types";
-import { replySummary } from "../messageReply";
+import { replyTargetSummary } from "../messageReply";
 import "./messageReplies.css";
 
 export function replyAuthor(target: ChatReplyTarget, conversation: ChatConversation, self: ChatSelfProfile): string {
@@ -9,6 +9,6 @@ export function replyAuthor(target: ChatReplyTarget, conversation: ChatConversat
 
 export function ReplyQuote({ target, authorName, onLocate }: { target: ChatReplyTarget; authorName: string; onLocate: () => void }) {
   return <button type="button" className="auth-reply-quote" aria-label="定位被回复消息" onClick={onLocate}>
-    <span>回复 {authorName}：{replySummary(target.content)}</span>
+    <span>回复 {authorName}：{replyTargetSummary(target)}</span>
   </button>;
 }

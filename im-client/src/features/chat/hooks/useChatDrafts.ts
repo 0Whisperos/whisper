@@ -128,6 +128,8 @@ export function useChatDrafts(activeConversationId: number) {
     draft: activeText.text,
     canSend: draft.trim().length > 0 || blocks.some((block) => block.type === "image"),
     blocks, version, setDraft, setBlocks, setBlocksForConversation, setDraftForConversation, getDraft, insertFiles, createImageBlocks, removeImage, clear,
+    replyTargets: [...repliesRef.current].flatMap(([conversationId, target]) => target && typeof conversationId === "number"
+      ? [{ conversationId, messageId: target.messageId }] : []),
     replyTo: repliesRef.current.get(activeConversationId) ?? null, setReply, snapshot, mergeUploadMetadata, completeSend,
   }), [activeConversationId, activeText.text, blocks, clear, completeSend, createImageBlocks, draft, getDraft, insertFiles, mergeUploadMetadata, removeImage, setBlocks, setBlocksForConversation, setDraft, setDraftForConversation, setReply, snapshot, version]);
 }

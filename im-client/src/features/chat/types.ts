@@ -59,6 +59,7 @@ export type ChatMessageContent = TextMessageContent | { blocks: ChatContentBlock
 
 /** A shallow reference: the original body is provided for display, without nested replies. */
 export interface ChatReplyTarget {
+  recalledAt?: string | null;
   messageId: string;
   senderUserId: number;
   messageType: "text" | "rich";
@@ -66,6 +67,7 @@ export interface ChatReplyTarget {
 }
 
 export interface ChatReplyTargetDto {
+  recalled_at?: string | null;
   message_id: string;
   sender_user_id: number;
   message_type: "text" | "rich";
@@ -73,6 +75,7 @@ export interface ChatReplyTargetDto {
 }
 
 export interface ChatMessage {
+  recalledAt?: string | null;
   /** Stable client-side key. Pending messages keep this value after acknowledgement. */
   localKey: string;
   messageId: string | null;
@@ -83,6 +86,8 @@ export interface ChatMessage {
   messageType: "text" | "rich";
   content: ChatMessageContent;
   replyToMessageId?: string | null;
+  /** Derived state also covers replies whose shallow target DTO is unavailable. */
+  replyToRecalledAt?: string | null;
   replyTo?: ChatReplyTarget | null;
   createdAt: string | null;
   clientSentAt: string;
@@ -131,6 +136,8 @@ export interface ChatContactSection {
 }
 
 export interface ChatData {
+  /** Lightweight terminal states, including messages outside the loaded history. */
+  recalledMessages?: Record<number, Record<string, string>>;
   self: ChatSelfProfile;
   sessions: ChatSessionItem[];
   conversations: Record<number, ChatConversation>;
@@ -181,6 +188,7 @@ export interface FriendRequestPageDto {
 }
 
 export interface ChatMessageDto {
+  recalledAt?: string | null;
   messageId: string;
   conversationId: number;
   conversationSeq: number;

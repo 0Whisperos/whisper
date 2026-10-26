@@ -6,6 +6,7 @@ import type {
   ChatUserProfileDto,
 } from "./types";
 import { isReplyMetadata, parseReplyTarget } from "./messageReply";
+import { isOptionalRecallTimestamp } from "./messageRecall";
 
 export type ChatApiErrorCode =
   | "invalid_token"
@@ -197,6 +198,7 @@ function parseMessagePage(value: unknown): ChatMessagePageDto | null {
       clientMessageId: message.client_message_id,
       messageType: message.message_type,
       content: message.content,
+      ...(message.recalled_at !== undefined ? { recalledAt: message.recalled_at } : {}),
       replyToMessageId: message.reply_to_message_id ?? message.reply_to?.message_id ?? null,
       replyTo: parseReplyTarget(message.reply_to),
       createdAt: message.created_at,
@@ -216,6 +218,7 @@ function parseMessagePage(value: unknown): ChatMessagePageDto | null {
 }
 
 function isMessage(value: unknown): value is {
+  recalled_at?: string | null;
   reply_to_message_id?: string | null;
   reply_to?: ChatReplyTargetDto | null;
   message_id: string;
@@ -237,7 +240,7 @@ function isMessage(value: unknown): value is {
     && "message_type" in value && (value.message_type === "text" || value.message_type === "rich")
     && "content" in value && (value.message_type === "text" ? isTextContent(value.content) : isRichContent(value.content))
     && "created_at" in value && typeof value.created_at === "string"
-    && isReplyMetadata(value);
+    && isReplyMetadata(value) && isOptionalRecallTimestamp(value as Record<string, unknown>);
 }
 
 function isTextContent(value: unknown): value is { text: string } {

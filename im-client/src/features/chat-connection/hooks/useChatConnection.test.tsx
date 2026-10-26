@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useChatConnection } from "./useChatConnection";
 import type { AuthSession } from "../../login/types";
 import type { ChatWebSocket } from "../types";
+import { useLayoutEffect } from "react";
 
 class MockWebSocket implements ChatWebSocket {
   readonly sent: string[] = [];
@@ -42,6 +43,50 @@ const initialSession: AuthSession = {
 };
 
 describe("useChatConnection", () => {
+  it.each([
+    { owner: "https://api:20002", session: { ...initialSession, userId: 20002, accessToken: "another-user" } },
+    { owner: "https://another-api:20001", session: initialSession },
+  ])("revokes old frames during the first layout phase of owner $owner", ({ owner, session }) => {
+    // 测试目标：验证账号或API切换首个commit的layout阶段即拒绝旧连接回调，不等待passive cleanup。
+    // 构造方法：认证旧socket，在rerender的layout effect中投递旧撤回帧，再认证新socket并投递有效事件。
+    // 输入数据：分别换用户及同session换API owner，旧事件old与新事件new。
+    // 预期行为：旧帧不进入新owner业务回调；每种owner切换均重连，新连接事件正常传递。
+    const sockets: MockWebSocket[] = []; const onServerFrame = vi.fn();
+    const webSocketFactory = () => { const socket = new MockWebSocket(); sockets.push(socket); return socket; };
+    const refreshSession = vi.fn();
+    const recallFrame = (event_id: string) => JSON.stringify({ type: "message_recalled", payload: { event_id,
+      message_id: "m", conversation_id: 42, conversation_seq: 1, sender_user_id: 20001, recalled_at: "2026-10-23T09:00:00Z" } });
+    const authenticate = (socket: MockWebSocket, userId: number) => {
+      socket.open(); socket.receive(JSON.stringify({ type: "auth_ok", request_id: "a", payload: { user_id: userId,
+        connection_id: `connection-${sockets.length}`, access_token_expires_at: new Date(Date.now() + 600_000).toISOString() } }));
+    };
+    const hook = renderHook((props: { session: AuthSession; owner: string }) => {
+      const connection = useChatConnection({ ...props, refreshSession, webSocketFactory, onServerFrame });
+      useLayoutEffect(() => { if (props.owner !== "https://api:20001") sockets[0].receive(recallFrame("old")); }, [props.owner]);
+      return connection;
+    }, { initialProps: { session: initialSession, owner: "https://api:20001" } });
+    act(() => authenticate(sockets[0], 20001));
+    hook.rerender({ owner, session });
+    expect(onServerFrame).not.toHaveBeenCalled(); expect(sockets).toHaveLength(2);
+    act(() => { authenticate(sockets[1], session.userId); sockets[1].receive(recallFrame("new")); });
+    expect(onServerFrame).toHaveBeenCalledTimes(1); expect(onServerFrame.mock.calls[0][0].payload.event_id).toBe("new");
+  });
+  it("discards delayed business frames from an obsolete account connection", () => {
+    // 测试目标：验证账号切换后旧连接的迟到撤回事件不污染新账号。
+    // 构造方法：认证第一条socket，切换session创建新连接，再手动投递旧socket消息。
+    // 输入数据：原账号20001与新账号20002、message_recalled事件e。
+    // 预期行为：旧事件不调用最新业务回调，新账号状态不受影响。
+    const sockets: MockWebSocket[] = []; const onServerFrame = vi.fn();
+    const factory = () => { const socket = new MockWebSocket(); sockets.push(socket); return socket; };
+    const hook = renderHook(({ session }) => useChatConnection({ session, refreshSession: vi.fn(), webSocketFactory: factory, onServerFrame }),
+      { initialProps: { session: initialSession } });
+    act(() => { sockets[0].open(); sockets[0].receive(JSON.stringify({ type: "auth_ok", request_id: "a", payload: {
+      user_id: 20001, connection_id: "old", access_token_expires_at: new Date(Date.now() + 600_000).toISOString() } })); });
+    hook.rerender({ session: { ...initialSession, userId: 20002, accessToken: "new" } });
+    act(() => sockets[0].receive(JSON.stringify({ type: "message_recalled", payload: { event_id: "e", message_id: "m",
+      conversation_id: 42, conversation_seq: 1, sender_user_id: 20001, recalled_at: "2026-10-23T09:00:00Z" } })));
+    expect(onServerFrame).not.toHaveBeenCalled();
+  });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllTimers();

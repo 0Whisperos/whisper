@@ -17,7 +17,7 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = 50 * 1024 * 1024;
 
 export function canForwardMessage(message: ChatMessage): boolean {
-  return Boolean(message.messageId && message.localStatus === "accepted" && message.content);
+  return Boolean(message.messageId && message.localStatus === "accepted" && message.content && !message.recalledAt);
 }
 
 /** Download independently of the display cache: every attempt needs fresh source authorization. */

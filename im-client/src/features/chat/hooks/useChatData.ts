@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 
 import { ChatApiError, loadConversationMessages, loadCurrentUser, loadFriends } from "../api";
 import type {
@@ -14,11 +14,33 @@ import type {
 import type { AuthSession } from "../../login/types";
 import { mergeOfficialMessage, toAcceptedTimelineMessage } from "./messageTimeline";
 import { replyTargetToDto } from "../messageReply";
+import { rememberDataRecalls, type RecallStates, type MessageRecallStatus } from "../messageRecall";
 
 const AVATAR_TONES: AvatarTone[] = ["blue", "teal", "gold", "orange", "purple", "rose", "green", "gray"];
 
 export function useChatData(apiBaseUrl: string, session: AuthSession) {
-  const [data, setData] = useState<ChatData | null>(null);
+  const owner = `${apiBaseUrl.replace(/\/+$/, "")}:${session.userId}`;
+  const [snapshot, setDataState] = useState<{ owner: string; data: ChatData | null }>(() => ({ owner, data: null }));
+  // Effects run after commit: hide another owner's snapshot during this render already.
+  const isCurrentOwner = snapshot.owner === owner;
+  const data = isCurrentOwner ? snapshot.data : null;
+  const recalls = useRef<{ owner: string; states: RecallStates }>({ owner, states: {} });
+  if (recalls.current.owner !== owner) recalls.current = { owner, states: {} };
+  const setData = useCallback((action: SetStateAction<ChatData | null>) => {
+    setDataState((previous) => {
+      if (recalls.current.owner !== owner) return previous;
+      const current = previous.owner === owner ? previous.data : null;
+      const next = typeof action === "function" ? action(current) : action;
+      const normalized = next ? rememberDataRecalls(next, recalls.current.states) : next;
+      return previous.owner === owner && normalized === previous.data ? previous : { owner, data: normalized };
+    });
+  }, [owner]);
+  const mergeRecalls = useCallback((conversationId: number, statuses: MessageRecallStatus[]) => {
+    if (recalls.current.owner !== owner) return;
+    const known = recalls.current.states[conversationId] ??= {};
+    for (const status of statuses) if (status.recalled_at) known[status.message_id] ??= status.recalled_at;
+    setData((current) => current ? { ...current } : current);
+  }, [owner, setData]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<ChatApiError | null>(null);
   const [loadingConversationId, setLoadingConversationId] = useState<number | null>(null);
@@ -64,7 +86,7 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
         setIsLoading(false);
       }
     }
-  }, [apiBaseUrl, session.accessToken]);
+  }, [apiBaseUrl, session.accessToken, setData]);
 
   useEffect(() => {
     void loadInitialData();
@@ -280,7 +302,7 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
 
   const updateData = useCallback((updater: (current: ChatData | null) => ChatData | null) => {
     setData(updater);
-  }, []);
+  }, [setData]);
 
   const updateSelfProfile = useCallback((profile: {
     userId: number;
@@ -291,7 +313,7 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
   }) => {
     const nextSelf = toSelfProfile(profile);
     setData((current) => current ? { ...current, self: nextSelf } : current);
-  }, []);
+  }, [setData]);
 
   const refreshFriends = useCallback(async () => {
     try {
@@ -332,14 +354,15 @@ export function useChatData(apiBaseUrl: string, session: AuthSession) {
 
   return {
     data,
-    isLoading,
-    error,
+    isLoading: !isCurrentOwner || isLoading,
+    error: isCurrentOwner ? error : null,
     retry: loadInitialData,
     refreshFriends,
     loadHistory,
     loadOlderHistory,
     retryHistory,
     updateData,
+    mergeRecalls,
     updateSelfProfile,
     loadingConversationId,
     historyError: (conversationId: number) => historyErrors[conversationId] ?? null,
@@ -464,6 +487,7 @@ function mergeConversationMessages(data: ChatData, conversationId: number, incom
       client_message_id: message.clientMessageId,
       message_type: message.messageType,
       content: message.content,
+      recalled_at: message.recalledAt,
       reply_to_message_id: message.replyToMessageId,
       reply_to: replyTargetToDto(message.replyTo),
       created_at: message.createdAt,

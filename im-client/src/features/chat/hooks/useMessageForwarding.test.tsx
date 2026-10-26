@@ -56,6 +56,22 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("independent forwarding task", () => {
+  it("stops recalled sources before obtaining the complete draft but keeps independent drafts sendable", async () => {
+    // 测试目标：验证撤回仅中止完整副本取得之前的转发，不影响已独立保存的副本。
+    // 构造方法：先阻塞源内容准备并撤回；再让另一任务完成准备但首次发送返回null，撤回后重试。
+    // 输入数据：源source、目标2、recalledAt有效时间、完整文字draft。
+    // 预期行为：未完整取得时不发送；完整draft保留并能在源撤回后重试提交。
+    const pending = deferred<ForwardMessageDraft>(); prepareForwardMessage.mockReturnValueOnce(pending.promise);
+    const first = renderForwarding(); first.start();
+    const recalled = data(); recalled.conversations[1].messages[0] = { ...message(), recalledAt: "2026-10-23T09:00:00Z" };
+    first.rerender({ ...first.initialProps, data: recalled });
+    await act(async () => pending.resolve(draft())); expect(first.sendMessage).not.toHaveBeenCalled();
+    expect(first.result.current.error).toBe("原消息已不可用"); first.unmount();
+    const second = renderForwarding(); second.sendMessage.mockReturnValueOnce(null); second.start();
+    await waitFor(() => expect(second.result.current.phase).toBe("failed"));
+    second.rerender({ ...second.initialProps, data: recalled }); act(() => second.result.current.retry());
+    await waitFor(() => expect(second.result.current.submitted).toBe(true)); expect(second.sendMessage).toHaveBeenCalledTimes(2);
+  });
   it("submits once, preserves source data and closes only after acceptance", async () => {
     // 测试目标：验证新普通消息独立发送、同步防双击、正式确认后才报告成功。
     // 构造方法：启动文字转发并重复提交，再向 data 加入相同 client ID 的 accepted 消息。

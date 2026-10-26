@@ -1,4 +1,9 @@
 import type { ChatMessage, ChatMessageContent, ChatReplyTarget, ChatReplyTargetDto } from "./types";
+import { isOptionalRecallTimestamp } from "./messageRecall";
+
+export function replyTargetSummary(target: ChatReplyTarget): string {
+  return target.recalledAt ? "该消息已撤回" : replySummary(target.content);
+}
 
 export function replySummary(content: ChatMessageContent): string {
   const blocks = "text" in content ? [{ type: "text" as const, text: content.text }] : content.blocks;
@@ -10,7 +15,7 @@ export function replySummary(content: ChatMessageContent): string {
 }
 
 export function replyTargetFromMessage(message: ChatMessage): ChatReplyTarget | null {
-  return message.messageId && message.localStatus === "accepted" ? {
+  return message.messageId && message.localStatus === "accepted" && !message.recalledAt ? {
     messageId: message.messageId, senderUserId: message.senderUserId,
     messageType: message.messageType, content: message.content,
   } : null;
@@ -18,12 +23,12 @@ export function replyTargetFromMessage(message: ChatMessage): ChatReplyTarget | 
 
 export function parseReplyTarget(value: ChatReplyTargetDto | null | undefined): ChatReplyTarget | null {
   return value ? { messageId: value.message_id, senderUserId: value.sender_user_id,
-    messageType: value.message_type, content: value.content } : null;
+    messageType: value.message_type, content: value.content, ...(value.recalled_at !== undefined ? { recalledAt: value.recalled_at } : {}) } : null;
 }
 
 export function replyTargetToDto(value: ChatReplyTarget | null | undefined): ChatReplyTargetDto | null {
   return value ? { message_id: value.messageId, sender_user_id: value.senderUserId,
-    message_type: value.messageType, content: value.content } : null;
+    message_type: value.messageType, content: value.content, ...(value.recalledAt !== undefined ? { recalled_at: value.recalledAt } : {}) } : null;
 }
 
 export function isReplyMetadata(value: object): value is {
@@ -37,6 +42,7 @@ export function isReplyMetadata(value: object): value is {
   if (typeof target !== "object" || target === null) return false;
   const reply = target as Record<string, unknown>;
   return typeof reply.message_id === "string" && Boolean(reply.message_id)
+    && isOptionalRecallTimestamp(reply)
     && typeof reply.sender_user_id === "number" && Number.isSafeInteger(reply.sender_user_id) && reply.sender_user_id > 0
     && (reply.message_type === "text" || reply.message_type === "rich")
     && isMessageContent(reply.message_type, reply.content)

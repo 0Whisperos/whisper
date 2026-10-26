@@ -73,6 +73,7 @@ export interface ChatHeartbeatOkFrame {
 }
 
 export interface ChatTextMessage {
+  recalled_at?: string | null;
   message_id: string;
   conversation_id: number;
   conversation_seq: number;
@@ -169,6 +170,9 @@ export interface ChatFriendRequestUpdatedFrame {
 }
 
 export type ChatBusinessServerFrame =
+  | ChatRecallAcceptedFrame
+  | ChatRecallRejectedFrame
+  | ChatMessageRecalledFrame
   | ChatServerAcceptedFrame
   | ChatSendMessageRejectedFrame
   | ChatMessageCreatedFrame
@@ -178,6 +182,24 @@ export type ChatBusinessServerFrame =
   | ChatReadAckRejectedFrame
   | ChatConversationReceiptUpdatedFrame
   | ChatFriendRequestUpdatedFrame;
+
+export interface ChatRecallState {
+  message_id: string;
+  conversation_id: number;
+  conversation_seq: number;
+  sender_user_id: number;
+  recalled_at: string;
+}
+export interface ChatRecallAcceptedFrame {
+  type: "recall_message_accepted"; request_id: string; payload: ChatRecallState;
+}
+export interface ChatRecallRejectedFrame {
+  type: "recall_message_rejected"; request_id: string;
+  payload: { message_id?: string; error_code: string; message: string };
+}
+export interface ChatMessageRecalledFrame {
+  type: "message_recalled"; payload: ChatRecallState & { event_id: string };
+}
 
 export type ChatServerFrame =
   | ChatAuthOkFrame

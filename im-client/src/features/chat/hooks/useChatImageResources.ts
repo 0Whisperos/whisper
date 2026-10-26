@@ -6,7 +6,7 @@ import type { ChatConversation } from "../types";
 export function useChatImageResources(conversation: ChatConversation, apiBaseUrl: string, accessToken: string, userId: number,
   attachmentResourceCache?: AttachmentResourceCache) {
   const attachmentIds = useMemo(() => Array.from(new Set(conversation.messages.flatMap((message) =>
-    message.messageId !== null && message.localStatus === "accepted" && "blocks" in message.content
+    message.messageId !== null && message.localStatus === "accepted" && !message.recalledAt && "blocks" in message.content
       ? message.content.blocks.filter((block) => block.type === "image").map((block) => block.attachment_id)
       : []
   ))).sort(), [conversation.messages]);

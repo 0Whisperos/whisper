@@ -7,6 +7,8 @@ import type { AuthSession } from "../../login/types";
 const TOKEN_REFRESH_LEAD_TIME_MS = 60_000;
 
 interface UseChatConnectionOptions {
+  /** Server/account namespace; changing it revokes old callbacks before effect cleanup. */
+  owner?: string;
   session: AuthSession;
   refreshSession: () => Promise<AuthSession | null>;
   onServerFrame?: (frame: ChatBusinessServerFrame) => void;
@@ -15,6 +17,7 @@ interface UseChatConnectionOptions {
 }
 
 export function useChatConnection({
+  owner,
   session,
   refreshSession,
   onServerFrame,
@@ -24,6 +27,7 @@ export function useChatConnection({
   const [state, setState] = useState<ChatConnectionState>({ status: "idle" });
   const controllerRef = useRef<ChatConnectionController | null>(null);
   const sessionRef = useRef(session);
+  const ownerRef = useRef(owner);
   const refreshSessionRef = useRef(refreshSession);
   const onServerFrameRef = useRef(onServerFrame);
   const reconnectAttemptRef = useRef(0);
@@ -37,12 +41,14 @@ export function useChatConnection({
   }
 
   sessionRef.current = session;
+  ownerRef.current = owner;
   refreshSessionRef.current = refreshSession;
   onServerFrameRef.current = onServerFrame;
 
   useEffect(() => {
     let cancelled = false;
     let refreshPromise: Promise<void> | null = null;
+    const isCurrent = () => !cancelled && sessionRef.current === session && ownerRef.current === owner;
 
     function scheduleRenewal(accessTokenExpiresAt: string) {
       clearRenewalTimer();
@@ -52,6 +58,7 @@ export function useChatConnection({
         : Math.max(0, expiresAt - Date.now() - TOKEN_REFRESH_LEAD_TIME_MS);
       renewalTimerRef.current = setTimeout(() => {
         renewalTimerRef.current = null;
+        if (!isCurrent()) return;
         void refreshAndReconnect("scheduled");
       }, delay);
     }
@@ -63,7 +70,7 @@ export function useChatConnection({
         webSocketFactory,
         requestIdFactory,
         onStateChange: (nextState) => {
-          if (cancelled) {
+          if (!isCurrent()) {
             return;
           }
           setState(nextState);
@@ -74,11 +81,12 @@ export function useChatConnection({
             void refreshAndReconnect("token_expired");
           }
         },
-        onServerFrame: (frame) => onServerFrameRef.current?.(frame),
+        onServerFrame: (frame) => { if (isCurrent()) onServerFrameRef.current?.(frame); },
       });
     }
 
     function refreshAndReconnect(reason: "scheduled" | "token_expired"): Promise<void> {
+      if (!isCurrent()) return Promise.resolve();
       if (refreshPromise) {
         return refreshPromise;
       }
@@ -89,7 +97,7 @@ export function useChatConnection({
       setState({ status: "refreshing", reason });
       refreshPromise = (async () => {
         const refreshed = await refreshSessionRef.current();
-        if (cancelled || attempt !== reconnectAttemptRef.current) {
+        if (!isCurrent() || attempt !== reconnectAttemptRef.current) {
           return;
         }
         if (!refreshed) {
@@ -108,7 +116,7 @@ export function useChatConnection({
       controllerRef.current?.close();
       controllerRef.current = null;
     };
-  }, [session, webSocketFactory, requestIdFactory]);
+  }, [owner, session, webSocketFactory, requestIdFactory]);
 
   const sendDeliveredAck = useCallback((conversationId: number, deliveredSeq: number) => {
     if (!controllerRef.current) {
@@ -124,6 +132,10 @@ export function useChatConnection({
   }, []);
 
   return {
+    sendRecallMessage: (messageId: string, requestId: string) => {
+      if (!controllerRef.current) throw new Error("chat connection is not available");
+      controllerRef.current.sendRecallMessage(messageId, requestId);
+    },
     state,
     close: () => {
       clearRenewalTimer();

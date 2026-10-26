@@ -1,6 +1,7 @@
 import type { ChatData, ChatMessage, ChatMessageDto } from "../types";
 import type { ChatReplyTarget, ChatReplyTargetDto } from "../types";
 import { parseReplyTarget } from "../messageReply";
+import { mergeRecallStatuses } from "../messageRecall";
 
 const MESSAGE_GROUP_GAP_MS = 10 * 60 * 1000;
 
@@ -14,6 +15,7 @@ export interface PendingTextMessageInput {
 }
 
 export interface ServerTextMessage {
+  recalled_at?: string | null;
   message_id: string;
   conversation_id: number;
   conversation_seq: number;
@@ -55,6 +57,10 @@ export function insertPendingTextMessage(data: ChatData, input: PendingTextMessa
 }
 
 export function mergeOfficialMessage(data: ChatData, incoming: ServerTextMessage): ChatData {
+  data = mergeRecallStatuses(data, incoming.conversation_id, [
+    { message_id: incoming.message_id, recalled_at: incoming.recalled_at ?? null },
+    ...(incoming.reply_to ? [{ message_id: incoming.reply_to.message_id, recalled_at: incoming.reply_to.recalled_at ?? null }] : []),
+  ]);
   const conversation = data.conversations[incoming.conversation_id];
   if (!conversation) {
     return data;
@@ -73,6 +79,13 @@ export function mergeOfficialMessage(data: ChatData, incoming: ServerTextMessage
       : data;
   }
   const official = toOfficialMessage(incoming, local);
+  const recalledAt = data.recalledMessages?.[incoming.conversation_id]?.[incoming.message_id];
+  if (recalledAt) official.recalledAt = recalledAt;
+  if (official.replyToMessageId) official.replyToRecalledAt = data.recalledMessages?.[incoming.conversation_id]?.[official.replyToMessageId];
+  if (official.replyTo) {
+    const replyRecalledAt = data.recalledMessages?.[incoming.conversation_id]?.[official.replyTo.messageId];
+    if (replyRecalledAt) official.replyTo = { ...official.replyTo, recalledAt: replyRecalledAt };
+  }
   const messages = local
     ? conversation.messages.map((message) => message === local ? official : message)
     : [...conversation.messages, official];
@@ -218,6 +231,7 @@ function toOfficialMessage(incoming: ServerTextMessage, local?: ChatMessage): Ch
     clientMessageId: incoming.client_message_id,
     messageType: incoming.message_type,
     content: incoming.content,
+    ...(incoming.recalled_at !== undefined ? { recalledAt: incoming.recalled_at } : {}),
     replyToMessageId: incoming.reply_to_message_id ?? incoming.reply_to?.message_id ?? null,
     replyTo: parseReplyTarget(incoming.reply_to),
     createdAt: incoming.created_at,
@@ -242,7 +256,7 @@ function replaceConversationMessages(data: ChatData, conversationId: number, uns
     sessions: data.sessions.map((session) => session.conversationId === conversationId
       ? {
         ...session,
-        preview: messagePreview(lastMessage) ?? "暂无消息",
+        preview: messagePreview(lastMessage, data.self.userId) ?? "暂无消息",
         time: lastMessage ? formatMessageTime(lastMessage.createdAt ?? lastMessage.clientSentAt) : "",
       }
       : session),
@@ -271,8 +285,9 @@ export function insertPendingRichMessage(data: ChatData, input: {
   return replaceConversationMessages(data, input.conversationId, [...conversation.messages, message]);
 }
 
-function messagePreview(message: ChatMessage | undefined): string | undefined {
+function messagePreview(message: ChatMessage | undefined, selfUserId: number): string | undefined {
   if (!message) return undefined;
+  if (message.recalledAt) return message.senderUserId === selfUserId ? "你撤回了一条消息" : "对方撤回了一条消息";
   if ("text" in message.content) return message.content.text;
   const first = message.content.blocks.find((block) => block.type === "text");
   return first?.type === "text" ? first.text : "[图片]";

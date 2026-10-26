@@ -19,6 +19,11 @@ const MESSAGE_LIST_BOTTOM_THRESHOLD = 32;
 const EMPTY_DRAFT_BLOCKS: ChatDraftBlock[] = [{ type: "text", id: "text-0", text: "" }];
 
 interface ChatPanelProps {
+  onRecallMessage?: (message: ChatMessage) => void;
+  pendingRecallIds?: Set<string>;
+  recallFeedback?: string;
+  recallSyncError?: string;
+  onRetryRecallSync?: () => void;
   conversation: ChatConversation;
   self: ChatSelfProfile;
   connectionLabel: string;
@@ -54,6 +59,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({
+  onRecallMessage, pendingRecallIds, recallFeedback, recallSyncError, onRetryRecallSync,
   conversation,
   self,
   connectionLabel,
@@ -91,7 +97,7 @@ export function ChatPanel({
     useChatImageResources(conversation, apiBaseUrl, accessToken, userId, attachmentResourceCache);
   const interactions = useChatImageInteractions(conversation, self.userId, imageContext, resolvedAttachmentCache, (target) => {
     onSelectReply(target); composerRef.current?.focus();
-  }, (message) => { onForwardMessage?.(message, () => composerRef.current?.focus()); });
+  }, (message) => { onForwardMessage?.(message, () => composerRef.current?.focus()); }, onRecallMessage, pendingRecallIds);
   const updateBottomState = useCallback((list: HTMLElement) => {
     const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop <= MESSAGE_LIST_BOTTOM_THRESHOLD;
     isAtBottomRef.current = atBottom;
@@ -299,7 +305,7 @@ export function ChatPanel({
                         onLocateReply={replyNavigation.locateReply} />
                     </div>
                   </div>
-                  {message.receipt ? (
+                  {message.receipt && !message.recalledAt ? (
                     <footer className="auth-message-footer">
                       <span className={`auth-message-receipt ${message.receipt === "已读" ? "is-read" : "is-pending"}`} aria-label={message.receipt}>
                         {message.receipt === "已读" ? <Icon name="check" /> : null}
@@ -324,6 +330,9 @@ export function ChatPanel({
         })}
       </section>
       <div className="auth-chat-footer">
+        {recallFeedback ? <p role="status" className="auth-chat-interaction-error">{recallFeedback}</p> : null}
+        {recallSyncError ? <div role="alert" className="auth-panel-error"><span>{recallSyncError}</span>
+          <button type="button" onClick={onRetryRecallSync}>重试状态校准</button></div> : null}
         {!isAtBottom && unreadCount > 0 ? (
           <button
             type="button"

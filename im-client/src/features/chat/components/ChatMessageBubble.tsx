@@ -25,10 +25,12 @@ interface ChatMessageBubbleProps {
 
 export function ChatMessageBubble({ message, conversation, self, imageContext, imageResources, imageFailures,
   onMessageMenu, onImageMenu, onCloseMenu, onOpenImage, onImageLayout, onRecoverImage, onRetryImage, onLocateReply }: ChatMessageBubbleProps) {
+  if (message.recalledAt) return <p className="auth-message-recalled">{message.senderUserId === self.userId
+    ? "你撤回了一条消息" : `${conversation.participants[message.senderUserId]?.name ?? "对方"}撤回了一条消息`}</p>;
   const quote = message.replyTo ? <ReplyQuote target={message.replyTo}
     authorName={replyAuthor(message.replyTo, conversation, self)} onLocate={() => onLocateReply(message.replyTo!.messageId)} />
     : message.replyToMessageId ? <button type="button" className="auth-reply-quote" aria-label="定位被回复消息"
-      onClick={() => onLocateReply(message.replyToMessageId!)}>原消息暂不可用</button> : null;
+      onClick={() => onLocateReply(message.replyToMessageId!)}>{message.replyToRecalledAt ? "该消息已撤回" : "原消息暂不可用"}</button> : null;
   if ("text" in message.content && !quote) return <p className="auth-message-bubble"
     onContextMenu={(event) => onMessageMenu(event, message)}>{message.content.text}</p>;
   return <div className={`auth-message-bubble${"blocks" in message.content ? " auth-rich-message-bubble" : ""}`}

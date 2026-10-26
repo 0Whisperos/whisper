@@ -37,6 +37,42 @@ function fixture(messages: ChatMessage[] = [official], conversationId = 42) {
 }
 
 describe("chat image and message interactions", () => {
+  it("recalls through the action, hides all original UI and retains caches and a sendable reply draft", async () => {
+    // 测试目标：验证撤回接线、菜单关闭、图片隐藏与缓存保留，已选引用仍可发送。
+    // 构造方法：渲染本人正式图文，点击撤回；用成功状态重绘并保留已选回复草稿。
+    // 输入数据：message-1、原图2张、recalledAt有效时间、答复草稿。
+    // 预期行为：撤回回调收到消息；占位无原文/图片/菜单，缓存不清，引用显示“该消息已撤回”且能发送。
+    const own = { ...official, senderUserId: 1 }; const { props, adapter, cache } = fixture([own]);
+    const onRecallMessage = vi.fn(); const clear = vi.spyOn(cache, "clear");
+    const view = render(<ChatPanel {...props} onRecallMessage={onRecallMessage} />);
+    await screen.findAllByRole("img", { name: "聊天图片" }); fireEvent.contextMenu(screen.getByText("正文"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "撤回" }));
+    expect(onRecallMessage).toHaveBeenCalledExactlyOnceWith(own);
+    fireEvent.contextMenu(screen.getByText("正文"));
+    const recalledAt = "2026-10-23T09:00:00Z";
+    view.rerender(<ChatPanel {...props} onRecallMessage={onRecallMessage} canSend draft="答复"
+      draftBlocks={[{ type: "text", id: "draft", text: "答复" }]}
+      conversation={{ ...props.conversation, messages: [{ ...own, recalledAt }] }}
+      replyTo={{ messageId: own.messageId!, senderUserId: 1, messageType: "rich", content: own.content, recalledAt }} />);
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(screen.getByText("你撤回了一条消息")).toBeInTheDocument();
+    expect(screen.queryByText("正文")).not.toBeInTheDocument(); expect(screen.queryByRole("img", { name: "聊天图片" })).not.toBeInTheDocument();
+    expect(screen.getByText("该消息已撤回")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    expect(props.onSendText).toHaveBeenCalledWith("答复"); expect(clear).not.toHaveBeenCalled(); expect(adapter.invalidate).not.toHaveBeenCalled();
+    expect((await cache.loadMany({ apiBaseUrl: "https://api.test", accessToken: "token", userId: 1, conversationId: 42 }, ["image-1"]))[0].resource).toBeDefined();
+  });
+  it("shows the recalled quote even when only its target ID is available", () => {
+    // 测试目标：验证浅层引用DTO缺失时仍使用已知撤回状态展示准确文案。
+    // 构造方法：渲染只有replyToMessageId和派生撤回状态的活动回复。
+    // 输入数据：原目标old未加载，回复正文“答复”。
+    // 预期行为：显示“该消息已撤回”，点击后提示尚未加载，不自动拉历史或插入占位。
+    const message = { ...official, messageType: "text" as const, content: { text: "答复" }, replyToMessageId: "old", replyToRecalledAt: "2026-10-23T09:00:00Z" };
+    const { props } = fixture([message]); render(<ChatPanel {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "定位被回复消息" }));
+    expect(screen.getByText("该消息已撤回")).toBeInTheDocument(); expect(screen.getByText("原消息尚未加载，请先加载更早记录")).toBeInTheDocument();
+    expect(props.onLoadOlderHistory).not.toHaveBeenCalled();
+  });
   beforeEach(() => { openViewer.mockReset().mockResolvedValue(undefined); copyImage.mockReset().mockResolvedValue(undefined);
     saveImage.mockReset().mockResolvedValue({ saved: true }); copyMessage.mockReset().mockResolvedValue(undefined); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });

@@ -1,4 +1,6 @@
 import { isReplyMetadata } from "../chat/messageReply";
+import { isOptionalRecallTimestamp } from "../chat/messageRecall";
+import { isRecallServerFrame } from "./recallProtocol";
 import type {
   ChatAuthFrame,
   ChatBusinessServerFrame,
@@ -26,6 +28,7 @@ import type {
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
 export interface ChatConnectionController {
+  sendRecallMessage: (messageId: string, requestId: string) => void;
   close: () => void;
   sendTextMessage: (input: ChatSendTextMessageInput) => void;
   sendRichMessage: (input: ChatSendRichMessageInput) => void;
@@ -114,6 +117,10 @@ export function connectChatWebSocket(options: ChatConnectionOptions): ChatConnec
   };
 
   return {
+    sendRecallMessage: (messageId, requestId) => {
+      if (!completedAuth || socket.readyState !== WebSocket.OPEN) throw new Error("chat connection is not authenticated");
+      socket.send(JSON.stringify({ type: "recall_message", request_id: requestId, payload: { message_id: messageId } }));
+    },
     close: () => {
       closedByClient = true;
       stopHeartbeat();
@@ -228,6 +235,7 @@ function parseServerFrame(data: unknown): ChatServerFrame | null {
     || isReadAckRejectedFrame(value)
     || isConversationReceiptUpdatedFrame(value)
     || isFriendRequestUpdatedFrame(value)
+    || isRecallServerFrame(value)
   ) {
     return value;
   }
@@ -235,7 +243,8 @@ function parseServerFrame(data: unknown): ChatServerFrame | null {
 }
 
 function isBusinessServerFrame(frame: ChatServerFrame): frame is ChatBusinessServerFrame {
-  return frame.type === "server_accepted"
+  return frame.type === "recall_message_accepted" || frame.type === "recall_message_rejected" || frame.type === "message_recalled"
+    || frame.type === "server_accepted"
     || frame.type === "send_message_rejected"
     || frame.type === "message_created"
     || frame.type === "delivered_ack_accepted"
@@ -413,7 +422,7 @@ function isTextMessage(value: unknown): value is ChatTextMessage {
     && value.content !== null
     && (value.message_type === "text" ? hasStringProperty(value.content, "text") : isRichContent(value.content))
     && hasStringProperty(value, "created_at")
-    && isReplyMetadata(value);
+    && isReplyMetadata(value) && isOptionalRecallTimestamp(value as Record<string, unknown>);
 }
 
 function isRichContent(value: object): boolean {
