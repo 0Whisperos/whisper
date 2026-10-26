@@ -98,19 +98,9 @@ func ListConversationMessages(userID, conversationID uint64, beforeSeq, fromSeq 
 		return MessagePage{}, ErrInvalidPagination
 	}
 
-	conversation, found, err := findConversationByID(conversationID)
+	conversation, err := authorizeConversation(userID, conversationID)
 	if err != nil {
-		return MessagePage{}, fmt.Errorf("find conversation: %w", err)
-	}
-	if !found || conversation.ConversationType != "direct" {
-		return MessagePage{}, ErrConversationNotFound
-	}
-	member, err := isActiveConversationMember(conversationID, userID)
-	if err != nil {
-		return MessagePage{}, fmt.Errorf("check conversation membership: %w", err)
-	}
-	if !member {
-		return MessagePage{}, ErrNotConversationMember
+		return MessagePage{}, err
 	}
 
 	messages, hasMore, err := listMessages(conversationID, beforeSeq, fromSeq, limit)

@@ -22,4 +22,5 @@ func registerChatRoutes(group *gin.RouterGroup) {
 	chatRoutes.POST("/friend-requests/:id/accept", handler.AcceptFriendRequest)
 	chatRoutes.POST("/friend-requests/:id/reject", handler.RejectFriendRequest)
 	chatRoutes.GET("/conversations/:conversation_id/messages", handler.ConversationMessages)
+	chatRoutes.POST("/conversations/:conversation_id/messages/statuses", handler.ConversationMessageStatuses)
 }

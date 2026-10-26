@@ -164,7 +164,7 @@ func ListMessages(conversationID uint64, beforeSeq, fromSeq *uint64, limit int) 
 	return messages, hasMore, nil
 }
 
-// FindMessagesByIDs resolves reply targets within an already authorized conversation.
+// FindMessagesByIDs resolves messages within an already authorized conversation.
 func FindMessagesByIDs(conversationID uint64, messageIDs []string) ([]entity.Message, error) {
 	if len(messageIDs) == 0 {
 		return nil, nil

@@ -13,7 +13,7 @@ func TestMessageReplyColumnIsNullableWithoutAdditionalIndex(t *testing.T) {
 	// 测试目标：验证回复关系由现有 messages 表的 nullable CHAR(36) 单列表示。
 	// 构造方法：解析正式 Message 的 GORM schema，检查字段及所有索引字段。
 	// 输入数据：migrationModels 中使用的 entity.Message 模型。
-	// 预期行为：reply_to_message_id 可空且无默认值，不添加外键、撤回列或回复索引。
+	// 预期行为：reply_to_message_id 可空且无默认值，不添加外键或回复索引。
 	model, err := schema.Parse(&entity.Message{}, &sync.Map{}, schema.NamingStrategy{})
 	if err != nil {
 		t.Fatal(err)
@@ -29,8 +29,33 @@ func TestMessageReplyColumnIsNullableWithoutAdditionalIndex(t *testing.T) {
 			}
 		}
 	}
-	if model.LookUpField("RecalledAt") != nil || len(model.Relationships.Relations) != 0 {
-		t.Fatal("reply migration must not add recall columns or foreign keys")
+	if len(model.Relationships.Relations) != 0 {
+		t.Fatal("reply migration must not add foreign keys")
+	}
+}
+
+func TestMessageRecallColumnIsNullableWithoutDefaultOrIndex(t *testing.T) {
+	// 测试目标：验证撤回只增加可空 datetime(6) 状态列。
+	// 构造方法：解析正式 Message 的 GORM schema，检查撤回字段及所有索引。
+	// 输入数据：AutoMigrate 使用的 entity.Message 模型。
+	// 预期行为：recalled_at 可空、无默认值、无索引，不增加外键关系。
+	model, err := schema.Parse(&entity.Message{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := model.LookUpField("RecalledAt")
+	if field == nil || field.DBName != "recalled_at" || field.DataType != "datetime(6)" || field.NotNull || field.HasDefaultValue {
+		t.Fatalf("recall column = %#v", field)
+	}
+	for _, index := range model.ParseIndexes() {
+		for _, indexed := range index.Fields {
+			if indexed.Field == field {
+				t.Fatalf("unexpected recall index %s", index.Name)
+			}
+		}
+	}
+	if len(model.Relationships.Relations) != 0 {
+		t.Fatal("recall migration must not add foreign keys")
 	}
 }
 

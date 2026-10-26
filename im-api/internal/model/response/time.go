@@ -7,3 +7,11 @@ func FormatProtocolTime(value time.Time) string {
 }
 
 func formatProtocolTime(value time.Time) string { return FormatProtocolTime(value) }
+
+func FormatNullableProtocolTime(value *time.Time) *string {
+	if value == nil {
+		return nil
+	}
+	formatted := value.Format(time.RFC3339Nano)
+	return &formatted
+}

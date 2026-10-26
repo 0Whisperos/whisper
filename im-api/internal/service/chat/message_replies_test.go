@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/0Whisperos/whisper/im-server/internal/model/entity"
 )
@@ -27,9 +28,10 @@ func setupMessageReplyRepositories(t *testing.T, messages []entity.Message) {
 func TestHistoryBatchesDistinctReplyTargetsOutsideCurrentPage(t *testing.T) {
 	// 测试目标：验证历史页对重复、页外和缺失回复目标只作一次同会话批量查询。
 	// 构造方法：返回三条回复，替换目标 repository 并返回一条页外 rich 目标及一条异常跨会话记录。
-	// 输入数据：会话 42 的引用 ID 为 original、original、missing，目标正文为图文 blocks。
-	// 预期行为：查询去重 ID 且带会话 42，页保留全部引用 ID，只暴露同会话 original 的原正文。
+	// 输入数据：会话 42 的引用 ID 为 original、original、missing，original 于 2026-10-23T10:00:00Z 撤回，原文为图文 blocks。
+	// 预期行为：查询去重 ID 且带会话 42，页保留全部引用 ID，只加载同会话 original 的原正文和当前撤回状态。
 	original, missing := "original", "missing"
+	recalledAt := time.Date(2026, time.October, 23, 10, 0, 0, 0, time.UTC)
 	setupMessageReplyRepositories(t, []entity.Message{{ReplyToMessageID: &original}, {ReplyToMessageID: &original}, {ReplyToMessageID: &missing}})
 	calls := 0
 	findMessagesByIDs = func(conversationID uint64, ids []string) ([]entity.Message, error) {
@@ -38,13 +40,16 @@ func TestHistoryBatchesDistinctReplyTargetsOutsideCurrentPage(t *testing.T) {
 			t.Fatalf("lookup = %d, %v; want 42, [original missing]", conversationID, ids)
 		}
 		return []entity.Message{
-			{MessageID: original, ConversationID: 42, SenderUserID: 2, MessageType: "rich", Content: entity.JSONValue(`{"blocks":[{"type":"text","text":"原文"},{"type":"image","attachment_id":"image"}]}`)},
+			{MessageID: original, ConversationID: 42, SenderUserID: 2, MessageType: "rich", Content: entity.JSONValue(`{"blocks":[{"type":"text","text":"原文"},{"type":"image","attachment_id":"image"}]}`), RecalledAt: &recalledAt},
 			{MessageID: missing, ConversationID: 43, Content: entity.JSONValue(`{"text":"private"}`)},
 		}, nil
 	}
 	page, err := ListConversationMessages(1, 42, nil, nil, 50)
 	if err != nil || calls != 1 || len(page.ReplyTargets) != 1 || page.ReplyTargets[original].MessageType != "rich" || *page.Messages[2].ReplyToMessageID != missing {
 		t.Fatalf("page=%#v, calls=%d, error=%v", page, calls, err)
+	}
+	if target := page.ReplyTargets[original]; target.RecalledAt == nil || !target.RecalledAt.Equal(recalledAt) || string(target.Content) != `{"blocks":[{"type":"text","text":"原文"},{"type":"image","attachment_id":"image"}]}` {
+		t.Fatalf("reply target=%#v", target)
 	}
 }
 

@@ -89,6 +89,7 @@ func ConversationMessages(context *gin.Context) {
 }
 
 var chatErrorMappings = []errorMapping{
+	{Err: chatservice.ErrInvalidMessageStatusRequest, StatusCode: http.StatusBadRequest, ErrorCode: "invalid_message_status_request", Message: "invalid message status request"},
 	{Err: chatservice.ErrUserNotFound, StatusCode: http.StatusNotFound, ErrorCode: "user_not_found", Message: "user not found"},
 	{Err: chatservice.ErrConversationNotFound, StatusCode: http.StatusNotFound, ErrorCode: "conversation_not_found", Message: "conversation not found"},
 	{Err: chatservice.ErrNotConversationMember, StatusCode: http.StatusForbidden, ErrorCode: "not_conversation_member", Message: "not a conversation member"},
@@ -141,6 +142,7 @@ func messageResponse(message entity.Message, replyTargets map[string]entity.Mess
 		message.CreatedAt,
 	)
 	result.ReplyToMessageID = message.ReplyToMessageID
+	result.RecalledAt = response.FormatNullableProtocolTime(message.RecalledAt)
 	if message.ReplyToMessageID != nil {
 		if target, ok := replyTargets[*message.ReplyToMessageID]; ok && target.ConversationID == message.ConversationID {
 			result.ReplyTo = &response.ReplyMessage{
@@ -148,6 +150,7 @@ func messageResponse(message entity.Message, replyTargets map[string]entity.Mess
 				SenderUserID: target.SenderUserID,
 				MessageType:  target.MessageType,
 				Content:      json.RawMessage(target.Content),
+				RecalledAt:   response.FormatNullableProtocolTime(target.RecalledAt),
 			}
 		}
 	}

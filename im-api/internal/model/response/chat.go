@@ -43,6 +43,7 @@ type Message struct {
 	Content          json.RawMessage `json:"content"`
 	ReplyToMessageID *string         `json:"reply_to_message_id"`
 	ReplyTo          *ReplyMessage   `json:"reply_to"`
+	RecalledAt       *string         `json:"recalled_at"`
 	CreatedAt        string          `json:"created_at"`
 }
 
@@ -51,6 +52,7 @@ type ReplyMessage struct {
 	SenderUserID uint64          `json:"sender_user_id"`
 	MessageType  string          `json:"message_type"`
 	Content      json.RawMessage `json:"content"`
+	RecalledAt   *string         `json:"recalled_at"`
 }
 
 type MessagePage struct {

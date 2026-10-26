@@ -3,8 +3,9 @@ package chat
 import "errors"
 
 var (
-	ErrUserNotFound          = errors.New("user not found")
-	ErrConversationNotFound  = errors.New("conversation not found")
-	ErrNotConversationMember = errors.New("user is not a conversation member")
-	ErrInvalidPagination     = errors.New("invalid pagination")
+	ErrUserNotFound                = errors.New("user not found")
+	ErrConversationNotFound        = errors.New("conversation not found")
+	ErrNotConversationMember       = errors.New("user is not a conversation member")
+	ErrInvalidPagination           = errors.New("invalid pagination")
+	ErrInvalidMessageStatusRequest = errors.New("invalid message status request")
 )
