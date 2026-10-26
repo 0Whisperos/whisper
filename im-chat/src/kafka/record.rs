@@ -1,7 +1,7 @@
 use rdkafka::Message;
 use rdkafka::message::Headers;
 
-use crate::message::MessageCreatedEvent;
+use crate::message::MessageEvent;
 
 /// Owns bytes so a record never keeps a consumer alive during a blocking close.
 pub(super) struct EventRecord {
@@ -54,22 +54,22 @@ impl EventRecord {
         }
     }
 
-    pub(super) fn parse(&self) -> Result<MessageCreatedEvent, RecordError> {
+    pub(super) fn parse(&self) -> Result<MessageEvent, RecordError> {
         let payload = self.payload.as_deref().ok_or(RecordError::MissingPayload)?;
         // Do not log serde's input-dependent error text: malformed fields may contain chat text.
-        let event: MessageCreatedEvent =
+        let event: MessageEvent =
             serde_json::from_slice(payload).map_err(|error| RecordError::InvalidJson {
                 line: error.line(),
                 column: error.column(),
             })?;
         event.validate()?;
-        if self.key.as_deref() != Some(event.aggregate_id.as_bytes()) {
+        if self.key.as_deref() != Some(event.aggregate_id().as_bytes()) {
             return Err(RecordError::InvalidKey);
         }
         for (name, expected) in [
-            ("event_id", event.event_id.as_str()),
-            ("event_type", event.event_type.as_str()),
-            ("aggregate_type", event.aggregate_type.as_str()),
+            ("event_id", event.event_id()),
+            ("event_type", event.event_type()),
+            ("aggregate_type", event.aggregate_type()),
         ] {
             let mut values = self.headers.iter().filter(|(key, _)| key == name);
             if values.next().and_then(|(_, value)| value.as_deref()) != Some(expected.as_bytes())

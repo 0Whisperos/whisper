@@ -7,7 +7,10 @@ use std::env;
 #[path = "store_reply_tests.rs"]
 mod reply_tests;
 
-fn valid_payload(client_message_id: String, conversation_id: u64) -> SendMessagePayload {
+pub(in crate::message) fn valid_payload(
+    client_message_id: String,
+    conversation_id: u64,
+) -> SendMessagePayload {
     SendMessagePayload {
         client_message_id,
         conversation_id,
@@ -426,7 +429,7 @@ async fn concurrent_same_key_requests_both_miss_then_recover_the_committed_messa
     fixture.cleanup(&pool).await;
 }
 
-async fn test_pool() -> MySqlPool {
+pub(in crate::message) async fn test_pool() -> MySqlPool {
     let database_url = env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     MySqlPoolOptions::new()
         .max_connections(5)
@@ -435,7 +438,7 @@ async fn test_pool() -> MySqlPool {
         .expect("TEST_DATABASE_URL should connect")
 }
 
-async fn ensure_schema(pool: &MySqlPool) {
+pub(in crate::message) async fn ensure_schema(pool: &MySqlPool) {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS conversations (
             id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
@@ -474,6 +477,7 @@ async fn ensure_schema(pool: &MySqlPool) {
             content JSON NOT NULL,
             content_hash CHAR(64) NOT NULL,
             reply_to_message_id CHAR(36) NULL DEFAULT NULL,
+            recalled_at DATETIME(6) NULL DEFAULT NULL,
             created_at DATETIME(6) NOT NULL,
             UNIQUE KEY uk_messages_message_id (message_id),
             UNIQUE KEY uk_messages_conversation_seq (conversation_id, conversation_seq),
@@ -520,7 +524,7 @@ async fn ensure_schema(pool: &MySqlPool) {
     .expect("create attachments table");
 }
 
-async fn insert_uploaded_attachment(
+pub(in crate::message) async fn insert_uploaded_attachment(
     pool: &MySqlPool,
     attachment_id: &str,
     uploader_user_id: u64,
@@ -547,12 +551,16 @@ async fn insert_uploaded_attachment(
     .expect("insert uploaded attachment");
 }
 
-struct TestFixture {
-    conversation_id: u64,
+pub(in crate::message) struct TestFixture {
+    pub(in crate::message) conversation_id: u64,
 }
 
 impl TestFixture {
-    async fn create(pool: &MySqlPool, user_id: u64, active_member: bool) -> Self {
+    pub(in crate::message) async fn create(
+        pool: &MySqlPool,
+        user_id: u64,
+        active_member: bool,
+    ) -> Self {
         let now = to_database_datetime(OffsetDateTime::now_utc());
         let result = sqlx::query(
             "INSERT INTO conversations (conversation_type, last_seq, created_at, updated_at) \
@@ -582,7 +590,7 @@ impl TestFixture {
         Self { conversation_id }
     }
 
-    async fn cleanup(self, pool: &MySqlPool) {
+    pub(in crate::message) async fn cleanup(self, pool: &MySqlPool) {
         let conversation_id = self.conversation_id;
         sqlx::query("DELETE FROM attachments WHERE conversation_id = ?")
             .bind(conversation_id)

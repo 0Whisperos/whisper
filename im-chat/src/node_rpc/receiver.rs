@@ -1,11 +1,12 @@
 //! Receives authenticated node requests and enqueues existing WebSocket frames.
 
 use super::protocol::{
-    EnqueueStatus, ForwardMessageRequest, NotifyCursorRequest, NotifyFriendRequest,
+    EnqueueStatus, ForwardMessageRequest, ForwardRecallRequest, NotifyCursorRequest,
+    NotifyFriendRequest,
 };
 use crate::connection::ConnectionRegistry;
 use crate::frame::PushFrame;
-use crate::message::AcceptedMessage;
+use crate::message::{AcceptedMessage, RecalledMessage};
 use axum::extract::ws::Message;
 use serde::Serialize;
 
@@ -13,6 +14,32 @@ use serde::Serialize;
 struct MessageCreatedPayload<'a> {
     event_id: &'a str,
     message: &'a AcceptedMessage,
+}
+
+#[derive(Serialize)]
+struct MessageRecalledPayload<'a> {
+    event_id: &'a str,
+    #[serde(flatten)]
+    message: &'a RecalledMessage,
+}
+
+pub(crate) fn forward_recall(
+    connections: &ConnectionRegistry,
+    request: ForwardRecallRequest,
+) -> Result<EnqueueStatus, serde_json::Error> {
+    let frame = PushFrame::new(
+        "message_recalled",
+        MessageRecalledPayload {
+            event_id: &request.event_id,
+            message: &request.recalled_message,
+        },
+    );
+    enqueue(
+        connections,
+        request.target_user_id,
+        &request.connection_id,
+        &frame,
+    )
 }
 
 #[derive(Serialize)]

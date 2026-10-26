@@ -1,10 +1,11 @@
 //! Shared request and response shapes for the internal HTTP endpoints.
 
 use crate::connection::SendToConnectionResult;
-use crate::message::AcceptedMessage;
+use crate::message::{AcceptedMessage, RecalledMessage};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const MESSAGE_PATH: &str = "/internal/v1/messages/forward";
+pub(crate) const RECALL_PATH: &str = "/internal/v1/messages/recall";
 pub(crate) const CURSOR_PATH: &str = "/internal/v1/cursors/notify";
 pub(crate) const FRIEND_REQUEST_PATH: &str = "/internal/v1/friend-requests/notify";
 
@@ -15,6 +16,15 @@ pub(crate) struct ForwardMessageRequest {
     pub(crate) connection_id: String,
     pub(crate) event_id: String,
     pub(crate) message: AcceptedMessage,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ForwardRecallRequest {
+    pub(crate) target_user_id: u64,
+    pub(crate) connection_id: String,
+    pub(crate) event_id: String,
+    pub(crate) recalled_message: RecalledMessage,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

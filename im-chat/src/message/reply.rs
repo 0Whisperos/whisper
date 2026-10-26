@@ -10,6 +10,8 @@ pub(crate) struct ReplyTarget {
     pub(crate) sender_user_id: u64,
     pub(crate) message_type: String,
     pub(crate) content: serde_json::Value,
+    #[serde(default)]
+    pub(crate) recalled_at: Option<String>,
 }
 
 pub(super) fn valid_reply_id(message_id: Option<&str>) -> bool {
@@ -22,7 +24,7 @@ pub(super) async fn find_reply_target<'e>(
     message_id: &str,
 ) -> Result<Option<ReplyTarget>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT message_id, sender_user_id, message_type, CAST(content AS CHAR) AS content \
+        "SELECT message_id, sender_user_id, message_type, CAST(content AS CHAR) AS content, recalled_at \
          FROM messages WHERE conversation_id = ? AND message_id = ?",
     )
     .bind(conversation_id)
@@ -37,6 +39,13 @@ pub(super) async fn find_reply_target<'e>(
             message_type: row.try_get("message_type")?,
             content: serde_json::from_str(&content)
                 .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
+            recalled_at: row
+                .try_get::<Option<time::PrimitiveDateTime>, _>("recalled_at")?
+                .map(|value| {
+                    crate::db_time::from_database_datetime(value)
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .expect("database time formats")
+                }),
         })
     })
     .transpose()

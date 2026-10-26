@@ -1,7 +1,8 @@
 //! Outbound authenticated HTTP calls to another im-chat node.
 
 use super::{
-    CURSOR_PATH, EnqueueStatus, ForwardMessageRequest, MESSAGE_PATH, NotifyCursorRequest, sign,
+    CURSOR_PATH, EnqueueStatus, ForwardMessageRequest, ForwardRecallRequest, MESSAGE_PATH,
+    NotifyCursorRequest, RECALL_PATH, sign,
 };
 use crate::presence::PresenceManager;
 use bytes::Bytes;
@@ -67,6 +68,14 @@ impl NodeRpcClient {
         request: NotifyCursorRequest,
     ) -> Result<EnqueueStatus, NodeRpcClientError> {
         self.send(target_node_id, CURSOR_PATH, &request).await
+    }
+
+    pub(crate) async fn forward_recall(
+        &self,
+        target_node_id: &str,
+        request: ForwardRecallRequest,
+    ) -> Result<EnqueueStatus, NodeRpcClientError> {
+        self.send(target_node_id, RECALL_PATH, &request).await
     }
 
     async fn send<T: Serialize>(

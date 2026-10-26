@@ -43,6 +43,7 @@ fn idempotency_includes_reply_target() {
         reply_to_message_id: Some(target),
         reply_to: None,
         created_at: "2026-10-16T00:00:00Z".to_owned(),
+        recalled_at: None,
     };
     let existing = || StoredMessage {
         message: accepted.clone(),

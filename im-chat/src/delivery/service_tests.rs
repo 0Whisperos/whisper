@@ -12,11 +12,51 @@ struct Lookup {
     fail_route: Option<u64>,
 }
 
+struct MissingMessageLookup {
+    has_members: bool,
+}
+
+impl DeliveryLookup for MissingMessageLookup {
+    async fn message(&self, _: &AcceptedMessage) -> Result<AcceptedMessage, DeliveryError> {
+        Err(DeliveryError::Message(sqlx::Error::RowNotFound))
+    }
+
+    async fn members(&self, _: u64) -> Result<Vec<u64>, DeliveryError> {
+        Ok(if self.has_members {
+            vec![20001]
+        } else {
+            vec![]
+        })
+    }
+
+    async fn route(&self, _: u64) -> Result<RouteState, DeliveryError> {
+        panic!("a missing authoritative message must never reach route lookup")
+    }
+}
+
+#[tokio::test]
+async fn obsolete_creation_with_no_members_completes_without_reading_missing_message() {
+    // 测试目标：验证无接收者的旧创建事件正常完成，有成员时仍要求读取真实消息状态。
+    // 构造方法：让消息读取固定返回 RowNotFound，分别提供空成员集合和一个有效成员。
+    // 输入数据：相同旧 message_created、已删除会话或仍有成员的会话。
+    // 预期行为：无成员时跳过消息读取并成功；有成员时返回查询错误，不把未知状态当未撤回投递。
+    let service = service();
+    let mut receiver = connect(&service, 20001, "sender");
+    for has_members in [false, true] {
+        let result = service
+            .deliver_with_lookup(&event(), &MissingMessageLookup { has_members })
+            .await;
+        assert_eq!(result.is_err(), has_members);
+        assert!(receiver.try_recv().is_err());
+    }
+}
+
 impl DeliveryLookup for Lookup {
     async fn message(&self, message: &AcceptedMessage) -> Result<AcceptedMessage, DeliveryError> {
         let mut message = message.clone();
         if let Some(id) = &message.reply_to_message_id {
             message.reply_to = Some(crate::message::ReplyTarget {
+                recalled_at: None,
                 message_id: id.clone(),
                 sender_user_id: 20002,
                 message_type: "text".to_owned(),
@@ -140,6 +180,65 @@ fn connect(
         sender,
     });
     receiver
+}
+
+#[tokio::test]
+async fn recall_uses_shared_fanout_and_keeps_best_effort_queue_failures() {
+    // 测试目标：验证撤回推送复用成员路由并保持队列失败的 best effort 边界。
+    // 构造方法：注册本人和接收者连接，并列入不存在连接和离线路由；先模拟预查询失败再正常投递。
+    // 输入数据：原序号 42、会话 10001、四个成员和固定撤回时间。
+    // 预期行为：预查询失败不向任何成员入队；成功时双方各收到相同撤回帧，缺失/离线连接不阻止完成。
+    let service = service();
+    let mut sender = connect(&service, 20001, "sender");
+    let mut recipient = connect(&service, 20002, "recipient");
+    let recalled_message = RecalledMessage {
+        message_id: event().message.message_id,
+        conversation_id: 10001,
+        conversation_seq: 42,
+        sender_user_id: 20001,
+        recalled_at: "2026-10-23T12:00:00+08:00".into(),
+    };
+    let event = MessageRecalledEvent {
+        event_id: uuid::Uuid::new_v4().to_string(),
+        event_type: "message_recalled".into(),
+        aggregate_type: "chat_message".into(),
+        aggregate_id: "10001".into(),
+        event_version: 1,
+        occurred_at: recalled_message.recalled_at.clone(),
+        recalled_message,
+    };
+    let mut lookup = Lookup {
+        members: vec![20001, 20002, 20003, 20004],
+        routes: HashMap::from([
+            (20001, local_route("sender")),
+            (20002, local_route("recipient")),
+            (20003, local_route("missing")),
+        ]),
+        fail_members: false,
+        fail_route: Some(20002),
+    };
+    assert!(
+        service
+            .deliver_recall_with_lookup(&event, &lookup)
+            .await
+            .is_err()
+    );
+    assert!(sender.try_recv().is_err() && recipient.try_recv().is_err());
+    lookup.fail_route = None;
+    service
+        .deliver_recall_with_lookup(&event, &lookup)
+        .await
+        .unwrap();
+    for receiver in [&mut sender, &mut recipient] {
+        let Message::Text(text) = receiver.try_recv().unwrap() else {
+            panic!("text required")
+        };
+        let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(frame["type"], "message_recalled");
+        assert_eq!(frame["payload"]["conversation_seq"], 42);
+        assert_eq!(frame["payload"]["event_id"], event.event_id);
+        assert!(frame.get("request_id").is_none());
+    }
 }
 
 #[tokio::test]

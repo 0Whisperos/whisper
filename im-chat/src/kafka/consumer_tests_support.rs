@@ -44,6 +44,30 @@ pub(super) fn record() -> EventRecord {
     }
 }
 
+pub(super) fn recall_record() -> EventRecord {
+    let mut record = record();
+    let event_id = "550e8400-e29b-41d4-a716-446655440004";
+    record.payload = Some(
+        serde_json::to_vec(&serde_json::json!({
+            "event_id":event_id, "event_type":"message_recalled", "aggregate_type":"chat_message",
+            "aggregate_id":"10001", "event_version":1, "occurred_at":"2026-10-23T12:00:00+08:00",
+            "recalled_message":{"message_id":"550e8400-e29b-41d4-a716-446655440002",
+                "conversation_id":10001,"conversation_seq":42,"sender_user_id":20001,
+                "recalled_at":"2026-10-23T12:00:00+08:00"}
+        }))
+        .unwrap(),
+    );
+    for (name, value) in &mut record.headers {
+        if name == "event_type" {
+            *value = Some(b"message_recalled".to_vec());
+        }
+        if name == "event_id" {
+            *value = Some(event_id.as_bytes().to_vec());
+        }
+    }
+    record
+}
+
 #[derive(Default)]
 pub(super) struct State {
     pub(super) calls: Vec<&'static str>,
@@ -85,7 +109,7 @@ impl RecordEffects for Effects {
         Ok(self.0.lock().unwrap().completed.contains(event_id))
     }
 
-    async fn deliver(&self, _: &MessageCreatedEvent) -> Result<(), OperationError> {
+    async fn deliver(&self, _: &crate::message::MessageEvent) -> Result<(), OperationError> {
         self.operation("deliver").await
     }
 

@@ -142,6 +142,7 @@ pub(super) async fn accept_message(
         reply_to_message_id: payload.reply_to_message_id.clone(),
         reply_to,
         created_at: format_protocol_time(to_storage_offset(now)),
+        recalled_at: None,
     };
 
     let insert_result =
@@ -229,7 +230,7 @@ fn existing_message_query() -> sqlx::query::Query<'static, sqlx::MySql, sqlx::my
     sqlx::query(
         "SELECT message_id, conversation_id, conversation_seq, sender_user_id, \
          client_message_id, message_type, CAST(content AS CHAR) AS content, \
-         content_hash, reply_to_message_id, created_at \
+          content_hash, reply_to_message_id, created_at, recalled_at \
          FROM messages WHERE sender_user_id = ? AND client_message_id = ?",
     )
 }
@@ -366,6 +367,9 @@ fn stored_message_from_row(row: MySqlRow) -> Result<StoredMessage, AcceptMessage
         reply_to_message_id: row.try_get("reply_to_message_id")?,
         reply_to: None,
         created_at: format_protocol_time(from_database_datetime(created_at)),
+        recalled_at: row
+            .try_get::<Option<PrimitiveDateTime>, _>("recalled_at")?
+            .map(|value| format_protocol_time(from_database_datetime(value))),
     };
     Ok(StoredMessage {
         message,
@@ -465,4 +469,4 @@ fn is_idempotency_duplicate_key_details(code: Option<&str>, message: &str) -> bo
 
 #[cfg(test)]
 #[path = "store_tests.rs"]
-mod tests;
+pub(in crate::message) mod tests;

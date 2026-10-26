@@ -5,7 +5,7 @@ use tokio::sync::watch;
 use tokio::time::{Instant, sleep, timeout_at};
 
 use crate::delivery::DeliveryError;
-use crate::message::MessageCreatedEvent;
+use crate::message::MessageEvent;
 
 use super::KafkaServiceError;
 use super::record::{EventRecord, RecordPosition};
@@ -26,7 +26,7 @@ pub(super) trait RecordEffects: Sync {
     -> impl Future<Output = Result<bool, OperationError>> + Send;
     fn deliver(
         &self,
-        event: &MessageCreatedEvent,
+        event: &MessageEvent,
     ) -> impl Future<Output = Result<(), OperationError>> + Send;
     fn complete(&self, event_id: &str) -> impl Future<Output = Result<(), OperationError>> + Send;
     fn commit(
@@ -66,13 +66,13 @@ pub(super) async fn handle_record(
     };
     let mut retry = RetryContext {
         position: &record.position,
-        event_id: &event.event_id,
+        event_id: event.event_id(),
         deadline: Instant::now() + PROCESSING_BUDGET,
         delay: Duration::from_secs(1),
     };
     let completed = match retry
         .attempt("check_completed", shutdown, || {
-            effects.contains(&event.event_id)
+            effects.contains(event.event_id())
         })
         .await
     {
@@ -89,7 +89,7 @@ pub(super) async fn handle_record(
         // Once delivery decisions finish, retries stay in this stage. They never resend locally.
         if let Err(outcome) = retry
             .attempt("mark_completed", shutdown, || {
-                effects.complete(&event.event_id)
+                effects.complete(event.event_id())
             })
             .await
         {

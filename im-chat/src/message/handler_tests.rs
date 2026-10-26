@@ -61,6 +61,7 @@ async fn send_accept_message_uses_protocol_frame_shape() {
         reply_to_message_id: None,
         reply_to: None,
         created_at: "2026-08-16T12:00:01Z".to_string(),
+        recalled_at: None,
     };
 
     assert!(send_accept_message(message, "req-1".to_string(), sender, 20001, "connection-1").await);

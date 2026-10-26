@@ -112,7 +112,13 @@ impl TestServer {
             config["node"]["node_id"] = format!("cdc-test-{run_id}-{index}").into();
             config["node"]["public_ws_url"] = ws_url.clone().into();
             config["node"]["rpc_addr"] = format!("127.0.0.1:{port}").into();
-            config["node"]["rpc_secret"] = format!("cdc-test-rpc-secret-{run_id}").into();
+            config["node"]
+                .as_table_mut()
+                .context("CDC node config must be a table")?
+                .insert(
+                    "rpc_secret".into(),
+                    format!("cdc-test-rpc-secret-{run_id}").into(),
+                );
             config["kafka"]["group_id"] = format!("cdc-test-{run_id}").into();
             let config_text = toml::to_string(&config)?;
             if settings.is_none() {

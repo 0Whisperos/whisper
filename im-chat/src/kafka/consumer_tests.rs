@@ -11,6 +11,55 @@ use super::*;
 use support::{Effects, Source, record};
 
 #[tokio::test]
+async fn recall_event_uses_existing_completion_and_commit_pipeline() {
+    // 测试目标：验证撤回与创建共享确认顺序，并在重放时跳过投递。
+    // 构造方法：用合法撤回 record 连续调用实际处理函数两次，共享完成集合。
+    // 输入数据：message_recalled v1、会话 10001、分区 2、offset 41。
+    // 预期行为：首次 check/deliver/mark/commit，重放仅 check/commit。
+    let record = support::recall_record();
+    assert!(matches!(
+        record.parse().unwrap(),
+        crate::message::MessageEvent::Recalled(_)
+    ));
+    let (_sender, mut shutdown) = watch::channel(false);
+    let effects = Effects::default();
+    for _ in 0..2 {
+        assert_eq!(
+            handle_record(&record, &effects, &mut shutdown).await,
+            HandleOutcome::Complete
+        );
+    }
+    assert_eq!(
+        effects.0.lock().unwrap().calls,
+        ["check", "deliver", "mark", "commit", "check", "commit"]
+    );
+}
+
+#[test]
+fn recall_record_rejects_wrong_metadata_and_invalid_body() {
+    // 测试目标：验证撤回事件类型独立校验，不能绕过 key/header/version/正文检查。
+    // 构造方法：复制合法撤回 record 并分别破坏 metadata 和 recalled_message。
+    // 输入数据：错误 key、错误 header、event_version=2、sequence=0、无效时间和无效 UUID。
+    // 预期行为：每项均被 parse 拒绝，原始 record 可成功解析。
+    for field in ["key", "header", "version", "sequence", "time", "id"] {
+        let mut record = support::recall_record();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(record.payload.as_ref().unwrap()).unwrap();
+        match field {
+            "key" => record.key = Some(b"other".to_vec()),
+            "header" => record.headers[1].1 = Some(b"message_created".to_vec()),
+            "version" => value["event_version"] = 2.into(),
+            "sequence" => value["recalled_message"]["conversation_seq"] = 0.into(),
+            "time" => value["recalled_message"]["recalled_at"] = "bad".into(),
+            "id" => value["recalled_message"]["message_id"] = "bad".into(),
+            _ => unreachable!(),
+        }
+        record.payload = Some(serde_json::to_vec(&value).unwrap());
+        assert!(record.parse().is_err(), "{field}");
+    }
+}
+
+#[tokio::test]
 async fn new_event_delivers_marks_then_commits_only_its_partition() {
     // 测试目标：验证未处理事件严格按投递、标记、提交的顺序完成。
     // 构造方法：使用合法record和记录副作用顺序的内存依赖执行真实处理函数。
@@ -41,7 +90,7 @@ async fn completed_event_skips_delivery_without_refreshing_its_ttl() {
         .lock()
         .unwrap()
         .completed
-        .insert(record.parse().unwrap().event_id);
+        .insert(record.parse().unwrap().event_id().to_owned());
     assert_eq!(
         handle_record(&record, &effects, &mut shutdown).await,
         HandleOutcome::Complete

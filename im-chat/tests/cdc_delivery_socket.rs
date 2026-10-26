@@ -158,6 +158,23 @@ impl Client {
         Ok(())
     }
 
+    pub(super) fn send_request(
+        &mut self,
+        kind: &str,
+        request_id: &str,
+        payload: Value,
+    ) -> Result<()> {
+        self.outgoing
+            .send(Message::Text(
+                serde_json::json!({
+                    "type":kind,"request_id":request_id,"payload":payload,
+                })
+                .to_string()
+                .into(),
+            ))
+            .context("test socket writer closed")
+    }
+
     pub(super) async fn receive(&mut self) -> Result<Value> {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {

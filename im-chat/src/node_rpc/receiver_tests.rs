@@ -16,6 +16,7 @@ fn message() -> AcceptedMessage {
         reply_to_message_id: None,
         reply_to: None,
         created_at: "2026-09-30T00:00:00Z".into(),
+        recalled_at: None,
     }
 }
 
@@ -29,6 +30,46 @@ fn connection(registry: &ConnectionRegistry, capacity: usize) -> mpsc::Receiver<
         sender,
     });
     receiver
+}
+
+#[test]
+fn forwards_recall_only_to_exact_connection_with_requestless_payload() {
+    // 测试目标：验证跨节点撤回帧定位正确并保留原序号和撤回时间。
+    // 构造方法：注册用户 20 的 connection-1，再依次提交旧连接和当前连接请求。
+    // 输入数据：event-1、message-1、会话 7、原序号 3 和固定撤回时间。
+    // 预期行为：旧连接不入队；当前连接收到不含 request_id 的 message_recalled。
+    let registry = ConnectionRegistry::new();
+    let mut receiver = connection(&registry, 1);
+    let mut request = ForwardRecallRequest {
+        target_user_id: 20,
+        connection_id: "old".into(),
+        event_id: "event-1".into(),
+        recalled_message: RecalledMessage {
+            message_id: "message-1".into(),
+            conversation_id: 7,
+            conversation_seq: 3,
+            sender_user_id: 10,
+            recalled_at: "2026-10-23T12:00:00+08:00".into(),
+        },
+    };
+    assert_eq!(
+        forward_recall(&registry, request.clone()).unwrap(),
+        EnqueueStatus::ConnectionIdMismatch
+    );
+    assert!(receiver.try_recv().is_err());
+    request.connection_id = "connection-1".into();
+    assert_eq!(
+        forward_recall(&registry, request).unwrap(),
+        EnqueueStatus::Queued
+    );
+    let Message::Text(text) = receiver.try_recv().unwrap() else {
+        panic!("text required")
+    };
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["type"], "message_recalled");
+    assert!(value.get("request_id").is_none());
+    assert_eq!(value["payload"]["conversation_seq"], 3);
+    assert_eq!(value["payload"]["recalled_at"], "2026-10-23T12:00:00+08:00");
 }
 
 #[test]
@@ -47,6 +88,7 @@ fn forwards_existing_message_frame_to_exact_connection() {
     };
     request.message.reply_to_message_id = Some("original-id".to_owned());
     request.message.reply_to = Some(crate::message::ReplyTarget {
+        recalled_at: None,
         message_id: "original-id".to_owned(),
         sender_user_id: 20,
         message_type: "rich".to_owned(),

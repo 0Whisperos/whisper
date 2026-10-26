@@ -7,6 +7,7 @@ use tokio::time::Instant;
 
 use super::super::*;
 use super::support::record;
+use crate::message::MessageCreatedEvent;
 
 const TOPIC: &str = "whisper.chat.message-events.v1";
 
@@ -231,14 +232,16 @@ fn ensure_after_commit(record: &EventRecord, floor: Option<(i32, i64)>) -> Resul
 }
 
 fn unique_event() -> MessageCreatedEvent {
-    let mut event = record().parse().unwrap();
+    let crate::message::MessageEvent::Created(mut event) = record().parse().unwrap() else {
+        panic!("expected created fixture")
+    };
     event.event_id = uuid::Uuid::new_v4().to_string();
     event.message.message_id = uuid::Uuid::new_v4().to_string();
     event.message.client_message_id = uuid::Uuid::new_v4().to_string();
     // A random conversation prevents synthetic broker events from targeting an existing test chat.
     event.message.conversation_id = (uuid::Uuid::new_v4().as_u128() as u64 % (1 << 50)) + 1;
     event.aggregate_id = event.message.conversation_id.to_string();
-    event
+    *event
 }
 
 async fn publish(

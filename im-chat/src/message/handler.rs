@@ -46,6 +46,8 @@ pub(crate) struct AcceptedMessage {
     #[serde(default)]
     pub(crate) reply_to: Option<super::ReplyTarget>,
     pub(crate) created_at: String,
+    #[serde(default)]
+    pub(crate) recalled_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -199,7 +201,15 @@ async fn accept_message(
 ) -> Result<AcceptedMessage, SendMessageReject> {
     let client_message_id = payload.client_message_id.clone();
     match store::accept_message(pool, sender_user_id, payload).await {
-        Ok(message) => Ok(message),
+        Ok(mut message) => {
+            super::refresh_message(pool, &mut message)
+                .await
+                .map_err(|error| {
+                    store::AcceptMessageError::InternalSql { source: error }
+                        .into_reject(Some(client_message_id))
+                })?;
+            Ok(message)
+        }
         Err(error) => {
             tracing::debug!(
                 %error,

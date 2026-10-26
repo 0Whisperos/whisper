@@ -60,6 +60,7 @@ fn event() -> MessageCreatedEvent {
             reply_to_message_id: None,
             reply_to: None,
             created_at: "2026-09-20T12:00:00+08:00".to_owned(),
+            recalled_at: None,
         },
         "2026-09-20T12:00:00+08:00".to_owned(),
     )

@@ -68,7 +68,7 @@ impl Observer {
             let record = timeout_at(deadline, self.consumer.recv())
                 .await
                 .context("CDC did not publish the committed outbox event")??;
-            let payload: Value =
+            let mut payload: Value =
                 serde_json::from_slice(record.payload().context("CDC record has no payload")?)?;
             if let Some(forbidden) = forbidden_id {
                 ensure!(
@@ -79,9 +79,13 @@ impl Observer {
             if payload["event_id"] != expected["event_id"] {
                 continue;
             }
+            let mut expected_payload = expected.clone();
+            normalize_optional_reply(&mut payload);
+            normalize_optional_reply(&mut expected_payload);
             ensure!(
-                &payload == expected,
-                "Kafka value differs from the actual outbox payload"
+                payload == expected_payload,
+                "Kafka value differs from the actual outbox payload; differing fields: {:?}",
+                differing_paths(&payload, &expected_payload, "")
             );
             let key = expected["aggregate_id"]
                 .as_str()
@@ -179,4 +183,59 @@ fn client_config(config: &Kafka) -> ClientConfig {
         .set("sasl.username", &config.username)
         .set("sasl.password", &config.password);
     client
+}
+
+fn differing_paths(actual: &Value, expected: &Value, path: &str) -> Vec<String> {
+    if actual == expected {
+        return Vec::new();
+    }
+    if let (Some(actual), Some(expected)) = (actual.as_object(), expected.as_object()) {
+        let keys: std::collections::BTreeSet<_> = actual.keys().chain(expected.keys()).collect();
+        return keys
+            .into_iter()
+            .flat_map(|key| {
+                let next = format!("{path}/{key}");
+                match (actual.get(key), expected.get(key)) {
+                    (Some(actual), Some(expected)) => differing_paths(actual, expected, &next),
+                    (None, Some(_)) => vec![format!("{next} (missing from Kafka)")],
+                    (Some(_), None) => vec![format!("{next} (missing from outbox)")],
+                    _ => Vec::new(),
+                }
+            })
+            .collect();
+    }
+    vec![path.to_owned()]
+}
+
+fn normalize_optional_reply(event: &mut Value) {
+    // EventRouter JSON expansion defaults to omitting nulls. The existing wire contract
+    // treats an omitted nullable reply ID exactly like null, while nonnull IDs stay strict.
+    // Source: https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html
+    // Configuration: table.json.payload.null.behavior defaults to ignore.
+    if event["event_type"] == "message_created"
+        && let Some(message) = event.get_mut("message").and_then(Value::as_object_mut)
+    {
+        message.entry("reply_to_message_id").or_insert(Value::Null);
+    }
+}
+
+#[test]
+fn nullable_reply_normalization_only_equates_omitted_and_null_creation_reference() {
+    // 测试目标：验证 CDC 比较仅容忍 nullable 引用字段缺失与 null 的既有兼容。
+    // 构造方法：分别归一缺字段、显式 null、有效引用 ID 的创建事件及撤回事件。
+    // 输入数据：reply_to_message_id 缺失/null/target-id，以及无 message 的 message_recalled。
+    // 预期行为：只有缺失与 null 等价；非空引用差异仍保留，撤回事件不新增 message。
+    let mut omitted = serde_json::json!({"event_type":"message_created","message":{}});
+    let mut null =
+        serde_json::json!({"event_type":"message_created","message":{"reply_to_message_id":null}});
+    let mut nonnull = serde_json::json!({"event_type":"message_created","message":{"reply_to_message_id":"target-id"}});
+    for event in [&mut omitted, &mut null, &mut nonnull] {
+        normalize_optional_reply(event);
+    }
+    assert_eq!(omitted, null);
+    assert_ne!(omitted, nonnull);
+    let mut recall = serde_json::json!({"event_type":"message_recalled","recalled_message":{}});
+    let original = recall.clone();
+    normalize_optional_reply(&mut recall);
+    assert_eq!(recall, original);
 }

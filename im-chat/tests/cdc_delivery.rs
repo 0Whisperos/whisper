@@ -8,6 +8,8 @@ mod environment;
 mod fixture;
 #[path = "cdc_delivery_kafka.rs"]
 mod kafka;
+#[path = "cdc_delivery_recall.rs"]
+mod recall;
 #[path = "cdc_delivery_socket.rs"]
 mod socket;
 

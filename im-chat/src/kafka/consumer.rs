@@ -8,7 +8,7 @@ use rdkafka::{Offset, TopicPartitionList};
 use tokio::sync::watch;
 
 use crate::delivery::DeliveryService;
-use crate::message::MessageCreatedEvent;
+use crate::message::MessageEvent;
 
 use super::dedup::CompletedEvents;
 use super::processing::{
@@ -121,7 +121,7 @@ impl RecordEffects for ConsumerEffects<'_> {
         Ok(self.completed.contains(event_id).await?)
     }
 
-    async fn deliver(&self, event: &MessageCreatedEvent) -> Result<(), OperationError> {
+    async fn deliver(&self, event: &MessageEvent) -> Result<(), OperationError> {
         Ok(self.delivery.deliver(event).await?)
     }
 

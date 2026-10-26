@@ -293,6 +293,10 @@ async fn handle_client_frame(
         message::SEND_MESSAGE => {
             message::handle_frame(raw_frame, mysql_pool, write_tx, user_id, connection_id).await
         }
+        message::RECALL_MESSAGE => {
+            message::handle_recall_frame(raw_frame, mysql_pool, write_tx, user_id, connection_id)
+                .await
+        }
         ack::DELIVERED_ACK | ack::READ_ACK => {
             ack::handle_frame(
                 raw_frame,

@@ -154,7 +154,7 @@ fn malformed_json_diagnostics_preserve_identity_without_echoing_chat_content() {
     // 输入数据：event_version="private-message-body"和损坏的JSON字节。
     // 预期行为：错误文本不包含敏感字符串，两种情况下都能取得event_id用于定位。
     let mut record = record();
-    let expected_id = record.parse().unwrap().event_id;
+    let expected_id = record.parse().unwrap().event_id().to_owned();
     let mut payload: serde_json::Value =
         serde_json::from_slice(record.payload.as_ref().unwrap()).unwrap();
     payload["event_version"] = serde_json::json!("private-message-body");
