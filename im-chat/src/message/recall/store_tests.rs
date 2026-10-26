@@ -1,7 +1,7 @@
 use super::*;
-use crate::message::store::{
-    accept_message,
-    tests::{TestFixture, ensure_schema, insert_uploaded_attachment, test_pool, valid_payload},
+use crate::message::send::test_support::{
+    TestFixture, accept_message, ensure_schema, insert_uploaded_attachment, test_pool,
+    valid_payload,
 };
 use sqlx::mysql::MySqlPoolOptions;
 
@@ -34,7 +34,7 @@ async fn permissions_and_concurrent_recall_preserve_message_and_sequence() {
         .bind(fixture.conversation_id).execute(&pool).await.unwrap();
     let payload = valid_payload(uuid::Uuid::new_v4().to_string(), fixture.conversation_id);
     let client_id = payload.client_message_id.clone();
-    let original = accept_message(&pool, 20001, payload).await.unwrap();
+    let original = accept_message(&pool, 20001, payload).await;
     assert!(matches!(
         recall_message(&pool, 20003, &original.message_id).await,
         Err(RecallError::MessageNotFound)
@@ -74,8 +74,7 @@ async fn permissions_and_concurrent_recall_preserve_message_and_sequence() {
         20001,
         valid_payload(client_id, fixture.conversation_id),
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(retry.message_id, original.message_id);
     assert_eq!(retry.content, original.content);
     assert_eq!(retry.conversation_seq, original.conversation_seq);
@@ -113,8 +112,7 @@ async fn recalled_target_remains_replyable_and_creation_refreshes_current_state(
         20001,
         valid_payload(uuid::Uuid::new_v4().to_string(), fixture.conversation_id),
     )
-    .await
-    .unwrap();
+    .await;
     let recalled = recall_message(&pool, 20001, &original.message_id)
         .await
         .unwrap();
@@ -122,7 +120,7 @@ async fn recalled_target_remains_replyable_and_creation_refreshes_current_state(
     for _ in 0..2 {
         let mut payload = valid_payload(client_id.clone(), fixture.conversation_id);
         payload.reply_to_message_id = Some(original.message_id.clone());
-        let reply = accept_message(&pool, 20001, payload).await.unwrap();
+        let reply = accept_message(&pool, 20001, payload).await;
         let target = reply.reply_to.unwrap();
         assert_eq!(target.content, original.content);
         assert_eq!(
@@ -157,8 +155,7 @@ async fn outbox_failure_rolls_back_recall_update() {
         20001,
         valid_payload(uuid::Uuid::new_v4().to_string(), fixture.conversation_id),
     )
-    .await
-    .unwrap();
+    .await;
     let trigger = format!("recall_failure_{}", uuid::Uuid::new_v4().simple());
     let statement = format!(
         "CREATE TRIGGER {trigger} BEFORE INSERT ON outbox_events FOR EACH ROW BEGIN IF NEW.type = 'message_recalled' AND NEW.aggregateid = '{}' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'test outbox unavailable'; END IF; END",
@@ -215,15 +212,14 @@ async fn recall_preserves_rich_content_reply_attachments_and_member_cursors() {
         20001,
         valid_payload(uuid::Uuid::new_v4().to_string(), fixture.conversation_id),
     )
-    .await
-    .unwrap();
+    .await;
     let attachment_id = uuid::Uuid::new_v4().to_string();
     insert_uploaded_attachment(&pool, &attachment_id, 20001, fixture.conversation_id, 100).await;
     let mut payload = valid_payload(uuid::Uuid::new_v4().to_string(), fixture.conversation_id);
     payload.message_type = "rich".into();
     payload.content = serde_json::json!({"blocks":[{"type":"image","attachment_id":attachment_id},{"type":"text","text":"caption"}]});
     payload.reply_to_message_id = Some(original.message_id.clone());
-    let message = accept_message(&pool, 20001, payload).await.unwrap();
+    let message = accept_message(&pool, 20001, payload).await;
     sqlx::query("UPDATE messages SET created_at='2000-01-01 00:00:00' WHERE message_id=?")
         .bind(&message.message_id)
         .execute(&pool)

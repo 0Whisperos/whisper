@@ -1,5 +1,6 @@
-use super::super::event::{CHAT_MESSAGE, EVENT_VERSION, MESSAGE_CREATED};
+use super::super::event::MESSAGE_CREATED;
 use super::*;
+use crate::message::event::{CHAT_MESSAGE, EVENT_VERSION};
 use serde_json::json;
 use sqlx::mysql::MySqlPoolOptions;
 use std::env;
