@@ -27,6 +27,9 @@
   var send = document.querySelector("[aria-label='发送消息']");
   var search = document.querySelector("[aria-label='搜索会话']");
   var media = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : { matches: false, addEventListener: function () {}, removeEventListener: function () {} };
+  var momentsRoot = document.querySelector("[data-moments-root]");
+  var moments = momentsRoot && typeof window.createWhisperMoments === "function"
+    ? window.createWhisperMoments({ root: momentsRoot, self: data.self, contacts: data.contacts }) : null;
 
   function add(node, event, handler) {
     node.addEventListener(event, handler);
@@ -433,6 +436,15 @@
     shell.dataset.mobilePanel = state.mobilePanel;
     var contacts = document.querySelector(".contacts-panel");
     if (contacts) contacts.hidden = state.view !== "contacts";
+    if (state.view !== "moments" && moments) moments.setActive(false);
+    if (momentsRoot) momentsRoot.hidden = state.view !== "moments";
+    if (state.view === "moments" && moments) moments.setActive(true);
+    var chatPanel = document.querySelector(".chat-panel");
+    var sessionsPanel = document.querySelector(".session-panel");
+    if (chatPanel) chatPanel.hidden = state.view !== "messages";
+    if (sessionsPanel) sessionsPanel.hidden = state.view !== "messages";
+    var sidebarResizer = document.querySelector(".sidebar-resizer");
+    if (sidebarResizer) sidebarResizer.hidden = state.view === "moments";
     document.querySelectorAll("[data-view-target]").forEach(function (button) {
       var active = button.getAttribute("data-view-target") === state.view;
       button.classList.toggle("is-active", active);
@@ -446,7 +458,7 @@
     if (title) title.textContent = conversation.name;
     if (presence) presence.textContent = conversation.status;
     if (avatar) { avatar.textContent = conversation.avatar; avatar.className = "person-avatar chat-avatar " + conversation.tone; }
-    renderMessages(conversation, scrollMessagesToLatest);
+    if (state.view !== "moments") renderMessages(conversation, scrollMessagesToLatest);
     renderContacts();
     restoreConversationDraft();
     var mainTitle = document.querySelector("[data-main-title]");
@@ -459,7 +471,7 @@
   setDetail(false);
   setupLayoutResizers();
   var messageList = document.querySelector("[data-message-list]");
-  if (messageList) add(messageList, "scroll", function () { messageScrollTop = messageList.scrollTop; });
+  if (messageList) add(messageList, "scroll", function () { if (state.view !== "moments") messageScrollTop = messageList.scrollTop; });
   if (input && send) {
     add(input, "input", function () { drafts[state.conversation] = input.value; updateSendState(); });
     add(send, "click", function () { showStatus("发送仅作界面预览", "chat"); });
@@ -495,7 +507,14 @@
       render(true);
       return;
     }
-    if (target.matches("[data-view-target]")) { state.view = target.dataset.viewTarget; state.mobilePanel = state.view === "contacts" ? "contacts" : "sessions"; closeMenu(false); render(); return; }
+    if (target.matches("[data-view-target]")) {
+      state.view = target.dataset.viewTarget;
+      state.mobilePanel = state.view === "moments" ? "moments" : state.view === "contacts" ? "contacts" : "sessions";
+      closeMenu(false);
+      setDetail(false);
+      render();
+      return;
+    }
     if (target.matches("[data-detail-trigger]")) { setDetail(!state.detailOpen, target, true); return; }
     if (target.matches("[aria-label='返回会话']")) { state.mobilePanel = "sessions"; render(); return; }
     if (target.matches("[aria-label='返回联系人']")) { state.mobilePanel = "contacts"; render(); return; }
@@ -534,5 +553,8 @@
 
   var logout = document.querySelector("[data-logout]");
   if (logout) add(logout, "click", function (event) { if (window.confirm("确定要退出当前账号吗？")) root.dataset.logoutState = "confirmed"; else event.preventDefault(); });
-  window.__whisperAuthenticatedPrototype = { destroy: function () { cleanups.splice(0).forEach(function (cleanup) { cleanup(); }); } };
+  window.__whisperAuthenticatedPrototype = { destroy: function () {
+    if (moments) moments.destroy();
+    cleanups.splice(0).forEach(function (cleanup) { cleanup(); });
+  } };
 })();

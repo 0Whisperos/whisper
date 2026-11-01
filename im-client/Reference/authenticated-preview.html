@@ -6,13 +6,25 @@
     <meta name="color-scheme" content="light dark" />
     <title>Whisper</title>
     <link rel="stylesheet" href="authenticated-preview.css" />
+    <link rel="stylesheet" href="authenticated-preview-moments.css" />
     <script src="authenticated-preview-data.js" defer></script>
+    <script src="authenticated-preview-moments-data.js" defer></script>
+    <script src="authenticated-preview-moments-ui.js" defer></script>
+    <script src="authenticated-preview-moments-composer.js" defer></script>
+    <script src="authenticated-preview-moments-render.js" defer></script>
+    <script src="authenticated-preview-moments-comment-state.js" defer></script>
+    <script src="authenticated-preview-moments-comment-editor.js" defer></script>
+    <script src="authenticated-preview-moments-comment-threads.js" defer></script>
+    <script src="authenticated-preview-moments-comments.js" defer></script>
+    <script src="authenticated-preview-moments-reader.js" defer></script>
+    <script src="authenticated-preview-moments.js" defer></script>
     <script src="authenticated-preview.js" defer></script>
   </head>
   <body>
     <svg data-icon-sprite aria-hidden="true" class="icon-sprite">
       <symbol id="icon-message" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3V5z" /></symbol>
       <symbol id="icon-contact" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3" /><path d="M5 20c1-4 3-6 7-6s6 2 7 6" /></symbol>
+      <symbol id="icon-moments" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z" /><path d="m8.5 12 2.3 2.3 4.7-4.6" /></symbol>
       <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.4-6.4-2.1 2.1M7.7 16.3l-2.1 2.1m0-12.8 2.1 2.1m8.6 8.6 2.1 2.1" /></symbol>
       <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5" /><path d="m15 15 5 5" /></symbol>
       <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
@@ -33,6 +45,7 @@
         <nav class="rail-nav" aria-label="功能">
           <button class="icon-button is-active" type="button" aria-label="消息" title="消息" data-view-target="messages"><svg><use href="#icon-message" /></svg><span class="rail-label">消息</span></button>
           <button class="icon-button" type="button" aria-label="好友" title="好友" data-view-target="contacts"><svg><use href="#icon-contact" /></svg><span class="rail-label">通讯录</span></button>
+          <button class="icon-button" type="button" aria-label="朋友圈" title="朋友圈" data-view-target="moments"><svg aria-hidden="true"><use href="#icon-moments" /></svg><span class="rail-label">朋友圈</span></button>
         </nav>
         <div class="rail-bottom"><button class="icon-button" type="button" aria-label="设置" title="设置" data-tool="设置"><svg><use href="#icon-settings" /></svg><span class="rail-label">设置</span></button></div>
       </aside>
@@ -88,9 +101,16 @@
         <div class="contacts-layout"><section class="contact-list" data-contact-list></section><aside class="contact-detail" data-contact-detail></aside></div>
       </main>
 
+      <section class="moments-panel" data-moments-root aria-label="朋友圈" hidden></section>
+
       <div id="conversation-detail-panel" class="detail-panel" data-detail-panel role="dialog" aria-modal="false" aria-label="会话详情" hidden><strong>会话详情</strong><button type="button" data-tool="搜索聊天记录">搜索聊天记录</button><button type="button" data-tool="置顶聊天">置顶聊天</button><button type="button" data-tool="消息免打扰">消息免打扰</button></div>
       <div class="account-menu" id="account-menu" data-theme-menu role="dialog" aria-modal="false" aria-label="账号与设置" hidden><div class="account-summary"><span class="person-avatar blue">林</span><span><strong>林澈</strong><small>lin@whisper.local</small></span></div><fieldset class="theme-options" data-theme-options role="radiogroup"><legend>外观</legend><button type="button" role="radio" aria-checked="true" data-theme-option="system">跟随系统<svg aria-hidden="true"><use href="#icon-check" /></svg></button><button type="button" role="radio" aria-checked="false" data-theme-option="light">浅色<svg aria-hidden="true"><use href="#icon-check" /></svg></button><button type="button" role="radio" aria-checked="false" data-theme-option="dark">深色<svg aria-hidden="true"><use href="#icon-check" /></svg></button></fieldset><a class="logout-button" href="login-preview.html" data-logout>退出登录</a></div>
-      <nav class="bottom-nav" aria-label="移动导航"><button type="button" aria-label="消息" title="消息" data-view-target="messages"><svg><use href="#icon-message" /></svg><small>消息</small></button><button type="button" aria-label="好友" title="好友" data-view-target="contacts"><svg><use href="#icon-contact" /></svg><small>通讯录</small></button><button type="button" aria-label="账号与设置" title="账号与设置" aria-haspopup="dialog" aria-expanded="false" aria-controls="account-menu"><svg><use href="#icon-settings" /></svg><small>账号</small></button></nav>
+      <nav class="bottom-nav" aria-label="移动导航">
+        <button type="button" aria-label="消息" title="消息" data-view-target="messages"><svg><use href="#icon-message" /></svg><small>消息</small></button>
+        <button type="button" aria-label="好友" title="好友" data-view-target="contacts"><svg><use href="#icon-contact" /></svg><small>通讯录</small></button>
+        <button type="button" aria-label="朋友圈" title="朋友圈" data-view-target="moments"><svg aria-hidden="true"><use href="#icon-moments" /></svg><small>朋友圈</small></button>
+        <button type="button" aria-label="账号与设置" title="账号与设置" aria-haspopup="dialog" aria-expanded="false" aria-controls="account-menu"><svg><use href="#icon-settings" /></svg><small>账号</small></button>
+      </nav>
       <p class="prototype-error" data-prototype-error hidden>预览数据未加载，无法显示会话。</p>
     </div>
   </body>

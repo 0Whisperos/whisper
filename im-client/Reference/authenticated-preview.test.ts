@@ -89,6 +89,9 @@ function loadPrototype(options: LoadPrototypeOptions = {}) {
   }
 
   window.eval(readFileSync(dataPath, "utf8"));
+  for (const tag of document.querySelectorAll<HTMLScriptElement>("script[src^='authenticated-preview-moments']")) {
+    window.eval(readFileSync(resolve(referenceDir, tag.getAttribute("src")!), "utf8"));
+  }
   if (options.prepareData) {
     const source = window.__whisperAuthenticatedPrototypeData as PrototypeData;
     const prepared = {
