@@ -1,3 +1,4 @@
+pub(crate) mod app_lifecycle;
 pub(crate) mod attachments;
 pub(crate) mod auth;
 pub(crate) mod clipboard;

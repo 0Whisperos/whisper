@@ -85,15 +85,23 @@ refresh_token
   -> refresh_token 无效或过期：客户端清理本地凭证并回到登录页
 ```
 
-主动退出登录和关闭客户端需要区分：
+主动退出登录、隐藏主窗口和完全退出客户端需要区分：
 
 ```text
-关闭 session_only 客户端
-  客户端在关闭前 best-effort 调用 im-api /v1/auth/logout。
+未登录 / 已退出登录，点击主窗口 ×
+  不显示托盘图标，完全退出客户端。
+
+登录后点击主窗口 ×，隐藏到系统托盘
+  保留当前会话，不注销、不撤销 refresh_token，客户端继续运行。
+  左键单击托盘图标，或右键选择“打开 Whisper”，可恢复主窗口。
+  已打开的图片查看器继续显示，可单独关闭。
+
+右键托盘选择“退出”，完全退出 session_only 客户端
+  客户端在退出前 best-effort 调用 im-api /v1/auth/logout。
   im-api 删除 Redis 中的 refresh_token hash，并在索引值匹配时删除 refresh_token_by_user:{user_id}。
   WebSocket 断开后，im-chat 清理连接状态和 Redis presence。
 
-关闭已保存 token 的客户端 / 断网 / 崩溃
+完全退出已保存 token 的客户端 / 断网 / 崩溃
   只代表 WebSocket 离线。
   im-chat 通过连接断开或客户端 heartbeat 超时清理本机连接状态和 Redis presence。
   不删除已保存 refresh_token，下次仍可通过已保存账号登录。
@@ -103,6 +111,7 @@ refresh_token
   im-api 删除 Redis 中的 refresh_token hash，并在索引值匹配时删除 refresh_token_by_user:{user_id}。
   客户端删除本地 access_token / refresh_token。
   WebSocket 断开后，im-chat 清理连接状态。
+  返回登录页并移除托盘图标；如果主窗口此前已隐藏，则恢复主窗口。
 ```
 
 `im-chat` 启动后需要注册到 Redis service registry，供 `im-api` 为客户端选择连接地址：

@@ -15,7 +15,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(platform::webview::context_menu_policy())
         .plugin(image_viewer::lifecycle_plugin())
+        .setup(|app| {
+            platform::tray::setup(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            commands::app_lifecycle::complete_app_exit,
+            commands::app_lifecycle::set_app_authenticated,
             commands::auth::list_saved_users,
             commands::auth::load_saved_refresh_token,
             commands::auth::save_refresh_token,
@@ -36,7 +42,10 @@ pub fn run() {
         ])
         .manage(attachment_cache::AttachmentCache::new())
         .manage(image_viewer::ViewerStore::default())
+        .manage(platform::tray::ExitState::default())
+        .manage(platform::tray::ResidencyState::default())
         .on_window_event(|window, event| {
+            platform::tray::handle_window_event(window, event);
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 if window.label() == "main" {
                     window.state::<image_viewer::ViewerStore>().close_main();

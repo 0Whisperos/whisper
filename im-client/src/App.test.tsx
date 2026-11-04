@@ -1,24 +1,25 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import type { CloseRequestedEvent, CloseRequestedHandler } from "./shared/tauri/appWindow";
+import type { AppExitRequestedHandler } from "./features/app-lifecycle/api";
 
-const { destroyAppWindowMock, listenAppCloseRequestedMock, loadClientConfigMock, useAuthSessionMock, closeViewerMock } = vi.hoisted(() => ({
-  destroyAppWindowMock: vi.fn(),
-  listenAppCloseRequestedMock: vi.fn(),
+const { completeAppExitMock, listenAppExitRequestedMock, loadClientConfigMock, useAuthSessionMock, closeViewerMock, setAppAuthenticatedMock } = vi.hoisted(() => ({
+  completeAppExitMock: vi.fn(),
+  listenAppExitRequestedMock: vi.fn(),
   loadClientConfigMock: vi.fn(),
   useAuthSessionMock: vi.fn(),
   closeViewerMock: vi.fn(),
+  setAppAuthenticatedMock: vi.fn(),
 }));
 
 vi.mock("./features/image-viewer/coordinator", () => ({ imageViewerCoordinator: { close: closeViewerMock } }));
-
 vi.mock("./features/client-config/api", () => ({ loadClientConfig: loadClientConfigMock }));
 vi.mock("./features/login/hooks/useAuthSession", () => ({ useAuthSession: useAuthSessionMock }));
-vi.mock("./shared/tauri/appWindow", () => ({
-  destroyAppWindow: destroyAppWindowMock,
-  listenAppCloseRequested: listenAppCloseRequestedMock,
+vi.mock("./features/app-lifecycle/api", () => ({
+  completeAppExit: completeAppExitMock,
+  listenAppExitRequested: listenAppExitRequestedMock,
+  setAppAuthenticated: setAppAuthenticatedMock,
 }));
 vi.mock("./routes/AuthenticatedPage", () => ({
   AuthenticatedPage: ({ session }: { session: { imChatWsUrl: string } }) => <div>chat api: {session.imChatWsUrl}</div>,
@@ -28,18 +29,16 @@ vi.mock("./routes/LoginPage", () => ({
 }));
 
 describe("App", () => {
-  const closeHandlers: CloseRequestedHandler[] = [];
+  const exitHandlers: AppExitRequestedHandler[] = [];
 
   beforeEach(() => {
-    closeHandlers.length = 0;
-    closeViewerMock.mockReset().mockResolvedValue(undefined);
-    destroyAppWindowMock.mockReset();
-    listenAppCloseRequestedMock.mockReset();
-    loadClientConfigMock.mockReset();
-    useAuthSessionMock.mockReset();
-    destroyAppWindowMock.mockResolvedValue(undefined);
-    listenAppCloseRequestedMock.mockImplementation(async (handler: CloseRequestedHandler) => {
-      closeHandlers.push(handler);
+    vi.resetAllMocks();
+    exitHandlers.length = 0;
+    closeViewerMock.mockResolvedValue(undefined);
+    completeAppExitMock.mockResolvedValue(undefined);
+    setAppAuthenticatedMock.mockResolvedValue(undefined);
+    listenAppExitRequestedMock.mockImplementation(async (handler: AppExitRequestedHandler) => {
+      exitHandlers.push(handler);
       return vi.fn();
     });
     useAuthSessionMock.mockReturnValue({
@@ -47,6 +46,7 @@ describe("App", () => {
       savedUsers: [],
       credentialWarning: null,
       authenticateWithPassword: vi.fn(),
+      registerAccount: vi.fn(),
       loginSavedUser: vi.fn(),
       refreshSession: vi.fn(),
       isLoadingSavedUsers: false,
@@ -56,19 +56,13 @@ describe("App", () => {
     });
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("renders the login route after client configuration loads", async () => {
     // Test goal: verify the login route is shown only after client configuration loads.
     // Construction: mock the client configuration API to return a local API base URL, then render App.
     // Input data: { apiBaseUrl: "http://127.0.0.1:8080" }.
     // Expected behavior: the login route renders after config loading instead of auto-restoring a session.
     loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
-
     render(<App />);
-
     expect(await screen.findByText("login users:")).toBeInTheDocument();
   });
 
@@ -78,9 +72,7 @@ describe("App", () => {
     // Input data: a rejected client_config_unavailable error.
     // Expected behavior: the configuration error view is shown and the login route is absent.
     loadClientConfigMock.mockRejectedValueOnce(new Error("client_config_unavailable"));
-
     render(<App />);
-
     expect(await screen.findByText(/Whisper/)).toBeInTheDocument();
     expect(screen.queryByText(/login users:/)).not.toBeInTheDocument();
   });
@@ -92,6 +84,7 @@ describe("App", () => {
     // Expected behavior: the authenticated route displays the im-chat WebSocket URL from session.
     loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
     useAuthSessionMock.mockReturnValue({
+      ...useAuthSessionMock(),
       session: {
         userId: 20001,
         accessToken: "jwt-access-token",
@@ -100,182 +93,52 @@ describe("App", () => {
         imChatWsUrl: "ws://127.0.0.1:9001/ws",
         refreshTokenPersistence: "session_only",
       },
-      savedUsers: [],
-      credentialWarning: null,
-      authenticateWithPassword: vi.fn(),
-      loginSavedUser: vi.fn(),
-      refreshSession: vi.fn(),
-      isLoadingSavedUsers: false,
-      isLoggingOut: false,
-      logout: vi.fn(),
-      cleanupBeforeAppClose: vi.fn(),
     });
-
     render(<App />);
-
     expect(await screen.findByText(/chat api: ws:\/\/127\.0\.0\.1:9001\/ws/)).toBeInTheDocument();
-    await waitFor(() => expect(loadClientConfigMock).toHaveBeenCalled());
   });
 
-  it("cleans up the current session before destroying the window on close request", async () => {
-    // Test goal: verify Tauri close requests run session cleanup before closing the app window.
-    // Construction: mock the Tauri window wrapper, render App, then trigger the captured close handler.
-    // Input data: a close event with preventDefault and a cleanupBeforeAppClose mock.
-    // Expected behavior: the close is intercepted, cleanup runs, and destroyAppWindow is called afterwards.
-    const events: string[] = [];
-    const cleanupBeforeAppClose = vi.fn(async () => {
-      events.push("cleanup");
-    });
-    destroyAppWindowMock.mockImplementation(async () => {
-      events.push("destroy");
-    });
+  it("preserves the session until the native tray requests full exit", async () => {
+    // 测试目标：验证 App 装配生命周期，但只有托盘退出事件触发认证和查看器清理。
+    // 构造方法：使用真实生命周期 hook，替换认证和原生 API；加载登录页后触发捕获的退出事件。
+    // 输入数据：客户端 API 地址和无 payload 的 app-exit-requested 事件。
+    // 预期行为：挂载不清理；收到退出事件后两项清理各一次，并确认完整退出。
+    const cleanupBeforeAppClose = vi.fn().mockResolvedValue(undefined);
+    useAuthSessionMock.mockReturnValue({ ...useAuthSessionMock(), cleanupBeforeAppClose });
     loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
-    useAuthSessionMock.mockReturnValue({
-      session: {
-        userId: 20001,
-        accessToken: "jwt-access-token",
-        refreshToken: "refresh-token",
-        accessTokenExpiresAt: "2026-08-16T12:15:00+08:00",
-        imChatWsUrl: "ws://127.0.0.1:9001/ws",
-        refreshTokenPersistence: "session_only",
-      },
-      savedUsers: [],
-      credentialWarning: null,
-      authenticateWithPassword: vi.fn(),
-      loginSavedUser: vi.fn(),
-      refreshSession: vi.fn(),
-      isLoadingSavedUsers: false,
-      isLoggingOut: false,
-      logout: vi.fn(),
-      cleanupBeforeAppClose,
-    });
     render(<App />);
-    await waitFor(() => expect(closeHandlers).toHaveLength(1));
-    expect(await screen.findByText(/chat api: ws:\/\/127\.0\.0\.1:9001\/ws/)).toBeInTheDocument();
-    const event = closeEvent();
-
-    await act(async () => {
-      await closeHandlers[0](event);
-    });
-
-    expect(event.preventDefault).toHaveBeenCalled();
-    expect(events).toEqual(["cleanup", "destroy"]);
-    expect(closeViewerMock).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("login users:")).not.toBeInTheDocument();
+    await screen.findByText("login users:");
+    await waitFor(() => expect(exitHandlers).toHaveLength(1));
+    expect(cleanupBeforeAppClose).not.toHaveBeenCalled();
+    expect(closeViewerMock).not.toHaveBeenCalled();
+    await act(async () => { await exitHandlers[0](); });
+    expect(cleanupBeforeAppClose).toHaveBeenCalledOnce();
+    expect(closeViewerMock).toHaveBeenCalledOnce();
+    expect(completeAppExitMock).toHaveBeenCalledOnce();
   });
 
-  it("destroys the window even when close cleanup fails", async () => {
-    // Test goal: verify best-effort close cleanup cannot trap the user in a window that refuses to close.
-    // Construction: mock cleanupBeforeAppClose to reject, then trigger the close handler.
-    // Input data: cleanup rejection Error("network_error").
-    // Expected behavior: destroyAppWindow still runs after preventDefault.
-    const cleanupBeforeAppClose = vi.fn().mockRejectedValueOnce(new Error("network_error"));
+  it("synchronizes session presence through login, refresh, and session invalidation", async () => {
+    // 测试目标：验证 App 将真实会话存在状态传给生命周期，而不是页面或 token 对象身份。
+    // 构造方法：挂载登录页，替换认证 hook 的 session 为已登录、刷新会话及 null，逐次重渲染。
+    // 输入数据：null → access-token-1 → access-token-2 → null；同一服务器 WebSocket 地址。
+    // 预期行为：页面随会话切换；仅同步 false、true、false，刷新不新增 IPC。
     loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
-    useAuthSessionMock.mockReturnValue({
-      session: null,
-      savedUsers: [],
-      credentialWarning: null,
-      authenticateWithPassword: vi.fn(),
-      loginSavedUser: vi.fn(),
-      refreshSession: vi.fn(),
-      isLoadingSavedUsers: false,
-      isLoggingOut: false,
-      logout: vi.fn(),
-      cleanupBeforeAppClose,
-    });
-    render(<App />);
-    await waitFor(() => expect(closeHandlers).toHaveLength(1));
-    const event = closeEvent();
-
-    await act(async () => {
-      await closeHandlers[0](event);
-    });
-
-    expect(event.preventDefault).toHaveBeenCalled();
-    expect(destroyAppWindowMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("allows a second close request after window destruction fails", async () => {
-    // Test goal: verify a failed native window destruction does not permanently block later close requests.
-    // Construction: make the first destroy call reject and the second call resolve, then invoke the captured close handler twice.
-    // Input data: destroyAppWindow rejects with Error("permission_denied") once, then succeeds.
-    // Expected behavior: the handler retries destruction on the second close request and logs the first failure.
-    const destroyError = new Error("permission_denied");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    destroyAppWindowMock
-      .mockRejectedValueOnce(destroyError)
-      .mockResolvedValueOnce(undefined);
-    loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
-    render(<App />);
-    await waitFor(() => expect(closeHandlers).toHaveLength(1));
-
-    await act(async () => {
-      await closeHandlers[0](closeEvent());
-      await closeHandlers[0](closeEvent());
-    });
-
-    expect(destroyAppWindowMock).toHaveBeenCalledTimes(2);
-    expect(errorSpy).toHaveBeenCalledWith("Failed to destroy the app window", destroyError);
-    errorSpy.mockRestore();
-  });
-
-  it("ignores repeated close requests while window destruction is already in progress", async () => {
-    // Test goal: verify duplicate close events do not duplicate logout cleanup or destroy calls.
-    // Construction: keep cleanup pending, trigger two close events, then resolve cleanup.
-    // Input data: two close events fired before the first cleanup finishes.
-    // Expected behavior: cleanupBeforeAppClose and destroyAppWindow are each called once.
-    let resolveCleanup: () => void = () => undefined;
-    const cleanupBeforeAppClose = vi.fn(() => new Promise<void>((resolve) => {
-      resolveCleanup = resolve;
-    }));
-    loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
-    useAuthSessionMock.mockReturnValue({
-      session: null,
-      savedUsers: [],
-      credentialWarning: null,
-      authenticateWithPassword: vi.fn(),
-      loginSavedUser: vi.fn(),
-      refreshSession: vi.fn(),
-      isLoadingSavedUsers: false,
-      isLoggingOut: false,
-      logout: vi.fn(),
-      cleanupBeforeAppClose,
-    });
-    render(<App />);
-    await waitFor(() => expect(closeHandlers).toHaveLength(1));
-
-    const firstClose = closeHandlers[0](closeEvent());
-    await closeHandlers[0](closeEvent());
-    resolveCleanup();
-    await act(async () => {
-      await firstClose;
-    });
-
-    expect(cleanupBeforeAppClose).toHaveBeenCalledTimes(1);
-    expect(destroyAppWindowMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("waits for viewer cleanup before destroying the main window even when viewer cleanup fails", async () => {
-    // 测试目标：验证主窗口等待查看器清理，且查看器失败不会阻止最终退出。
-    // 构造方法：保留查看器关闭 Promise，触发主窗口关闭，然后拒绝该 Promise。
-    // 输入数据：延迟的 window_not_found 拒绝及正常的认证清理。
-    // 预期行为：查看器清理未结束时不销毁主窗口；拒绝后仍销毁且无未处理错误。
-    let rejectViewer!: (error: Error) => void;
-    closeViewerMock.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectViewer = reject; }));
-    loadClientConfigMock.mockResolvedValueOnce({ apiBaseUrl: "http://127.0.0.1:8080" });
-    render(<App />);
-    await waitFor(() => expect(closeHandlers).toHaveLength(1));
-    const closing = closeHandlers[0](closeEvent());
-    expect(closeViewerMock).toHaveBeenCalledTimes(1);
-    expect(destroyAppWindowMock).not.toHaveBeenCalled();
-    await act(async () => {
-      rejectViewer(new Error("window_not_found"));
-      await closing;
-    });
-    expect(destroyAppWindowMock).toHaveBeenCalledTimes(1);
+    const authState = useAuthSessionMock();
+    const session = { userId: 20001, accessToken: "access-token-1", imChatWsUrl: "ws://127.0.0.1:9001/ws" };
+    const view = render(<App />);
+    await screen.findByText("login users:");
+    await waitFor(() => expect(setAppAuthenticatedMock).toHaveBeenCalledExactlyOnceWith(false));
+    useAuthSessionMock.mockReturnValue({ ...authState, session });
+    view.rerender(<App />);
+    await screen.findByText(/chat api:/);
+    await waitFor(() => expect(setAppAuthenticatedMock.mock.calls).toEqual([[false], [true]]));
+    useAuthSessionMock.mockReturnValue({ ...authState, session: { ...session, accessToken: "access-token-2" } });
+    view.rerender(<App />);
+    await act(async () => {});
+    expect(setAppAuthenticatedMock.mock.calls).toEqual([[false], [true]]);
+    useAuthSessionMock.mockReturnValue(authState);
+    view.rerender(<App />);
+    await screen.findByText("login users:");
+    await waitFor(() => expect(setAppAuthenticatedMock.mock.calls).toEqual([[false], [true], [false]]));
   });
 });
-
-function closeEvent(): CloseRequestedEvent & { preventDefault: ReturnType<typeof vi.fn> } {
-  return { preventDefault: vi.fn() };
-}

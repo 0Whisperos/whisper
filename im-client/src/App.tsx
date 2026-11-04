@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
+import { useAppLifecycle } from "./features/app-lifecycle/useAppLifecycle";
 import { loadClientConfig } from "./features/client-config/api";
 import type { ClientConfig } from "./features/client-config/types";
 import { useAuthSession } from "./features/login/hooks/useAuthSession";
 import { AuthenticatedPage } from "./routes/AuthenticatedPage";
 import { LoginPage } from "./routes/LoginPage";
-import { destroyAppWindow, listenAppCloseRequested } from "./shared/tauri/appWindow";
-import { imageViewerCoordinator } from "./features/image-viewer/coordinator";
 
 export function App() {
   const [config, setConfig] = useState<ClientConfig | null>(null);
@@ -25,7 +24,7 @@ export function App() {
     logout,
     cleanupBeforeAppClose,
   } = useAuthSession(config?.apiBaseUrl ?? "");
-  const isDestroyingWindowRef = useRef(false);
+  useAppLifecycle(cleanupBeforeAppClose, session !== null);
 
   useEffect(() => {
     let isMounted = true;
@@ -49,44 +48,6 @@ export function App() {
       isMounted = false;
     };
   }, []);
-
-  useEffect(() => {
-    let isDisposed = false;
-    let unlisten: (() => void) | null = null;
-
-    void listenAppCloseRequested(async (event) => {
-      event.preventDefault();
-      if (isDestroyingWindowRef.current) {
-        return;
-      }
-      isDestroyingWindowRef.current = true;
-      try {
-        await Promise.allSettled([imageViewerCoordinator.close(), cleanupBeforeAppClose()]);
-      } catch {
-        // Window closing is best-effort cleanup; the app should still close.
-      } finally {
-        try {
-          await destroyAppWindow();
-        } catch (error) {
-          isDestroyingWindowRef.current = false;
-          console.error("Failed to destroy the app window", error);
-        }
-      }
-    })
-      .then((nextUnlisten) => {
-        if (isDisposed) {
-          nextUnlisten();
-          return;
-        }
-        unlisten = nextUnlisten;
-      })
-      .catch(() => undefined);
-
-    return () => {
-      isDisposed = true;
-      unlisten?.();
-    };
-  }, [cleanupBeforeAppClose]);
 
   if (isConfigLoading) {
     return <main className="status-page">正在加载客户端配置...</main>;
